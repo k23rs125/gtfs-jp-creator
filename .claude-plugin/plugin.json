@@ -1,0 +1,12 @@
+{
+  "name": "gtfs-jp-creator",
+  "description": "Claude Skill for creating, validating, and fixing GTFS-JP (Japan public transit data standard v4.0) static feed data from non-machine-readable sources such as bus timetable PDFs, Excel sheets, or photographed schedules. Designed for non-experts (bus operators, municipal staff, citizens, researchers).",
+  "version": "0.1.0",
+  "author": {
+    "name": "Rio Honda",
+    "email": "k23rs125@st.kyusan-u.ac.jp"
+  },
+  "homepage": "https://github.com/k23rs125/gtfs-jp-creator",
+  "repository": "https://github.com/k23rs125/gtfs-jp-creator",
+  "license": "Apache-2.0"
+}
