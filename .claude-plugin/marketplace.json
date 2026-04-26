@@ -1,0 +1,29 @@
+{
+  "name": "gtfs-jp",
+  "owner": {
+    "name": "Rio Honda",
+    "email": "k23rs125@st.kyusan-u.ac.jp"
+  },
+  "metadata": {
+    "description": "Marketplace for gtfs-jp-creator plugin. Contains a single Claude Skill that helps non-experts create GTFS-JP (Japan public transit data v4.0) data from PDFs, Excel sheets, and timetables.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "gtfs-jp-creator",
+      "source": "./",
+      "description": "Claude Skill for creating, validating, and fixing GTFS-JP static feed data from non-machine-readable sources such as bus timetable PDFs, Excel sheets, or photographed schedules. Designed for non-experts (bus operators, municipal staff, citizens, researchers).",
+      "version": "0.1.0",
+      "author": {
+        "name": "Rio Honda",
+        "email": "k23rs125@st.kyusan-u.ac.jp"
+      },
+      "homepage": "https://github.com/k23rs125/gtfs-jp-creator",
+      "repository": "https://github.com/k23rs125/gtfs-jp-creator",
+      "license": "Apache-2.0",
+      "keywords": ["gtfs", "gtfs-jp", "transit", "bus", "japan", "公共交通", "オープンデータ"],
+      "category": "data-tools",
+      "tags": ["gtfs", "transit", "japan", "research"]
+    }
+  ]
+}

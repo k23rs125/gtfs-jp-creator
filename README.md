@@ -13,9 +13,10 @@ v0.1（最低限動作するMVP）リリース予定: 2026年8月
 ## 構成（プラグイン形式）
 
 ```
-gtfs-jp-creator/                       # プラグインルート（Gitリポルート）
+gtfs-jp-creator/                       # プラグイン＆マーケットプレイスルート（Gitリポルート）
 ├── .claude-plugin/
-│   └── plugin.json                    # プラグインマニフェスト
+│   ├── plugin.json                    # プラグインマニフェスト
+│   └── marketplace.json               # マーケットプレイスカタログ（単一プラグイン）
 ├── skills/
 │   └── gtfs-jp-creator/               # Skill本体
 │       ├── SKILL.md                   # frontmatter + ガイド
@@ -34,17 +35,36 @@ gtfs-jp-creator/                       # プラグインルート（Gitリポル
 ├── README.md                          # このファイル
 ├── LICENSE                            # Apache License 2.0
 ├── .gitignore
-├── .gitattributes                     # 改行コード方針
-└── .claude-plugin/plugin.json         # プラグインマニフェスト（再掲）
+└── .gitattributes                     # 改行コード方針
 ```
 
-## ローカルテスト方法（Claude Code CLI 用）
+## インストール方法
+
+### 方法1: マーケットプレイス経由（推奨）
+
+このリポジトリはプラグインだけでなく **シングルプラグイン・マーケットプレイス** も兼ねています。Claude Code CLI または Cowork mode で以下を実行：
+
+```shell
+/plugin marketplace add k23rs125/gtfs-jp-creator
+/plugin install gtfs-jp-creator@gtfs-jp
+```
+
+その後、`/reload-plugins` で読み込み完了。Skillはユーザー発話に応じて自動起動します。
+
+### 方法2: ローカル開発テスト（Claude Code CLI 用）
+
+リポジトリをクローンしたディレクトリで：
 
 ```bash
 claude --plugin-dir ./gtfs-jp-creator
 ```
 
-Cowork mode での実環境テストはマーケットプレイス経由で行います（後日整備予定）。
+### アンインストール
+
+```shell
+/plugin uninstall gtfs-jp-creator@gtfs-jp
+/plugin marketplace remove gtfs-jp
+```
 
 ## 全体ワークフロー
 
