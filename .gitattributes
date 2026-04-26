@@ -1,0 +1,27 @@
+# Cross-platform line ending normalization
+# Repository に格納する際は LF に統一し、各 OS のチェックアウト時に
+# 自動変換する（macOS/Linux はそのまま、Windows は CRLF に変換）。
+
+# テキストファイル全般は自動判定
+* text=auto
+
+# 明示的にLFを強制（GTFSデータ生成時のCSV/TXT出力との一貫性のため）
+*.py        text eol=lf
+*.md        text eol=lf
+*.json      text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.txt       text eol=lf
+*.csv       text eol=lf
+.gitignore  text eol=lf
+LICENSE     text eol=lf
+
+# バイナリファイル
+*.pdf  binary
+*.zip  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.xlsx binary
+*.docx binary
+*.pptx binary
