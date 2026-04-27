@@ -216,3 +216,29 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ====================================
+# Project-specific (gtfs-jp-creator)
+# ====================================
+
+# pdf_to_markdown.py のテスト出力
+test_output.md
+test_output_*.md
+*.test.md
+
+# GTFS-JP Validatorの出力
+validation_report/
+
+# 一時的に生成された GTFS-JP feed
+output/
+feed_*.zip
+
+# OSRM map-matching のキャッシュ
+.osrm_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# ローカルテスト用 PDF（Rio個人のテストデータ）
+test_pdfs/

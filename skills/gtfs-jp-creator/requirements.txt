@@ -1,0 +1,15 @@
+# gtfs-jp-creator scripts dependencies
+# Install: pip install -r requirements.txt
+
+# Phase 1: PDF to Markdown extraction
+pymupdf>=1.24.4
+pymupdf4llm>=0.0.17
+
+# Phase 2 (future): OCR for image-based PDFs
+# olmocr>=0.x  # commented out until Phase 2
+
+# Phase 3 (future): GTFS validation via java -jar gtfs-validator-cli.jar
+# (downloaded separately, not a Python package)
+
+# Phase 4 (future): OSRM map-matching for shapes.txt
+requests>=2.31.0
