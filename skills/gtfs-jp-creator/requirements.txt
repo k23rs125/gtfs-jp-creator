@@ -1,9 +1,15 @@
 # gtfs-jp-creator scripts dependencies
 # Install: pip install -r requirements.txt
+# Optional add-on: pip install -U "mineru[core]"  (for --engine mineru)
 
-# Phase 1: PDF to Markdown extraction
+# Phase 1: PDF to Markdown extraction (default engine: pymupdf4llm)
 pymupdf>=1.24.4
 pymupdf4llm>=0.0.17
+
+# Phase 1 alternative engine: MinerU (high quality for decorative layouts)
+# Not in this requirements.txt because of large model downloads (~3GB).
+# Users opt-in by running: pip install -U "mineru[core]"
+# See SKILL.md for guidance on when to use --engine mineru.
 
 # Phase 2 (future): OCR for image-based PDFs
 # olmocr>=0.x  # commented out until Phase 2

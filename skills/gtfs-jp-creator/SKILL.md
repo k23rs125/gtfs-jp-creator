@@ -19,7 +19,7 @@ description: Use this skill when the user wants to create, generate, validate, o
 ## 全体ワークフロー（5ステップ）
 
 ```
-[Step 1] PDF/画像/Excel  →  Markdown 抽出
+[Step 1] PDF/画像/Excel  →  Markdown 抽出（エンジン選択可：pymupdf4llm or MinerU）
 [Step 2] Markdown        →  構造化テーブル（中間表現）
 [Step 3] 構造化テーブル   →  GTFS-JP の各CSVファイル
 [Step 4] stop_times      →  shapes.txt 生成（OSRM map-matching）
@@ -30,15 +30,42 @@ description: Use this skill when the user wants to create, generate, validate, o
 ## 各ステップの詳細
 
 ### Step 1: PDF/画像 → Markdown
-- スクリプト: `scripts/pdf_to_markdown.py`
-- ライブラリ: `pymupdf4llm`（テキストPDF用）/ `olmOCR`（スキャン画像用）
-- LLMプロンプト: `references/prompts/01_pdf_extraction.md`
+
+スクリプト: `scripts/pdf_to_markdown.py`
+
+**2つのエンジンから選択可能** (`--engine` オプション):
+
+| エンジン | 速度 | 品質（装飾レイアウト） | 用途 |
+|---|---|---|---|
+| `pymupdf4llm` (default) | 高速（数秒） | 中（シンプルなPDFに最適） | 一般的なテキストPDF |
+| `mineru` (opt-in) | 遅い（CPUで数十分、GPUで数分） | 高（並列テーブル/装飾OK） | カラフル・複雑なバス時刻表PDF |
+
+**実証データ（須恵町コミュニティバス時刻表PDF v4.0、令和7年4月1日改正で検証）:**
+
+- `pymupdf4llm`: 全7路線中、装飾的なpage 1の路線テーブルを正しく分離できず picture text fallback。時刻末尾切れ多数（例 `14:50` → `14:5`）。**抽出成功率 ~30%**
+- `mineru`: 全7路線分のテーブルを完璧に分離抽出。時刻完全保持。日本語OCRの誤認識1件のみ（`7→フ`）。**抽出成功率 ~95%**
+
+→ 推奨: 装飾的・複数路線が並列レイアウトされた日本のコミュニティバス時刻表は **`--engine mineru`**。
+
+使用例:
+
+```bash
+# 高速・軽量（シンプルなPDFに）
+python scripts/pdf_to_markdown.py timetable.pdf -o out.md
+
+# 高品質（装飾的なバス時刻表PDFに）
+python scripts/pdf_to_markdown.py timetable.pdf --engine mineru --lang japan -o out.md
+```
+
+LLMプロンプト: `references/prompts/01_pdf_extraction.md`
 
 ### Step 2: Markdown → 構造化テーブル
+
 - LLMが Markdown を解析し、JSON形式の中間表現を生成
 - LLMプロンプト: `references/prompts/02_structured_extraction.md`
 
 ### Step 3: GTFS-JPファイル生成
+
 - スクリプト: `scripts/generate_gtfs_files.py`
 - 仕様: `references/gtfs-jp-spec-v4.0-summary.md` および `references/field-definitions/`
 - 主要ファイル:
@@ -52,16 +79,19 @@ description: Use this skill when the user wants to create, generate, validate, o
   - `feed_info.txt` / `translations.txt`
 
 ### Step 4: shapes.txt 生成
+
 - スクリプト: `scripts/generate_shapes.py`
 - 戦略: OSRM map-matching API を使い、停留所列から最尤経路を推定
 - フォールバック: map-matchingが失敗した場合は停留所間直線結合
 
 ### Step 5: バリデーション
+
 - スクリプト: `scripts/validate_gtfs.py`（MobilityData GTFS Validator のラッパー）
 - スクリプト: `scripts/validate_gtfs_jp_extensions.py`（GTFS-JP拡張部の独自チェック）
 - 必要環境: Java 11以上のJRE
 
 ### 最終: パッケージング
+
 - スクリプト: `scripts/package_gtfs_zip.py`
 - 出力: `feed_<事業者名>_<生成日時>.zip`
 
@@ -69,8 +99,13 @@ description: Use this skill when the user wants to create, generate, validate, o
 
 - Python 3.10以上
 - Java 11以上のJRE（GTFS Validator実行用）
-- インターネット接続（OSRM API利用時）
+- インターネット接続（OSRM API・MinerU初回モデルDL用）
 - 推奨実行環境: Cowork mode（Claude desktop app）
+
+### Step 1 エンジン別の追加要件
+
+- **pymupdf4llm**（default）: `pip install pymupdf pymupdf4llm`
+- **mineru**（opt-in、装飾PDF用）: `pip install -U "mineru[core]"`（初回 ~3GB のMLモデルDLあり）
 
 ## 参考資料
 

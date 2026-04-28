@@ -224,7 +224,12 @@ __marimo__/
 # pdf_to_markdown.py のテスト出力
 test_output.md
 test_output_*.md
+test_suetown.md
 *.test.md
+
+# MinerU の一時出力ディレクトリ（_mineru_tmp_* と test_mineru_output 含む）
+test_mineru_output/
+_mineru_tmp_*/
 
 # GTFS-JP Validatorの出力
 validation_report/
