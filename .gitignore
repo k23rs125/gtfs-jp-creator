@@ -237,6 +237,7 @@ validation_report/
 # 一時的に生成された GTFS-JP feed
 output/
 feed_*.zip
+test_output_gtfs/
 
 # OSRM map-matching のキャッシュ
 .osrm_cache/
