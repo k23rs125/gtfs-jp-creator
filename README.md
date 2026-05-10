@@ -77,12 +77,143 @@ claude --plugin-dir ./gtfs-jp-creator
                           →  zipパッケージ → 完成
 ```
 
+## MinerU 利用ガイド（PowerShell 編）
+
+Step 1（PDF→Markdown）で **MinerU** を使う場合の手順を、PowerShell でのコマンドベースで詳述します。pymupdf4llm（軽量エンジン）の場合は本セクションは飛ばして構いません。
+
+### MinerU とは
+
+[OpenDataLab](https://github.com/opendatalab/mineru) が開発した、CJK（中国語・日本語・韓国語）に特化した PDF→Markdown 変換ツール。バス時刻表のような **装飾的レイアウトの日本語PDF** に対して、pymupdf4llm より大幅に高い抽出品質を発揮します（須恵町PDFで実測：抽出成功率 30% → 95%）。
+
+### インストール
+
+PowerShell で以下を実行：
+
+```powershell
+# Python 3.10 以上が必要（事前に python --version で確認）
+python --version
+```
+
+```powershell
+# MinerU の core 版をインストール（ML モデル + Web UI 含むフル版）
+pip install -U "mineru[core]"
+```
+
+> 💡 初回インストールは **約 700MB のパッケージダウンロード**＋ **約 1〜1.5GB のディスク使用** となります。完了まで数分〜10分程度。
+
+### インストール確認
+
+```powershell
+python -c "import mineru; print('mineru imported OK')"
+```
+
+```powershell
+mineru --version
+```
+
+→ `mineru, version 3.x.x` のような表示が出れば成功。
+
+> ⚠️ Windows で `mineru` コマンドが見つからない場合は、代わりに `python -m mineru` で実行してください（[既知のWindows互換性問題](https://github.com/opendatalab/MinerU/issues/4433)）。
+
+### 基本的な使い方
+
+```powershell
+mineru -p "<入力PDFのフルパス>" -o "<出力ディレクトリ名>" --lang japan
+```
+
+#### 実例：須恵町コミュニティバス時刻表PDFを変換
+
+```powershell
+cd $HOME\Desktop\稲ゼミ\gtfs-jp-creator
+```
+
+```powershell
+mineru -p "$HOME\Desktop\稲ゼミ\komyubasujikokuhyou.pdf" -o test_demo --lang japan
+```
+
+### 処理の流れ（実測）
+
+初回実行では以下のステップが進行します：
+
+| ステップ | 内容 | 所要時間（CPU） |
+|---|---|---|
+| 1 | MLモデルダウンロード（初回のみ、約3GB） | 約 7 分 |
+| 2 | VLM推論モデルのロード | 約 7 分 |
+| 3 | レイアウト解析（ページ単位） | 約 8 分 / 2ページ |
+| 4 | コンテンツ抽出（VLMによるOCR込み） | 約 35 分 / 2ページ |
+| 5 | 後処理＋OCR補完 | 約 3 分 |
+| **合計** | （初回・CPU推論） | **約 50〜60 分** |
+| **2回目以降** | モデルキャッシュ済 | **約 40〜45 分** |
+
+> 💡 GPU環境（CUDA対応）では **数分** に短縮されます。実用的には GPU 推奨。
+
+### 出力ファイル構造
+
+`-o` で指定したディレクトリに、以下のような階層で出力されます：
+
+```
+test_demo/
+└── komyubasujikokuhyou/
+    └── hybrid_auto/
+        ├── komyubasujikokuhyou.md           ← ★メインの抽出 Markdown
+        ├── komyubasujikokuhyou_content_list.json
+        ├── komyubasujikokuhyou_content_list_v2.json
+        ├── komyubasujikokuhyou_layout.pdf   ← レイアウト検出可視化PDF
+        ├── komyubasujikokuhyou_middle.json
+        ├── komyubasujikokuhyou_model.json
+        ├── komyubasujikokuhyou_origin.pdf   ← 元PDFのコピー
+        └── images/                          ← 切り出された画像群
+            ├── (各種 .jpg ファイル)
+```
+
+抽出結果の Markdown を確認：
+
+```powershell
+Get-Content .\test_demo\komyubasujikokuhyou\hybrid_auto\komyubasujikokuhyou.md | Select-Object -First 30
+```
+
+### トラブルシュート
+
+| 症状 | 原因 | 対処 |
+|---|---|---|
+| `mineru: コマンドが見つかりません` | Windows のPATH問題 | `python -m mineru ...` で代替実行 |
+| `--lang japan#` 等のエラー | PowerShellでの全角空白混入 | コマンド全体を再入力（コピペ時に注意） |
+| 処理がフリーズして見える | CPU推論はもともと遅い | `tail -f` 不可だが、進捗バーが進んでいれば正常 |
+| メモリエラー | 8GB未満のRAMで重いVLM | `--backend pipeline` でCPU軽量モードへ切り替え |
+| GPU環境を使いたい | CUDA対応PyTorchが必要 | `pip install torch --index-url https://download.pytorch.org/whl/cu121` |
+
+### 高速化のヒント
+
+1. **GPU を使う**: NVIDIA GPU + CUDA で 10倍以上高速化
+2. **ページ範囲を絞る**: 大きなPDFは `--start-page-id 0 --end-page-id 5` で最初の5ページのみ処理（要環境変数）
+3. **既に処理済みのMDを使い回す**: 一度処理したPDFは再処理せず、既存の `.md` ファイルを使う（本研究の `test_mineru_output/` 等）
+
+### なぜ pymupdf4llm ではなく MinerU を使うのか
+
+本研究では **2エンジン併用** 方式を採用しています：
+
+| エンジン | 速度 | 装飾PDF品質 | 用途 |
+|---|---|---|---|
+| pymupdf4llm | 高速（数秒） | 低（30%） | テキスト埋め込み済みのシンプルなPDF |
+| **MinerU** | 遅い（CPUで30〜60分） | 高（95%） | **装飾的・並列レイアウトの日本のバス時刻表PDF** |
+
+実証データ（須恵町コミュニティバス時刻表PDFで検証）：
+- pymupdf4llm: 並列レイアウトの 7路線分テーブルを正しく分離できず、時刻末尾切れ多数
+- MinerU: 全7路線分のテーブルを完璧に分離抽出、時刻完全保持
+
+→ **日本の自治体バス時刻表PDFのほとんどは装飾的レイアウト**のため、MinerU が事実上の標準選択肢になります。
+
 ## 必要環境
 
 - Python 3.10以上
 - Java 11以上のJRE（GTFS Validator実行用）
-- インターネット接続（OSRM map-matching API利用時）
+- インターネット接続（OSRM map-matching API利用時、MinerU初回モデルDL用）
 - 推奨: Cowork mode（Claude desktop app）
+
+### Step 1 エンジン別の追加要件
+
+- **pymupdf4llm**（default）: `pip install pymupdf pymupdf4llm`
+- **mineru**（opt-in、装飾PDF用）: `pip install -U "mineru[core]"`（初回 ~3GB のMLモデルDLあり）
 
 ## 研究背景
 
