@@ -203,6 +203,131 @@ Get-Content .\test_demo\komyubasujikokuhyou\hybrid_auto\komyubasujikokuhyou.md |
 
 → **日本の自治体バス時刻表PDFのほとんどは装飾的レイアウト**のため、MinerU が事実上の標準選択肢になります。
 
+## 複数LLM対応ガイド（Claude / ChatGPT / Gemini）
+
+本Skillの **コア処理（Pythonスクリプト＋プロンプトテキスト）は LLM 非依存** です。LLM が必要なのは Step 2（Markdown→JSON 抽出）のみで、Claude / ChatGPT / Gemini を自由に差し替え可能です。
+
+### LLMが関わる箇所
+
+```
+[Step 1] PDF        →  Markdown        ❌ LLM不要（pymupdf4llm/MinerU）
+[Step 2] Markdown   →  JSON            ✅ LLM必要 ← ここを差し替え
+[Step 3] JSON       →  CSV ×8          ❌ LLM不要（決定的Pythonスクリプト）
+[Step 4] stop_times →  shapes.txt       ❌ LLM不要（OSRM API）
+[Step 5] CSV ×8     →  Validation       ❌ LLM不要（GTFS Validator）
+```
+
+→ **Step 2 だけ** が LLM 依存。他はすべて決定的処理。
+
+### 利用形態の比較
+
+| LLM | 利用形態 | プロンプト投入 | 結果保存 | Skill自動連動 |
+|---|---|---|---|---|
+| **Claude（Cowork mode）** | Skillとして組込済 | 自動 | 自動 | ✅ |
+| **Claude（API）** | スクリプト経由（Phase 1.x で対応予定） | 自動 | 自動 | ✅ |
+| **ChatGPT（Web UI）** | 手動コピペ | 手動 | 手動 | ❌ |
+| **Gemini（Web UI）** | 手動コピペ | 手動 | 手動 | ❌ |
+
+### Claude（Cowork mode）での利用
+
+Claudeのデスクトップ版（Cowork mode）にプラグインを導入すると、ユーザー発話を Skill が自動検知して、Step 1〜5 を一気通貫で実行します。
+
+```
+[ユーザー]
+  バス時刻表のPDFをGTFS-JPデータにしたい
+  C:\Users\...\komyubasujikokuhyou.pdf
+
+[Claude]
+  GTFS-JP Creator Skill を起動します。
+  Step 1〜3 を実行して条件確認サマリを出します...
+```
+
+詳細は `画面操作フロー設計_v2.md` を参照。
+
+### ChatGPT / Gemini での利用（手動操作モード）
+
+#### 前提
+
+```powershell
+git clone https://github.com/k23rs125/gtfs-jp-creator.git
+cd gtfs-jp-creator
+pip install -U "mineru[core]" pymupdf pymupdf4llm
+```
+
+#### Step 1: PDF → Markdown（LLM不要）
+
+```powershell
+mineru -p "$HOME\Desktop\komyubasujikokuhyou.pdf" -o test_demo --lang japan
+```
+
+→ `test_demo\komyubasujikokuhyou\hybrid_auto\komyubasujikokuhyou.md` が生成される。
+
+#### Step 2: Markdown → JSON（ここで LLM を選択）
+
+ブラウザで [ChatGPT](https://chat.openai.com/) または [Gemini](https://gemini.google.com/) を開き、次の2つを連結して送信：
+
+**(A) プロンプト本文** — リポジトリ内のこのファイル全文をコピー：
+
+```
+skills/gtfs-jp-creator/references/prompts/02_structured_extraction.md
+```
+
+**(B) Step 1 で生成された Markdown 全文** をプロンプト末尾に貼り付け。
+
+LLM が JSON 形式で応答するので、`{` で始まり `}` で終わる JSON ブロック部分のみを抽出して保存：
+
+```powershell
+notepad test_demo\extracted.json
+# JSON部分をペースト → 保存
+```
+
+> ⚠️ ChatGPT / Gemini は応答冒頭に説明文や ` ```json ... ``` ` のコードブロック囲みを付ける場合があるので、純粋な JSON 部分だけを取り出してください。
+
+#### Step 3: JSON → CSV（LLM不要）
+
+```powershell
+python skills\gtfs-jp-creator\scripts\generate_gtfs_files.py test_demo\extracted.json -o test_demo\gtfs_output
+```
+
+→ `test_demo\gtfs_output\` に `agency.txt`, `routes.txt`, `stops.txt`, `stop_times.txt`, `calendar.txt` 等が生成される。
+
+#### Step 4-5: 任意（v0.1 リリース時に対応）
+
+現時点（v0.1 未満）では `generate_shapes.py` および `validate_gtfs.py` はスタブ実装のため、Step 4-5 は手動 or 別ツールでの実施を推奨。
+
+### LLM 切替の影響範囲
+
+「どの LLM を使うか」で変わるのは **Step 2 の出力品質** のみ。CSV のフォーマット、相互参照の整合性、Validatorの結果は **どの LLM を使っても同じ Python ロジックで処理されるため均質** です。
+
+ベースライン実験での確認：
+- Gemini 単体 → JSON 直接生成は不可（CSV を要求すると拒否）
+- Gemini + 本Skillのプロンプト + 本研究 Python = ✅ 動作（手動操作モード）
+
+→ 「LLM の差」は意味抽出の精度差として現れるが、**フォーマット差・整合性差にはならない**。これは本研究の設計（Markdown / JSON 中間表現）の利点。
+
+詳細な設計理由は `Markdown_JSON_設計説明書_v1.md` を参照。
+
+### LLM 別のメリット・デメリット（実証ベース）
+
+| LLM | メリット | デメリット |
+|---|---|---|
+| **Claude** | Skill自動起動、プロンプト管理不要、対話型UI | 個別プラン契約 |
+| **ChatGPT** | 普及度高、無料プランあり | 手動操作、Skill連動なし |
+| **Gemini** | 無料、Google AI Studio統合 | 手動操作、JSON出力時に説明文混入の傾向 |
+
+### Phase 1.x ロードマップ（API モード対応）
+
+将来的には、各 LLM の API を呼び出す Python スクリプトを追加し、ChatGPT/Gemini でも自動連動させる予定：
+
+```
+scripts/llm_extract.py
+  --provider {claude,openai,gemini}
+  --input  test_demo/extracted.md
+  --output test_demo/extracted.json
+```
+
+→ これが入れば、コマンド1本で Step 1-5 を完走できる。
+
 ## 必要環境
 
 - Python 3.10以上
