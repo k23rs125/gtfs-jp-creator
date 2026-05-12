@@ -248,3 +248,11 @@ test_output_gtfs/
 
 # ローカルテスト用 PDF（Rio個人のテストデータ）
 test_pdfs/
+
+# enrich_stops.py の実行時生成物
+stops_geocache.json
+enrichment_report.json
+
+# Step 3 / 3.5 / 4 の中間出力
+test_demo/
+*.enriched.txt

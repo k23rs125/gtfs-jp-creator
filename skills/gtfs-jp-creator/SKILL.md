@@ -16,15 +16,16 @@ description: Use this skill when the user wants to create, generate, validate, o
 - 「GTFS自動生成」「GTFSデータ作成」というキーワードを含む質問
 - 既存のGTFSデータの **検証・修正** を依頼された場合
 
-## 全体ワークフロー（5ステップ）
+## 全体ワークフロー（6ステップ）
 
 ```
-[Step 1] PDF/画像/Excel  →  Markdown 抽出（エンジン選択可：pymupdf4llm or MinerU）
-[Step 2] Markdown        →  構造化テーブル（中間表現）
-[Step 3] 構造化テーブル   →  GTFS-JP の各CSVファイル
-[Step 4] stop_times      →  shapes.txt 生成（OSRM map-matching）
-[Step 5] 全ファイル群     →  バリデーション（GTFS Validator + 拡張独自チェック）
-                           →  zip パッケージ → 完成
+[Step 1]   PDF/画像/Excel  →  Markdown 抽出（エンジン選択可：pymupdf4llm or MinerU）
+[Step 2]   Markdown        →  構造化テーブル（中間表現 JSON）
+[Step 3]   構造化テーブル   →  GTFS-JP の各CSVファイル
+[Step 3.5] stops.txt       →  緯度経度補完（Nominatim API、Step 4 の前提）
+[Step 4]   stop_times      →  shapes.txt 生成（OSRM map-matching）
+[Step 5]   全ファイル群     →  バリデーション（GTFS Validator + 拡張独自チェック）
+                             →  zip パッケージ → 完成
 ```
 
 ## 各ステップの詳細

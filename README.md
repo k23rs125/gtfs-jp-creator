@@ -69,12 +69,13 @@ claude --plugin-dir ./gtfs-jp-creator
 ## 全体ワークフロー
 
 ```
-[Step 1] PDF/画像/Excel  →  Markdown抽出（pymupdf4llm / olmOCR）
-[Step 2] Markdown        →  構造化中間表現（LLM）
-[Step 3] 中間表現        →  GTFS-JPの各CSVファイル
-[Step 4] stop_times      →  shapes.txt（OSRM map-matching）
-[Step 5] 全ファイル群    →  バリデーション（GTFS Validator + JP拡張独自）
-                          →  zipパッケージ → 完成
+[Step 1]   PDF/画像/Excel  →  Markdown抽出（pymupdf4llm / MinerU）
+[Step 2]   Markdown        →  構造化中間表現（LLM）
+[Step 3]   中間表現        →  GTFS-JPの各CSVファイル
+[Step 3.5] stops.txt       →  緯度経度補完（Nominatim API）
+[Step 4]   stop_times      →  shapes.txt（OSRM map-matching）
+[Step 5]   全ファイル群    →  バリデーション（GTFS Validator + JP拡張独自）
+                            →  zipパッケージ → 完成
 ```
 
 ## MinerU 利用ガイド（PowerShell 編）
@@ -202,6 +203,113 @@ Get-Content .\test_demo\komyubasujikokuhyou\hybrid_auto\komyubasujikokuhyou.md |
 - MinerU: 全7路線分のテーブルを完璧に分離抽出、時刻完全保持
 
 → **日本の自治体バス時刻表PDFのほとんどは装飾的レイアウト**のため、MinerU が事実上の標準選択肢になります。
+
+## 緯度経度補完ガイド（Step 3.5）
+
+PDF からは取得できない `stop_lat`/`stop_lon` を外部APIで補完するスクリプト `enrich_stops.py` を提供します。OSRM による shapes.txt 生成（Step 4）の前提条件です。
+
+### 設計概要
+
+| 項目 | 内容 |
+|---|---|
+| 一次バックエンド | Nominatim (OpenStreetMap) |
+| クエリ戦略 | 4段階（住所付き → 事業者名付き → 県市レベル → 停留所名のみ） |
+| レート制限 | 1.1 sec/req（Nominatim 公式ポリシー遵守） |
+| キャッシュ | JSON ファイル（再実行時はキャッシュ優先） |
+| エンコーディング | UTF-8 with BOM + CRLF（GTFS仕様） |
+
+詳細は `緯度経度補完設計書_v1.md` を参照。
+
+### 基本的な使い方（v0.1.1 推奨パラメータ込み）
+
+```powershell
+python skills\gtfs-jp-creator\scripts\enrich_stops.py `
+  test_demo\gtfs_output\stops.txt `
+  -o test_demo\gtfs_output\stops.enriched.txt `
+  --context "福岡県糟屋郡須恵町" `
+  --agency-name "須恵町コミュニティバス" `
+  --bbox "130.40,33.45,130.55,33.60" `
+  --cache test_demo\stops_geocache.json `
+  --report test_demo\enrichment_report.json
+```
+
+#### `--bbox` を必ず付ける理由（重要）
+
+`--bbox` を **付けない** と、Nominatim は `countrycodes=jp` だけが効き、日本全国の同名地名を返します。たとえば「須恵中学校」と検索すると **大阪府の同名校** にヒットし、誤った座標を持ってきてしまいます。
+
+`--bbox lon_min,lat_min,lon_max,lat_max` を付けると Nominatim の `viewbox + bounded=1` が効き、**範囲内の結果しか返らなくなります**。
+
+bbox の値は対象自治体を含む緯度経度の最小箱を指定。`https://nominatim.openstreetmap.org/` で対象町を検索し、`Bounding Box` の値をコピーするのが手早いです。例：
+
+| 自治体 | bbox (lon_min,lat_min,lon_max,lat_max) |
+|---|---|
+| 福岡県 須恵町 | `130.40,33.45,130.55,33.60` |
+| 福岡県 柳川市 | `130.30,33.10,130.50,33.30` |
+
+#### `--prefecture` のフォールバック（二重防止）
+
+bbox に加えて、結果の `address.state` を「福岡県」と一致するかチェックします。`--context` に「福岡県…」と書いてあれば **自動推定** されるので、通常は明示不要です。明示する場合：
+
+```powershell
+--prefecture "福岡県"
+```
+
+#### `--municipality` で隣町誤マッチを防ぐ（v0.1.2 推奨）
+
+bbox + prefecture だけでは **隣町の同名施設** が紛れ込みます。例：
+
+- 「福祉センター」検索 → 須恵町の隣の **宇美町立老人福祉センター** にヒット（福岡県内 + bbox内ではあるが、別の町）
+- 「金堀公園前」検索 → **福岡市中央区の駐輪場** にヒット（OSMが「金堀公園前」と関連付けてしまった謎の結果）
+
+これを防ぐため、`--municipality "須恵町"` を指定すると `address.city/town/village` を「須恵町」と一致するかチェックします。`--context "福岡県糟屋郡須恵町"` のように市町村名まで書いていれば **自動推定** されるので明示不要。
+
+### 出力
+
+- `stops.enriched.txt`: `stop_lat`/`stop_lon` が埋まった enriched CSV
+- `stops_geocache.json`: キャッシュ（再実行時に活用）
+- `enrichment_report.json`: 補完成功・失敗の統計と失敗詳細
+
+### サマリ出力（実行終了時）
+
+```
+================================================================
+ENRICHMENT REPORT
+================================================================
+Total stops:           87
+Already had coords:     0
+Newly enriched:        76 (87.4%)
+Failed:                11 (12.6%)
+Cache hits:             0
+API calls made:       304
+Total time:           285 sec
+================================================================
+```
+
+### デバッグ用：先頭N件だけ試す
+
+```powershell
+python skills\gtfs-jp-creator\scripts\enrich_stops.py `
+  test_demo\gtfs_output\stops.txt --limit 5 --context "福岡県須恵町"
+```
+
+→ 5件だけ補完して動作確認。本番前に 1〜2 分でテスト可能。
+
+### 失敗時の対処
+
+- **すべての停留所が `not_found`**: `--bbox` が狭すぎる or 対象地域から外れている可能性。bbox を広げるか、削除して `--prefecture` のみで試す。
+- **県外の場所にヒットしてしまう（v0.1.0 までのバグ）**: v0.1.1 で `--bbox` + `--prefecture` 検証を追加して解消。`--bbox` を必ず付けるべし。
+- **特定の停留所だけ失敗**: 漢字表記揺れや略称が原因。手動で stops.txt を編集 or Phase 1.2 で予定の国土数値情報 P11 ベース実装を待つ。
+- **HTTP 429**: レート違反。`--rate 2.0` で間隔を広げる。
+- **キャッシュに古い不正データがある**: `--force-refresh` で再取得 or `stops_geocache.json` を削除。
+
+### Phase 1.x ロードマップ
+
+| Phase | 内容 |
+|---|---|
+| v0.1（本実装） | Nominatim 単一バックエンド、4戦略クエリ |
+| v0.2 | 国土地理院 AddressSearch をフォールバック追加 |
+| v0.3 | 国土数値情報 P11（オフライン・高精度・全国網羅） |
+| v1.0 | LLM ベースの曖昧表記正規化 |
 
 ## 複数LLM対応ガイド（Claude / ChatGPT / Gemini）
 
