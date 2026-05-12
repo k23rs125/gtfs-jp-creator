@@ -1,0 +1,85 @@
+{
+  "official": "C:\\Users\\User\\Downloads\\feed_suetown_SueTownCommunityBus_20250401_20250225120124.zip",
+  "ours": "test_demo_csv",
+  "routes": {
+    "official_count": 7,
+    "our_count": 8,
+    "matched_count": 0,
+    "match_rate": 0.0,
+    "long_name_match_count": 0,
+    "long_name_match_rate": 0.0,
+    "only_in_official": [],
+    "only_in_ours": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8"
+    ],
+    "matched_short_names": []
+  },
+  "stops": {
+    "official_count": 94,
+    "our_count": 87,
+    "matched_count": 81,
+    "match_rate": 97.6,
+    "official_with_coords": 94,
+    "our_with_coords": 0,
+    "only_in_official": [
+      "正信会　水戸病院前",
+      "福祉センター(カルチャーセンター前)"
+    ],
+    "only_in_ours": [
+      "上須恵橋",
+      "新生",
+      "東志免",
+      "正信会 水戸病院前",
+      "緑風会水戸病院前",
+      "老人ホーム前"
+    ]
+  },
+  "trips": {
+    "official_count": 50,
+    "our_count": 8,
+    "official_count_by_route": {},
+    "our_count_by_route": {
+      "1": 8
+    },
+    "per_route": []
+  },
+  "stop_times": {
+    "official_count": 828,
+    "our_count": 16,
+    "official_unique_pairs": 821,
+    "our_unique_pairs": 16,
+    "matched_pairs": 0,
+    "match_rate_vs_official": 0.0,
+    "match_rate_vs_ours": 0.0
+  },
+  "calendar": {
+    "official_count": 1,
+    "our_count": 4,
+    "matched_patterns": 1,
+    "official_patterns": [
+      "1111111"
+    ],
+    "our_patterns": [
+      "1111111",
+      "1111100",
+      "0000010",
+      "0000001"
+    ],
+    "official_service_ids": [
+      "全日"
+    ],
+    "our_service_ids": [
+      "EVERY_DAY",
+      "WEEKDAY",
+      "SATURDAY",
+      "SUNDAY_HOLIDAY"
+    ]
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "official": "C:\\Users\\User\\Downloads\\feed_suetown_SueTownCommunityBus_20250401_20250225120124.zip",
+  "ours": "test_demo_csv",
+  "routes": {
+    "official_count": 7,
+    "our_count": 8,
+    "matched_count": 7,
+    "match_rate": 100.0,
+    "long_name_match_count": 7,
+    "long_name_match_rate": 100.0,
+    "only_in_official": [],
+    "only_in_ours": [
+      "8"
+    ],
+    "matched_keys": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7"
+    ],
+    "name_match_details": [
+      [
+        "1",
+        "一番田~上須恵線",
+        "一致"
+      ],
+      [
+        "2",
+        "乙植木~須恵~城山線",
+        "一致"
+      ],
+      [
+        "3",
+        "旅石~山の神~新原線",
+        "一致"
+      ],
+      [
+        "4",
+        "佐谷~川子線",
+        "一致"
+      ],
+      [
+        "5",
+        "佐谷~建正寺線",
+        "一致"
+      ],
+      [
+        "6",
+        "平原~大間線",
+        "一致"
+      ],
+      [
+        "7",
+        "中央循環線",
+        "一致"
+      ]
+    ]
+  },
+  "stops": {
+    "official_count": 94,
+    "our_count": 87,
+    "official_unique_names": 83,
+    "our_unique_names": 87,
+    "matched_count": 82,
+    "match_rate_vs_official": 98.8,
+    "match_rate_vs_ours": 94.3,
+    "official_with_coords": 94,
+    "our_with_coords": 0,
+    "only_in_official": [
+      "福祉センター(カルチャーセンター前)"
+    ],
+    "only_in_ours": [
+      "上須恵橋",
+      "新生",
+      "東志免",
+      "緑風会水戸病院前",
+      "老人ホーム前"
+    ]
+  },
+  "trips": {
+    "official_count": 50,
+    "our_count": 8,
+    "official_count_by_route": {
+      "1": 8,
+      "2": 8,
+      "3": 8,
+      "4": 8,
+      "5": 4,
+      "6": 4,
+      "7": 10
+    },
+    "our_count_by_route": {
+      "1": 8
+    },
+    "per_route": [
+      {
+        "route_key": "1",
+        "official_trips": 8,
+        "our_trips": 8,
+        "match_rate": 100.0
+      }
+    ]
+  },
+  "stop_times": {
+    "official_count": 828,
+    "our_count": 16,
+    "official_unique_pairs": 821,
+    "our_unique_pairs": 16,
+    "matched_pairs": 0,
+    "match_rate_vs_official": 0.0,
+    "match_rate_vs_ours": 0.0
+  },
+  "calendar": {
+    "official_count": 1,
+    "our_count": 4,
+    "matched_patterns": 1,
+    "official_patterns": [
+      "1111111"
+    ],
+    "our_patterns": [
+      "1111111",
+      "1111100",
+      "0000010",
+      "0000001"
+    ],
+    "official_service_ids": [
+      "全日"
+    ],
+    "our_service_ids": [
+      "EVERY_DAY",
+      "WEEKDAY",
+      "SATURDAY",
+      "SUNDAY_HOLIDAY"
+    ]
+  }
+}
