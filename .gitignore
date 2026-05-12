@@ -256,3 +256,10 @@ enrichment_report.json
 # Step 3 / 3.5 / 4 の中間出力
 test_demo/
 *.enriched.txt
+
+# Step 3 旧版の中間出力（自治体ごとに変わる、再生成可能）
+test_demo_csv/
+test_demo_csv.zip
+test_output_gtfs/
+test_mineru_output/
+test_suetown.md
