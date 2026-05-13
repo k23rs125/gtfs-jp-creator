@@ -78,6 +78,107 @@ claude --plugin-dir ./gtfs-jp-creator
                             →  zipパッケージ → 完成
 ```
 
+## Quick Start（PowerShell 編）
+
+Windows ユーザー向けに、全 Step を通して動かす **最短経路** をまとめました。各 Step の詳細・トラブルシュート・選択肢の比較は、後続の各章を参照してください。
+
+### 前提：環境セットアップ（最初の 1 回だけ）
+
+```powershell
+# リポジトリをクローン
+git clone https://github.com/k23rs125/gtfs-jp-creator.git
+cd gtfs-jp-creator
+
+# Python パッケージ（PDF抽出 + ジオコーディングは標準ライブラリで完結）
+pip install pymupdf pymupdf4llm
+pip install -U "mineru[core]"   # 装飾的 PDF を扱う場合（~3GB のML モデル DL あり）
+```
+
+> 💡 **PowerShell の役割**：PowerShell は Python スクリプトを呼び出すためのターミナルです。実際の変換処理はすべて Python が決定的（deterministic）に行います。Mac/Linux なら同じスクリプトを Bash から呼び出せます。
+
+### Step 1: PDF → Markdown
+
+```powershell
+# 装飾的レイアウトの日本のバス時刻表 PDF は MinerU 推奨（CPU で 30〜60 分、GPU で数分）
+mineru -p "$HOME\Desktop\komyubasujikokuhyou.pdf" -o test_demo --lang japan
+
+# 出力確認
+Get-Content .\test_demo\komyubasujikokuhyou\hybrid_auto\komyubasujikokuhyou.md | Select-Object -First 30
+```
+
+詳細：[`## MinerU 利用ガイド（PowerShell 編）`](#mineru-利用ガイドpowershell-編)
+
+### Step 2: Markdown → JSON（LLM が関わる唯一の Step）
+
+ブラウザで [Claude](https://claude.ai) / [ChatGPT](https://chat.openai.com/) / [Gemini](https://gemini.google.com/) を開き、次の2つを連結して送信：
+
+1. `skills/gtfs-jp-creator/references/prompts/02_structured_extraction.md` のプロンプト全文
+2. Step 1 で生成された `komyubasujikokuhyou.md` の全文
+
+応答の **JSON 部分のみ** を抽出してファイル保存：
+
+```powershell
+notepad test_demo\extracted.json
+# LLM 応答の { ... } 部分をペースト → 保存
+```
+
+詳細：[`## 複数LLM対応ガイド`](#複数llm対応ガイドclaude--chatgpt--gemini)
+
+### Step 3: JSON → CSV（決定的・LLM 不要）
+
+```powershell
+python skills\gtfs-jp-creator\scripts\generate_gtfs_files.py `
+  test_demo\extracted.json `
+  -o test_demo\gtfs_output
+```
+
+→ `test_demo\gtfs_output\` に GTFS-JP 8 ファイル（`agency.txt`, `routes.txt`, `stops.txt`, `trips.txt`, `stop_times.txt`, `calendar.txt`, `feed_info.txt`, `routes_jp.txt`）が生成されます。
+
+> 🔑 **なぜ LLM ではなく Python で CSV を作るのか**：LLM だと長い CSV の末尾省略や、8 ファイル相互参照（`trips.route_id` ↔ `routes.route_id` など）の整合性破綻が起きます。Python による決定的変換で、エンコーディング（UTF-8 with BOM + CRLF）も含めて GTFS 仕様準拠を保証します。詳細は `Markdown_JSON_設計説明書_v1.md` を参照。
+
+### Step 3.5: 緯度経度補完
+
+```powershell
+python skills\gtfs-jp-creator\scripts\enrich_stops.py `
+  test_demo\gtfs_output\stops.txt `
+  --context "福岡県糟屋郡須恵町" `
+  --agency-name "須恵町コミュニティバス" `
+  --bbox "130.40,33.45,130.55,33.60"
+```
+
+→ `stops.enriched.txt`、`stops_geocache.json`、`enrichment_report.json` が生成されます。
+
+詳細：[`## 緯度経度補完ガイド（Step 3.5）`](#緯度経度補完ガイドstep-35)
+
+### Step 4-5: shapes.txt 生成・バリデーション
+
+> 🚧 **v0.1 リリース時に対応予定**。現時点ではスタブ実装のため、Step 4-5 は未動作です（中間発表後の実装目標）。
+
+### コピペで丸ごと実行できる完全例（須恵町コミュニティバス）
+
+```powershell
+# 0. 準備
+cd $HOME\Desktop\稲ゼミ\gtfs-jp-creator
+
+# 1. PDF → Markdown
+mineru -p "$HOME\Desktop\稲ゼミ\komyubasujikokuhyou.pdf" -o test_demo --lang japan
+
+# 2. （手動）LLM に Markdown を投げて test_demo\extracted.json を作成
+
+# 3. JSON → CSV
+python skills\gtfs-jp-creator\scripts\generate_gtfs_files.py `
+  test_demo\extracted.json -o test_demo\gtfs_output
+
+# 3.5 緯度経度補完
+python skills\gtfs-jp-creator\scripts\enrich_stops.py `
+  test_demo\gtfs_output\stops.txt `
+  --context "福岡県糟屋郡須恵町" `
+  --agency-name "須恵町コミュニティバス" `
+  --bbox "130.40,33.45,130.55,33.60"
+
+# 4-5. （v0.1 で対応予定）
+```
+
 ## MinerU 利用ガイド（PowerShell 編）
 
 Step 1（PDF→Markdown）で **MinerU** を使う場合の手順を、PowerShell でのコマンドベースで詳述します。pymupdf4llm（軽量エンジン）の場合は本セクションは飛ばして構いません。
