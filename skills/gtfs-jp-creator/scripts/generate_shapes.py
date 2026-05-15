@@ -5,11 +5,17 @@ generate_shapes.py
 Step 4: stop_times.txt の停留所列から shapes.txt を生成する。
 
 Strategy (主):
-    OSRM (Open Source Routing Machine) の map-matching API を使い、
-    停留所の lat/lon を「実走行経路」にマッピングする。
+    OSRM (Open Source Routing Machine) の routing API (/route) を使い、
+    停留所（ウェイポイント）間の道路経路を求めて shape にする。
+
+    なぜ /match ではなく /route か:
+      - /match (map-matching) は「ノイズの多いGPSトレースを道路に吸着」する用途。
+        本ツールは GPS トレースを持たず、停留所という確定ウェイポイントを持つ。
+      - /route は「ウェイポイント間の最適経路」を返す。停留所→経路はこちらが正しい。
+      - さらに OSRM 公開デモサーバーは /route のみ有効で /match は無効 (HTTP 400)。
 
 Strategy (フォールバック):
-    map-matching が失敗 or 不可能 (座標欠落多数) の場合、
+    routing が失敗 or 不可能 (座標欠落多数) の場合、
     停留所を直線で結んだ簡易 shape を生成。
 
 設計の根拠:
@@ -47,12 +53,12 @@ from typing import Any
 # 定数
 # ---------------------------------------------------------------------------
 
-OSRM_BASE = "https://router.project-osrm.org/match/v1/driving"
+OSRM_BASE = "https://router.project-osrm.org/route/v1/driving"
 USER_AGENT = "gtfs-jp-creator/0.1 (research; https://github.com/k23rs125/gtfs-jp-creator)"
 DEFAULT_RATE_SEC = 1.1
 DEFAULT_TIMEOUT_SEC = 30
 EARTH_RADIUS_M = 6_371_000
-OSRM_MAX_COORDS = 100  # OSRM の上限
+OSRM_MAX_COORDS = 100  # OSRM の上限（ウェイポイント数）
 
 
 # ---------------------------------------------------------------------------
@@ -108,18 +114,21 @@ def write_csv_dict(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
 # OSRM API 呼び出し
 # ---------------------------------------------------------------------------
 
-def call_osrm_match(coords_lat_lon: list[tuple[float, float]],
+def call_osrm_route(coords_lat_lon: list[tuple[float, float]],
                      timeout: int = DEFAULT_TIMEOUT_SEC,
                      osrm_base: str = OSRM_BASE) -> list[tuple[float, float]] | None:
-    """OSRM map-matching を呼んで、最尤経路の点列 [(lat, lon), ...] を返す。
+    """OSRM routing API (/route) を呼んで、ウェイポイント間の道路経路を返す。
+
+    停留所列をウェイポイントとして渡し、それらを順に結ぶ道路経路の
+    点列 [(lat, lon), ...] を取得する。
 
     Args:
         coords_lat_lon: 停留所の (lat, lon) 列。順序は trip 通り。
         timeout:        HTTP タイムアウト秒
-        osrm_base:      OSRM サーバーのベース URL
+        osrm_base:      OSRM サーバーのベース URL (/route/v1/driving)
 
     Returns:
-        マッチング成功時: 経路上の点列 [(lat, lon), ...]
+        成功時: 経路上の点列 [(lat, lon), ...]
         失敗時 (HTTP/JSON エラー、code != "Ok"): None
     """
     if len(coords_lat_lon) < 2:
@@ -133,7 +142,7 @@ def call_osrm_match(coords_lat_lon: list[tuple[float, float]],
     params = {
         "geometries": "geojson",
         "overview": "full",
-        "radiuses": ";".join(["50"] * len(coords_lat_lon)),  # 50m 探索半径
+        # /route は radiuses 不要。全ウェイポイントを通る経路を返す
     }
     url = f"{osrm_base}/{coord_str}?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
@@ -156,12 +165,12 @@ def call_osrm_match(coords_lat_lon: list[tuple[float, float]],
         print(f"  ! OSRM code={data.get('code')}", file=sys.stderr)
         return None
 
-    matchings = data.get("matchings", [])
-    if not matchings:
+    routes = data.get("routes", [])
+    if not routes:
         return None
 
-    # 複数の matching が返る場合があるが、最初を使う
-    geom = matchings[0].get("geometry", {})
+    # 複数の route が返ることは通常ないが、最初を使う
+    geom = routes[0].get("geometry", {})
     coords = geom.get("coordinates", [])
     # GeoJSON は [lon, lat]、本ツール内では (lat, lon) に揃える
     return [(lat, lon) for lon, lat in coords]
@@ -276,7 +285,7 @@ def save_cache(cache: dict, cache_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate shapes.txt via OSRM map-matching (with straight-line fallback)"
+        description="Generate shapes.txt via OSRM routing (/route) with straight-line fallback"
     )
     parser.add_argument("stops_txt", help="入力 stops.txt（緯度経度付き）")
     parser.add_argument("stop_times_txt", help="入力 stop_times.txt")
@@ -407,7 +416,7 @@ def main() -> int:
             print(f"[{i}/{len(trip_stops_seq)}] {trip_id}: OSRM 呼び出し ({len(coords)} 点)")
             time.sleep(args.rate)
             n_api_calls += 1
-            points = call_osrm_match(coords, osrm_base=args.osrm_url)
+            points = call_osrm_route(coords, osrm_base=args.osrm_url)
             if points is not None:
                 used_source = "osrm"
                 n_osrm_success += 1
