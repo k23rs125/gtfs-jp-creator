@@ -70,12 +70,18 @@ def extract_route_number(route_long_name: str) -> str:
 def get_route_matchkey(route: dict) -> str:
     """route から比較用キーを取り出す。
     1. route_short_name があればそれ
-    2. 無ければ route_long_name から数字を抽出
+    2. 無ければ route_long_name から先頭数字を抽出（"1 一番田～上須恵線" 形式）
+    3. 数字も無ければ route_long_name 全体を正規化してキーにする
+       （"JR古賀線" "小竹線" のような番号なし路線に対応）
     """
     short = (route.get("route_short_name") or "").strip()
     if short:
         return normalize_name(short)
-    return extract_route_number(route.get("route_long_name", ""))
+    num = extract_route_number(route.get("route_long_name", ""))
+    if num:
+        return num
+    # 番号なし路線は route_long_name 全体をマッチキーにする
+    return normalize_name(route.get("route_long_name", ""))
 
 
 def strip_route_number(route_long_name: str) -> str:
@@ -400,14 +406,15 @@ def generate_markdown_report(results: dict) -> str:
     md.append("")
     md.append("## 注意事項")
     md.append("")
-    md.append("- **マッチング戦略 (v2)**:")
-    md.append("  - routes: route_short_name → 無ければ route_long_name から先頭数字を抽出")
+    md.append("- **マッチング戦略 (v2.1)**:")
+    md.append("  - routes: route_short_name → 先頭数字抽出 → どちらも無ければ route_long_name 全体")
     md.append("  - stops/stop_times: 名前を NFKC + 全角/半角空白正規化してから比較")
     md.append("- **stop_times の一致率**: (停留所名, 到着時刻) ペアの集合比較。便（trip）の対応付けはしていない")
-    md.append("- **緯度経度**: 当方データは未補完。GEN-05 機能実装後に再評価予定")
-    md.append("- **shapes.txt**: 比較対象外（Step 4 未実装）")
+    md.append("  - ダイヤ改正後の時刻表を旧フィードと比べる場合、一致率が低いのは正常（時刻が変わったため）")
+    md.append("- **緯度経度**: stops.merged.txt 等で補完済みなら our_with_coords に反映される")
+    md.append("- **shapes.txt**: 比較対象外")
     md.append("")
-    md.append("v2 改善: 全角/半角空白の正規化、route 命名規則の差を吸収")
+    md.append("v2.1 改善: 番号なし路線（JR古賀線・小竹線等）を route_long_name 全体でマッチ")
 
     return "\n".join(md)
 
