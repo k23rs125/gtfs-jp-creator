@@ -54,6 +54,29 @@ def normalize_name(s: str) -> str:
     return s.strip()
 
 
+def normalize_time(t: str) -> str:
+    """時刻フォーマットを HH:MM:SS に統一する。
+
+    GTFS 仕様は HH:MM:SS だが、ゼロパディングが省略された "8:10:00" 形式も
+    公式フィードによっては使われる。本ツールでは比較前に
+    "8:10:00" → "08:10:00" のようにゼロパディングする。
+    """
+    if not t:
+        return ""
+    s = str(t).strip()
+    if ":" not in s:
+        return s
+    parts = s.split(":")
+    try:
+        if len(parts) == 2:
+            return f"{int(parts[0]):02d}:{int(parts[1]):02d}:00"
+        if len(parts) >= 3:
+            return f"{int(parts[0]):02d}:{int(parts[1]):02d}:{int(parts[2]):02d}"
+    except (ValueError, TypeError):
+        return s
+    return s
+
+
 def extract_route_number(route_long_name: str) -> str:
     """'1 一番田～上須恵線' から '1' を取り出す。
     取り出せなければ空文字。
@@ -241,14 +264,14 @@ def compare_stop_times(off_dir: Path, our_dir: Path) -> dict:
     off_pairs = set()
     for st in off_st:
         name = off_id_to_name.get(st.get("stop_id", ""), "")
-        time = (st.get("arrival_time") or "").strip()
+        time = normalize_time(st.get("arrival_time", ""))
         if name and time:
             off_pairs.add((name, time))
 
     our_pairs = set()
     for st in our_st:
         name = our_id_to_name.get(st.get("stop_id", ""), "")
-        time = (st.get("arrival_time") or "").strip()
+        time = normalize_time(st.get("arrival_time", ""))
         if name and time:
             our_pairs.add((name, time))
 
