@@ -222,6 +222,72 @@ def generate_calendar(data: dict, output_dir: Path) -> None:
     write_csv(output_dir / "calendar.txt", rows, fieldnames)
 
 
+def generate_calendar_dates(data: dict, output_dir: Path) -> None:
+    """calendar_dates.txt を生成 (例外日: 運休日・祝日・年末年始など)。
+
+    入力 JSON に calendar_dates 配列が無いか空なら、ファイルを生成しない。
+    """
+    cdates = data.get("calendar_dates") or []
+    if not cdates:
+        return  # 例外日が無いならファイル作らない
+    rows = []
+    for c in cdates:
+        rows.append({
+            "service_id": c["service_id"],
+            "date": c["date"],
+            "exception_type": c.get("exception_type", 2),
+            "comment": c.get("comment", "") or "",
+        })
+    fieldnames = ["service_id", "date", "exception_type", "comment"]
+    write_csv(output_dir / "calendar_dates.txt", rows, fieldnames)
+
+
+def generate_fare_attributes(data: dict, output_dir: Path, default_agency_id: str) -> None:
+    """fare_attributes.txt を生成 (運賃情報)。
+
+    入力 JSON に fare_attributes 配列が無いか空なら、ファイルを生成しない。
+    """
+    fares = data.get("fare_attributes") or []
+    if not fares:
+        return
+    rows = []
+    for f in fares:
+        rows.append({
+            "agency_id": f.get("agency_id") or default_agency_id,
+            "fare_id": f["fare_id"],
+            "price": f["price"],
+            "currency_type": f.get("currency_type") or "JPY",
+            "payment_method": f.get("payment_method", 0),
+            "transfers": f.get("transfers", 0),
+        })
+    fieldnames = [
+        "agency_id", "fare_id", "price",
+        "currency_type", "payment_method", "transfers",
+    ]
+    write_csv(output_dir / "fare_attributes.txt", rows, fieldnames)
+
+
+def generate_fare_rules(data: dict, output_dir: Path) -> None:
+    """fare_rules.txt を生成 (運賃と route の対応規則)。
+
+    入力 JSON に fare_rules 配列が無いか空なら、ファイルを生成しない。
+    """
+    rules = data.get("fare_rules") or []
+    if not rules:
+        return
+    rows = []
+    for r in rules:
+        rows.append({
+            "fare_id": r["fare_id"],
+            "route_id": r.get("route_id") or "",
+            "origin_id": r.get("origin_id") or "",
+            "destination_id": r.get("destination_id") or "",
+            "contains_id": r.get("contains_id") or "",
+        })
+    fieldnames = ["fare_id", "route_id", "origin_id", "destination_id", "contains_id"]
+    write_csv(output_dir / "fare_rules.txt", rows, fieldnames)
+
+
 def generate_feed_info(data: dict, output_dir: Path) -> None:
     """feed_info.txt を生成 (GTFS-JP では必須扱い)。"""
     agency = data["agency"]
@@ -301,6 +367,9 @@ def main():
     generate_trips(data, output_dir)
     generate_stop_times(data, output_dir)
     generate_calendar(data, output_dir)
+    generate_calendar_dates(data, output_dir)          # NEW: 例外日
+    generate_fare_attributes(data, output_dir, agency_id)  # NEW: 運賃
+    generate_fare_rules(data, output_dir)              # NEW: 運賃ルール
     generate_feed_info(data, output_dir)
 
     print_stats(output_dir)
