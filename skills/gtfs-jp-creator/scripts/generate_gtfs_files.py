@@ -45,8 +45,30 @@ from typing import Any
 DEFAULT_TIMEZONE = "Asia/Tokyo"
 DEFAULT_LANG = "ja"
 PLACEHOLDER_URL = "https://example.com/"  # agency_url 等が無い場合のプレースホルダ
-DEFAULT_START_DATE = "20250401"  # calendar.start_date のデフォルト
-DEFAULT_END_DATE = "20260331"    # calendar.end_date のデフォルト
+DEFAULT_START_DATE = "20250401"  # calendar.start_date のデフォルト（年度初め）
+DEFAULT_END_DATE = "20991231"    # 究極のフォールバック（実質期限なし）
+
+
+def compute_default_end_date(start_date_str: str | None) -> str:
+    """start_date から日本の年度末（3/31）を計算する。
+
+    例:
+      start_date 20260601 → end_date 20270331（FY2026 年度末）
+      start_date 20260301 → end_date 20260331（FY2025 年度末）
+      start_date None     → DEFAULT_END_DATE
+
+    GTFS Validator の `start_and_end_range_out_of_order` エラー回避が目的。
+    end_date が必ず start_date より後になるよう保証する。
+    """
+    if not start_date_str:
+        return DEFAULT_END_DATE
+    try:
+        sd = datetime.strptime(start_date_str, "%Y%m%d")
+    except (ValueError, TypeError):
+        return DEFAULT_END_DATE
+    # 日本の年度: 4/1 から始まる
+    end_year = sd.year + 1 if sd.month >= 4 else sd.year
+    return f"{end_year}0331"
 
 
 def _none_to_empty(value: Any) -> str:
@@ -198,9 +220,14 @@ def generate_calendar(data: dict, output_dir: Path) -> None:
 
     GTFS必須項目として start_date / end_date を要求するため、
     JSONで null の場合はデフォルト値を補う。
+    end_date が null の場合は start_date から日本の年度末を自動計算する。
+    （GTFS Validator の start_and_end_range_out_of_order エラー対策）
     """
     rows = []
     for c in data["calendar"]:
+        start_date = c.get("start_date") or DEFAULT_START_DATE
+        # end_date が無ければ start_date から年度末を計算
+        end_date = c.get("end_date") or compute_default_end_date(start_date)
         rows.append({
             "service_id": c["service_id"],
             "monday": c.get("monday", 0),
@@ -210,8 +237,8 @@ def generate_calendar(data: dict, output_dir: Path) -> None:
             "friday": c.get("friday", 0),
             "saturday": c.get("saturday", 0),
             "sunday": c.get("sunday", 0),
-            "start_date": c.get("start_date") or DEFAULT_START_DATE,
-            "end_date": c.get("end_date") or DEFAULT_END_DATE,
+            "start_date": start_date,
+            "end_date": end_date,
         })
     fieldnames = [
         "service_id",
