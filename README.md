@@ -25,13 +25,21 @@ gtfs-jp-creator/                       # プラグイン＆マーケットプレ
 │       │   ├── field-definitions/     # 各テーブル仕様
 │       │   ├── examples/              # 正解GTFS-JPサンプル
 │       │   └── prompts/               # LLM用プロンプト集
-│       └── scripts/                   # 実行スクリプト群
-│           ├── pdf_to_markdown.py             # Step 1: PDF→Markdown
-│           ├── generate_gtfs_files.py         # Step 3: GTFS-JPファイル生成
-│           ├── generate_shapes.py             # Step 4: shapes.txt生成 (OSRM)
-│           ├── validate_gtfs.py               # Step 5a: GTFS Validator実行
-│           ├── validate_gtfs_jp_extensions.py # Step 5b: JP拡張独自検証
-│           └── package_gtfs_zip.py            # 最終: zipパッケージング
+│       ├── scripts/                   # 実行スクリプト群
+│       │   ├── pdf_to_markdown.py             # Step 1:   PDF→Markdown
+│       │   ├── generate_gtfs_files.py         # Step 3:   JSON→GTFS-JP CSV
+│       │   ├── merge_stop_coords.py           # Step 3.5a: 旧フィードから座標再利用
+│       │   ├── enrich_stops_p11.py            # Step 3.5b: 国土数値情報 P11 で座標補完
+│       │   ├── enrich_stops.py                # Step 3.5c: Nominatim で座標補完
+│       │   ├── canonicalize_stops.py          # Step 3.x: 停留所名の表記揺れ正規化
+│       │   ├── generate_shapes.py             # Step 4:   shapes.txt生成 (OSRM /route)
+│       │   ├── generate_translations.py       # Step 6:   translations.txt生成 (3言語)
+│       │   ├── package_gtfs_zip.py            # Step 5:   zipパッケージング
+│       │   ├── validate_gtfs.py               # Step 7:   GTFS Validator実行
+│       │   ├── run_pipeline.py                # ワンコマンド: Step 3〜7 を一括実行
+│       │   ├── eval_compare.py                # 精度評価: 公式フィードとの集合比較
+│       │   └── analyze_stop_times_diff.py     # 精度評価: trip単位の時刻 diff
+│       └── tools/                     # （任意配置）gtfs-validator-cli.jar など
 ├── README.md                          # このファイル
 ├── LICENSE                            # Apache License 2.0
 ├── .gitignore
@@ -201,8 +209,111 @@ python skills\gtfs-jp-creator\scripts\generate_shapes.py `
   -o test_demo\gtfs_output\shapes.txt `
   --update-trips test_demo\gtfs_output\trips.with_shapes.txt
 
-# 5. （v0.1 で対応予定：validate_gtfs.py）
+# 5. zip パッケージング + 検証は run_pipeline.py で一括実行（下記参照）
 ```
+
+## ワンコマンド実行ガイド（run_pipeline.py）
+
+Step 2（Markdown→JSON、LLM 利用）まで済んだら、**残りの Step 3〜7 は config JSON 1枚で全自動実行** できます。各 Step スクリプトを個別に叩く必要はありません。
+
+### 何をやってくれるか
+
+```
+run_pipeline.py --config <config.json>
+  ├ Step 3    JSON → CSV
+  ├ Step 3.5a 旧フィードから座標再利用      （reference_feed 指定時）
+  ├ Step 3.5b 国土数値情報 P11 で座標補完    （p11_shapefile 指定時）
+  ├ Step 3.5c Nominatim で座標補完          （use_nominatim=true 時）
+  ├ Step 3.x  停留所名 canonicalize         （canonical_reference 指定時）
+  ├ Step 4    shapes.txt 生成 (OSRM)
+  ├ Step 6    translations.txt 生成
+  ├ Step 5    zip パッケージング
+  └ Step 7    GTFS Validator 検証           （validate=true 時）
+```
+
+各 Step は config に該当オプションが無ければ **自動でスキップ**。stops.txt は Step 間で
+自動的にチェーンされる（座標補完 → 正規化 → shapes 生成 まで一貫）。
+
+### config JSON の書き方
+
+```json
+{
+  "feed_name": "kogabus_20260601",
+  "input_json": "test_demo/kogashi_claude.json",
+  "output_dir": "test_demo/kogabus_pipeline",
+  "context": "福岡県",
+  "bbox": "130.42,33.67,130.52,33.76",
+  "reference_feed": "C:/Users/User/Desktop/稲ゼミ/260211kogabus_gtfs-jp.zip",
+  "p11_shapefile": "C:/Users/User/Desktop/稲ゼミ/p11_fukuoka/P11-22_40_SHP/P11-22_40.shp",
+  "canonical_reference": "C:/Users/User/Desktop/稲ゼミ/Shin_kogashi.zip",
+  "use_nominatim": false,
+  "translations_en_json": "test_demo/kogashi_en.json",
+  "validate": true
+}
+```
+
+| キー | 必須 | 説明 |
+|---|---|---|
+| `feed_name` | ✅ | 出力 zip 名のプレフィックス |
+| `input_json` | ✅ | Step 2 の出力（LLM が作った構造化JSON）|
+| `output_dir` | ✅ | 成果物の出力先ディレクトリ |
+| `context` | — | Nominatim 用コンテキスト（例: "福岡県"）|
+| `bbox` | — | 座標補完の検索範囲 |
+| `reference_feed` | — | 旧 GTFS-JP（Step 3.5a 用）。あれば座標 100% |
+| `p11_shapefile` | — | 国土数値情報 P11（Step 3.5b 用）|
+| `canonical_reference` | — | 表記揺れ正規化の参照フィード（Step 3.x 用）|
+| `use_nominatim` | — | `true` で Step 3.5c を有効化（既定 false）|
+| `translations_en_json` | — | LLM 英訳済み JSON。無ければ en プロンプトを export |
+| `validate` | — | `true` で Step 7 GTFS Validator を実行 |
+
+### 使い方
+
+```powershell
+cd C:\Users\User\Desktop\稲ゼミ\gtfs-jp-creator
+
+# まず dry-run で実行計画を確認（実行はしない）
+python skills\gtfs-jp-creator\scripts\run_pipeline.py `
+  --config test_demo\kogabus_pipeline_config.json --dry-run
+
+# 本実行
+python skills\gtfs-jp-creator\scripts\run_pipeline.py `
+  --config test_demo\kogabus_pipeline_config.json
+```
+
+### 出力
+
+```
+<output_dir>/
+├── gtfs/                          ← GTFS-JP CSV 群（13ファイル）
+├── work/                          ← 各 Step の中間ファイル・レポート
+├── <feed_name>_gtfs-jp.zip        ← ★ 最終成果物
+└── validation/                    ← GTFS Validator レポート（validate=true 時）
+```
+
+### 実行サマリ例
+
+```
+================================================================
+パイプライン完了
+================================================================
+  ✓ Step 3 JSON→CSV              [OK]
+  ✓ Step 3.5a 旧フィード座標         [OK]
+  ✓ Step 3.5b P11補完              [OK]
+  ・ Step 3.5c Nominatim補完        [SKIP]
+  ✓ Step 3.x 停留所名正規化          [OK]
+  ✓ Step 4 shapes生成              [OK]
+  ✓ Step 6 translations生成        [OK]
+  ✓ Step 5 zipパッケージ            [OK]
+  ✓ Step 7 Validator検証           [OK]
+================================================================
+```
+
+### オプション
+
+| オプション | 説明 |
+|---|---|
+| `--dry-run` | 実行せず計画のみ表示 |
+| `--stop-on-error` | Step 失敗時に即中断（既定は続行可能なら続行）|
 
 ## MinerU 利用ガイド（PowerShell 編）
 
