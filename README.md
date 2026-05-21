@@ -73,7 +73,7 @@ claude --plugin-dir ./gtfs-jp-creator
 [Step 2]   Markdown        →  構造化中間表現（LLM）
 [Step 3]   中間表現        →  GTFS-JPの各CSVファイル
 [Step 3.5] stops.txt       →  緯度経度補完（Nominatim API）
-[Step 4]   stop_times      →  shapes.txt（OSRM map-matching）
+[Step 4]   stop_times      →  shapes.txt（OSRM routing /route）
 [Step 5]   全ファイル群    →  バリデーション（GTFS Validator + JP拡張独自）
                             →  zipパッケージ → 完成
 ```
@@ -150,9 +150,23 @@ python skills\gtfs-jp-creator\scripts\enrich_stops.py `
 
 詳細：[`## 緯度経度補完ガイド（Step 3.5）`](#緯度経度補完ガイドstep-35)
 
-### Step 4-5: shapes.txt 生成・バリデーション
+### Step 4: shapes.txt 生成（OSRM routing）
 
-> 🚧 **v0.1 リリース時に対応予定**。現時点ではスタブ実装のため、Step 4-5 は未動作です（中間発表後の実装目標）。
+```powershell
+python skills\gtfs-jp-creator\scripts\generate_shapes.py `
+  test_demo\gtfs_output\stops.enriched.txt `
+  test_demo\gtfs_output\stop_times.txt `
+  test_demo\gtfs_output\trips.txt `
+  -o test_demo\gtfs_output\shapes.txt `
+  --update-trips test_demo\gtfs_output\trips.with_shapes.txt
+```
+
+→ `shapes.txt`、`shapes_cache.json`、`shapes_report.json` が生成されます。
+詳細：[`## shapes.txt 生成ガイド（Step 4）`](#shapestxt-生成ガイドstep-4)
+
+### Step 5: バリデーション
+
+> 🚧 **v0.1 リリース時に対応予定**。現時点ではスタブ実装のため、Step 5 は未動作です（中間発表後の実装目標）。
 
 ### コピペで丸ごと実行できる完全例（須恵町コミュニティバス）
 
@@ -176,7 +190,18 @@ python skills\gtfs-jp-creator\scripts\enrich_stops.py `
   --agency-name "須恵町コミュニティバス" `
   --bbox "130.40,33.45,130.55,33.60"
 
-# 4-5. （v0.1 で対応予定）
+# enrich_stops は <input>.enriched.txt を出すので、stops.txt に上書きするなら：
+Copy-Item test_demo\gtfs_output\stops.enriched.txt test_demo\gtfs_output\stops.txt -Force
+
+# 4. shapes.txt 生成（OSRM routing /route）
+python skills\gtfs-jp-creator\scripts\generate_shapes.py `
+  test_demo\gtfs_output\stops.txt `
+  test_demo\gtfs_output\stop_times.txt `
+  test_demo\gtfs_output\trips.txt `
+  -o test_demo\gtfs_output\shapes.txt `
+  --update-trips test_demo\gtfs_output\trips.with_shapes.txt
+
+# 5. （v0.1 で対応予定：validate_gtfs.py）
 ```
 
 ## MinerU 利用ガイド（PowerShell 編）
@@ -305,6 +330,109 @@ Get-Content .\test_demo\komyubasujikokuhyou\hybrid_auto\komyubasujikokuhyou.md |
 
 → **日本の自治体バス時刻表PDFのほとんどは装飾的レイアウト**のため、MinerU が事実上の標準選択肢になります。
 
+## P11 統合ガイド（Step 3.5b・国土数値情報）
+
+国土交通省「**国土数値情報 P11 バス停留所**」データを使って停留所座標を補完するスクリプト `enrich_stops_p11.py` を提供します。Nominatim（OSM）よりカバレッジが圧倒的に高く、コミュニティバス停も網羅されています。
+
+### Step 3.5 の3段階階層
+
+```
+[3.5a] 旧 GTFS-JP フィード再利用  (merge_stop_coords.py)    旧フィードあり→100%
+   ↓ そこで補完できなかった stop だけが次に進む
+[3.5b] 国土数値情報 P11 から補完  (enrich_stops_p11.py)    全自治体→90%+ 期待 ← 本章
+   ↓ そこでも補完できなかった stop だけが次に進む
+[3.5c] Nominatim（OSM）で補完    (enrich_stops.py)         残りの安全網
+```
+
+### 設計概要
+
+| 項目 | 内容 |
+|---|---|
+| データソース | 国土交通省 国土数値情報 P11（公的・全国網羅・年次更新）|
+| 入手 | https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P11.html から都道府県別 Shapefile |
+| ライセンス | 国土数値情報利用約款（出典明記で自由利用可）|
+| 依存 | `pip install pyshp`（pure Python・軽量）|
+| マッチング | 4段階：完全一致 → 前方/後方一致 → 部分一致 → fuzzy (difflib) |
+| ネットワーク | 不要（ローカル処理のみ）|
+
+詳細は `国土数値情報P11統合設計書_v1.md` を参照。
+
+### データ入手手順（一度だけ）
+
+```powershell
+# 1. ブラウザで以下を開く
+#    https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P11.html
+# 2. 「P11 バス停留所」最新版（v2.x）の対象都道府県を選択
+#    例: 福岡県 → P11-2024_40_GML.zip
+# 3. 任意のフォルダに展開（例: C:\Users\User\Desktop\稲ゼミ\p11_fukuoka\）
+# 4. 展開された .shp の絶対パスを控える
+
+# pyshp 依存をインストール
+pip install pyshp
+```
+
+### 基本的な使い方
+
+```powershell
+python skills\gtfs-jp-creator\scripts\enrich_stops_p11.py `
+  test_demo\kogashi_gtfs_output\stops.txt `
+  --p11 "$HOME\Desktop\稲ゼミ\p11_fukuoka\P11-24_40-jgd_BusStop.shp" `
+  --bbox "130.42,33.67,130.52,33.76" `
+  -o test_demo\kogashi_gtfs_output\stops.p11.txt
+```
+
+### 出力
+
+| ファイル | 説明 |
+|---|---|
+| `stops.p11.txt` | P11 で補完済み stops.txt |
+| `p11_enrichment_report.json` | マッチ詳細（exact/prefix/substring/fuzzy 内訳）|
+
+### Step 3.5 の組み合わせ運用（古賀市の例）
+
+旧フィードと P11 と Nominatim を順に重ねる完全版：
+
+```powershell
+# 1. 旧フィードから再利用（あれば最強）
+python skills\gtfs-jp-creator\scripts\merge_stop_coords.py `
+  test_demo\kogashi_gtfs_output\stops.txt `
+  --reference "$HOME\Desktop\稲ゼミ\260211kogabus_gtfs-jp.zip" `
+  -o test_demo\kogashi_gtfs_output\stops.merged.txt
+
+# 2. 旧フィードでカバーできなかった stop を P11 で補完
+python skills\gtfs-jp-creator\scripts\enrich_stops_p11.py `
+  test_demo\kogashi_gtfs_output\stops.merged.txt `
+  --p11 "$HOME\Desktop\稲ゼミ\p11_fukuoka\P11-24_40-jgd_BusStop.shp" `
+  --bbox "130.42,33.67,130.52,33.76" `
+  -o test_demo\kogashi_gtfs_output\stops.p11.txt
+
+# 3. それでも残ったものを Nominatim で（必要な場合のみ）
+python skills\gtfs-jp-creator\scripts\enrich_stops.py `
+  test_demo\kogashi_gtfs_output\stops.p11.txt `
+  --context "福岡県" `
+  --bbox "130.42,33.67,130.52,33.76" `
+  -o test_demo\kogashi_gtfs_output\stops.final.txt
+```
+
+→ 最終 `stops.final.txt` を Step 4 (shapes生成) と Step 5 (zip化) で使用。
+
+### 想定精度
+
+| 自治体 | 旧フィード | + P11 | + Nominatim | 合計 |
+|---|---|---|---|---|
+| 須恵町（旧フィードなし）| 0% | 85-95% | +0-5% | **90%+** |
+| 古賀市（旧フィードあり）| 100% | — | — | 100% |
+| 新規自治体（旧フィードなし）| 0% | 80-95% | +5-10% | **90%+** |
+
+### 失敗時の対処
+
+| 症状 | 対処 |
+|---|---|
+| `pyshp が必要です` | `pip install pyshp` |
+| `P11 名前フィールドが見つかりません` | Shapefile のバージョン違い。 `--p11` のパスとフィールド名を確認 |
+| カバレッジが低い | bbox を広げる、fuzzy threshold を下げる（`--fuzzy-threshold 0.7`）|
+| マッチが緩すぎる | fuzzy threshold を上げる（`--fuzzy-threshold 0.9`）|
+
 ## 緯度経度補完ガイド（Step 3.5）
 
 PDF からは取得できない `stop_lat`/`stop_lon` を外部APIで補完するスクリプト `enrich_stops.py` を提供します。OSRM による shapes.txt 生成（Step 4）の前提条件です。
@@ -411,6 +539,108 @@ python skills\gtfs-jp-creator\scripts\enrich_stops.py `
 | v0.2 | 国土地理院 AddressSearch をフォールバック追加 |
 | v0.3 | 国土数値情報 P11（オフライン・高精度・全国網羅） |
 | v1.0 | LLM ベースの曖昧表記正規化 |
+
+## shapes.txt 生成ガイド（Step 4）
+
+PDF にない **実走行経路（lat/lon 点列）** を OSRM の routing API（/route）で自動生成するスクリプト `generate_shapes.py` を提供します。Step 3.5 で補完した stops.txt を入力とし、`shapes.txt` を出力します。
+
+### 設計概要
+
+| 項目 | 内容 |
+|---|---|
+| 主バックエンド | OSRM 公開デモサーバー (`https://router.project-osrm.org/route/v1/driving/`) |
+| フォールバック | OSRM 失敗時は停留所間を直線で結ぶ簡易 shape |
+| パターンユニーク化 | 同じ stop_id 列を通る trip は同じ shape を共有（API 呼び出し削減）|
+| 累積距離 | Haversine 公式で `shape_dist_traveled` を自動計算 |
+| キャッシュ | パターン単位の JSON キャッシュで再実行を高速化 |
+| エンコーディング | UTF-8 with BOM + CRLF（GTFS仕様） |
+
+詳細は `shapes生成設計書_v1.md` を参照。
+
+### 基本的な使い方
+
+```powershell
+python skills\gtfs-jp-creator\scripts\generate_shapes.py `
+  test_demo\gtfs_output\stops.txt `
+  test_demo\gtfs_output\stop_times.txt `
+  test_demo\gtfs_output\trips.txt `
+  -o test_demo\gtfs_output\shapes.txt `
+  --update-trips test_demo\gtfs_output\trips.with_shapes.txt
+```
+
+### 出力ファイル
+
+| ファイル | 説明 |
+|---|---|
+| `shapes.txt` | GTFS 標準の shapes ファイル（`shape_id, lat, lon, sequence, dist_traveled`）|
+| `trips.with_shapes.txt` | `shape_id` カラムが付与された trips（`--update-trips` 指定時のみ）|
+| `shapes_cache.json` | パターンキャッシュ（次回実行で再利用）|
+| `shapes_report.json` | 統計レポート |
+
+### サマリ出力例
+
+```
+================================================================
+SHAPES REPORT
+================================================================
+Total trips:              42
+Unique patterns:          8
+Trips with shape_id:      42
+Trips skipped (座標不足):  0
+OSRM success:             5
+OSRM failed → fallback:   3
+Cache hits:               0
+API calls:                8
+Elapsed:                  12.5 sec
+================================================================
+```
+
+### OSRM を使わない（オフライン直線のみ）
+
+OSRM 公開サーバーが落ちている / 商用利用で外部 API を避けたい場合：
+
+```powershell
+python skills\gtfs-jp-creator\scripts\generate_shapes.py `
+  ... --no-osrm
+```
+
+→ すべての shape を停留所間の直線で生成。精度は落ちるが GTFS としては有効。
+
+### 座標が欠落している stops への対処
+
+Step 3.5 で補完できなかった停留所は、shape 生成時にスキップされます：
+
+- `stops.txt` に座標がある stop は OSRM / 直線フォールバックで利用
+- 座標欠落の stop はスキップ（位置不明として扱う）
+- 残った座標が 2 点未満になった trip は **shape をスキップ**（レポートに件数を記録）
+
+→ shape の品質は **Step 3.5 の補完率に直結**。Phase 1.2（国土数値情報 P11）で補完率が上がれば、shapes.txt の完成度も上がる依存関係。
+
+### 自前 OSRM サーバーを使う
+
+公開デモサーバーは個人利用向けで、商用・大規模利用には自前で OSRM を立てる必要があります：
+
+```powershell
+python skills\gtfs-jp-creator\scripts\generate_shapes.py `
+  ... --osrm-url "https://my-osrm.example.com/route/v1/driving"
+```
+
+### 失敗時の対処
+
+| 症状 | 対処 |
+|---|---|
+| `Error: 座標を持つ stops が0件です` | Step 3.5（enrich_stops.py）を先に実行 |
+| OSRM が `code: "NoMatch"` を返す | 直線フォールバックされる。問題なし |
+| HTTP 429 Too Many Requests | `--rate 2.0` で間隔を広げる |
+| shapes.txt が空 | trips に `shape_id` が振られないので地図表示できない。Step 3.5 改善が必要 |
+
+### Phase 1.x ロードマップ
+
+| Phase | 内容 |
+|---|---|
+| v0.1（本実装）| OSRM デモサーバー + 直線フォールバック + パターン共有 |
+| v0.2 | 自前 OSRM サーバー対応の検証、半径パラメータの調整 |
+| v0.3 | OSM 道路網がない地域での警告と代替戦略 |
 
 ## 複数LLM対応ガイド（Claude / ChatGPT / Gemini）
 
@@ -537,11 +767,53 @@ scripts/llm_extract.py
 
 → これが入れば、コマンド1本で Step 1-5 を完走できる。
 
+## 精度評価ガイド（trip-aligned diff）
+
+生成した GTFS-JP を公式フィードと比較して **stop_times の真の精度** を測る `analyze_stop_times_diff.py` を提供します。
+
+### なぜ専用ツールが必要か
+
+`eval_compare.py` は (停留所名, 時刻) ペアの **集合比較** を行いますが、停留所名の表記揺れや時刻フォーマットの差で精度が **過小評価** されます（古賀市実証：集合比較 71.9% に対し、本ツールでは 99.7%）。
+
+`analyze_stop_times_diff.py` は **trip（便）単位で対応付け** て比較します：
+
+1. 各 trip の「最初の停留所の (名前, 時刻)」をシグネチャとして1対1対応付け
+2. 対応した trip ごとに stop_sequence の各行で時刻・停留所名を比較
+3. 真の時刻誤差／名前不一致／余分・欠落を分けて集計
+
+### 使い方
+
+```powershell
+python skills\gtfs-jp-creator\scripts\analyze_stop_times_diff.py `
+  --official "C:\path\to\official_gtfs.zip" `
+  --ours test_demo\kogashi_gtfs_v3 `
+  -o test_demo\trip_aligned_report.md `
+  --json test_demo\trip_aligned_report.json
+```
+
+### 出力例（古賀市実証）
+
+```
+================================================================
+TRIP-ALIGNED STOP_TIMES DIFF
+================================================================
+  公式 trips:                36
+  当方 trips:                36
+  マッチした trip ペア:       36
+  比較した行数:               342
+  時刻一致:                  341 / 342 = 99.71%
+  時刻不一致:                 1
+  停留所名不一致:             0
+================================================================
+```
+
+→ 集合比較 71.9% は測定手法の弱点による錯覚で、**真の Step 2（LLM）精度は 99.7%** であることが定量化できます。
+
 ## 必要環境
 
 - Python 3.10以上
 - Java 11以上のJRE（GTFS Validator実行用）
-- インターネット接続（OSRM map-matching API利用時、MinerU初回モデルDL用）
+- インターネット接続（OSRM routing API利用時、MinerU初回モデルDL用）
 - 推奨: Cowork mode（Claude desktop app）
 
 ### Step 1 エンジン別の追加要件
