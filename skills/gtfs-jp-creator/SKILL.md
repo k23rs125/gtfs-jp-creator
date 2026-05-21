@@ -16,17 +16,27 @@ description: Use this skill when the user wants to create, generate, validate, o
 - 「GTFS自動生成」「GTFSデータ作成」というキーワードを含む質問
 - 既存のGTFSデータの **検証・修正** を依頼された場合
 
-## 全体ワークフロー（6ステップ）
+## 全体ワークフロー
 
 ```
-[Step 1]   PDF/画像/Excel  →  Markdown 抽出（エンジン選択可：pymupdf4llm or MinerU）
-[Step 2]   Markdown        →  構造化テーブル（中間表現 JSON）
-[Step 3]   構造化テーブル   →  GTFS-JP の各CSVファイル
-[Step 3.5] stops.txt       →  緯度経度補完（Nominatim API、Step 4 の前提）
-[Step 4]   stop_times      →  shapes.txt 生成（OSRM map-matching）
-[Step 5]   全ファイル群     →  バリデーション（GTFS Validator + 拡張独自チェック）
-                             →  zip パッケージ → 完成
+[Step 1]    PDF/画像/Excel  →  Markdown 抽出（エンジン選択可：pymupdf4llm or MinerU）
+[Step 2]    Markdown        →  構造化中間表現 JSON（LLM：Claude / ChatGPT / Gemini）
+[Step 3]    JSON            →  GTFS-JP の各CSVファイル
+[Step 3.5a] stops.txt       →  緯度経度補完：旧GTFS-JPフィードから再利用
+[Step 3.5b] stops.txt       →  緯度経度補完：国土数値情報 P11
+[Step 3.5c] stops.txt       →  緯度経度補完：Nominatim（OSM）フォールバック
+[Step 3.x]  stops.txt       →  停留所名の表記揺れ正規化（canonicalize）
+[Step 4]    stop_times      →  shapes.txt 生成（OSRM routing /route）
+[Step 6]    stops/routes    →  translations.txt 生成（ja / ja-Hrkt / en）
+[Step 5]    全ファイル群     →  zip パッケージング
+[Step 7]    zip             →  バリデーション（MobilityData GTFS Validator）
 ```
+
+**Step 3 以降は `scripts/run_pipeline.py` で一括自動実行できる**（config JSON 1枚で
+Step 3〜7 をオーケストレーション）。Step 1（PDF抽出）と Step 2（LLM）は個別に実施する。
+
+緯度経度補完（Step 3.5）は **3段階の階層** で動く：旧フィードがあれば 3.5a で 100%、
+無ければ 3.5b の国土数値情報 P11 で 80〜95%、残りを 3.5c の Nominatim で補う。
 
 ## 各ステップの詳細
 
@@ -60,53 +70,93 @@ python scripts/pdf_to_markdown.py timetable.pdf --engine mineru --lang japan -o 
 
 LLMプロンプト: `references/prompts/01_pdf_extraction.md`
 
-### Step 2: Markdown → 構造化テーブル
+### Step 2: Markdown → 構造化中間表現 JSON
 
 - LLMが Markdown を解析し、JSON形式の中間表現を生成
 - LLMプロンプト: `references/prompts/02_structured_extraction.md`
+- **対応 LLM**: Claude（Skill 自動）/ ChatGPT / Gemini（プロンプトをコピペ）
+- Markdown と JSON の2つの中間表現を挟む理由は `Markdown_JSON_設計説明書` を参照
+- スキーマには `calendar_dates` / `fare_attributes` / `fare_rules` も含む
+  （PDF に運休日・運賃の記載があれば抽出）
 
 ### Step 3: GTFS-JPファイル生成
 
 - スクリプト: `scripts/generate_gtfs_files.py`
 - 仕様: `references/gtfs-jp-spec-v4.0-summary.md` および `references/field-definitions/`
-- 主要ファイル:
-  - `agency.txt` / `agency_jp.txt`
-  - `routes.txt` / `routes_jp.txt`
-  - `stops.txt`
-  - `trips.txt` / `stop_times.txt`
-  - `calendar.txt` / `calendar_dates.txt`
-  - `fare_attributes.txt` / `fare_rules.txt`
-  - `office_jp.txt` / `pattern_jp.txt`
-  - `feed_info.txt` / `translations.txt`
+- 生成ファイル: `agency.txt` `routes.txt` `routes_jp.txt` `stops.txt` `trips.txt`
+  `stop_times.txt` `calendar.txt` `calendar_dates.txt` `fare_attributes.txt`
+  `fare_rules.txt` `feed_info.txt`
+- `calendar.end_date` が未指定なら start_date から日本の年度末を自動計算
+
+### Step 3.5: 緯度経度補完（3段階階層）
+
+stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に：
+
+- **3.5a** `scripts/merge_stop_coords.py` — 旧 GTFS-JP フィードから停留所名マッチで
+  座標を再利用。再作成タスクなら 100% 補完。
+- **3.5b** `scripts/enrich_stops_p11.py` — 国土数値情報 P11（国交省バス停データ）から
+  fuzzy マッチで補完。新規自治体でも 80〜95%。
+- **3.5c** `scripts/enrich_stops.py` — Nominatim（OSM）フォールバック。bbox + 県/市町村
+  フィルタで誤マッチを排除（補完率は低めだが「正しく失敗」する）。
+
+### Step 3.x: 停留所名の正規化
+
+- スクリプト: `scripts/canonicalize_stops.py`
+- 参照フィードから canonical な停留所名表記を引き当て、表記揺れ（「JR」接頭辞、
+  「(駅前広場)」接尾辞、「」括弧など）を吸収する。
 
 ### Step 4: shapes.txt 生成
 
 - スクリプト: `scripts/generate_shapes.py`
-- 戦略: OSRM map-matching API を使い、停留所列から最尤経路を推定
-- フォールバック: map-matchingが失敗した場合は停留所間直線結合
+- 戦略: OSRM routing API（`/route`）で停留所間の道路経路を取得
+  - 停留所は確定ウェイポイントなので map-matching ではなく routing が正しい
+- フォールバック: OSRM が使えない場合は停留所間を直線結合
+- 同じ停留所列の trip はパターン共有して API 呼び出しを削減
 
-### Step 5: バリデーション
+### Step 6: translations.txt 生成
 
-- スクリプト: `scripts/validate_gtfs.py`（MobilityData GTFS Validator のラッパー）
-- スクリプト: `scripts/validate_gtfs_jp_extensions.py`（GTFS-JP拡張部の独自チェック）
-- 必要環境: Java 11以上のJRE
+- スクリプト: `scripts/generate_translations.py`
+- 3言語対応: `ja`（原文）/ `ja-Hrkt`（pykakasi で漢字→ひらがな）/ `en`（LLM 英訳）
+- 2段階構成: 抽出フェーズで LLM 用プロンプトを export → 英訳 JSON を merge
 
-### 最終: パッケージング
+### Step 5: パッケージング
 
 - スクリプト: `scripts/package_gtfs_zip.py`
-- 出力: `feed_<事業者名>_<生成日時>.zip`
+- `--substitute` で座標入り stops.txt や shape_id 付き trips.txt を差し替え梱包
+- 出力: `<事業者名>_gtfs-jp.zip`
+
+### Step 7: バリデーション
+
+- スクリプト: `scripts/validate_gtfs.py`（MobilityData GTFS Validator のラッパー）
+- 必要環境: Java 11以上のJRE + `gtfs-validator-cli.jar`（`tools/` に配置）
+- ERROR / WARNING / INFO を severity 別に集計してサマリ表示
+
+### ワンコマンド実行
+
+- スクリプト: `scripts/run_pipeline.py`
+- config JSON 1枚で Step 3〜7 を一括オーケストレーション
+- `--dry-run` で実行計画のプレビュー可能
+
+### 精度評価（任意）
+
+- `scripts/eval_compare.py` — 公式フィードとの集合比較（routes/stops/stop_times）
+- `scripts/analyze_stop_times_diff.py` — trip 単位対応付けで時刻の真の精度を測定
 
 ## 必要環境
 
 - Python 3.10以上
-- Java 11以上のJRE（GTFS Validator実行用）
-- インターネット接続（OSRM API・MinerU初回モデルDL用）
+- Java 11以上のJRE（Step 7 GTFS Validator実行用）
+- インターネット接続（Step 4 OSRM API・Step 3.5c Nominatim・MinerU初回モデルDL用）
 - 推奨実行環境: Cowork mode（Claude desktop app）
 
-### Step 1 エンジン別の追加要件
+### ステップ別の追加要件
 
-- **pymupdf4llm**（default）: `pip install pymupdf pymupdf4llm`
-- **mineru**（opt-in、装飾PDF用）: `pip install -U "mineru[core]"`（初回 ~3GB のMLモデルDLあり）
+- **Step 1 pymupdf4llm**（default）: `pip install pymupdf pymupdf4llm`
+- **Step 1 mineru**（opt-in、装飾PDF用）: `pip install -U "mineru[core]"`（初回 ~3GB のMLモデルDLあり）
+- **Step 3.5b P11**: `pip install pyshp` + 国土数値情報 P11 Shapefile（都道府県別 DL）
+- **Step 6 translations**: `pip install pykakasi`（ja-Hrkt 生成用）
+- **Step 7 Validator**: `gtfs-validator-cli.jar` を `tools/` に配置
+  （https://github.com/MobilityData/gtfs-validator/releases から DL）
 
 ## 参考資料
 
