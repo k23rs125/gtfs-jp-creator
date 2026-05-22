@@ -21,7 +21,8 @@ description: Use this skill when the user wants to create, generate, validate, o
 ```
 [Step 1]    PDF/画像/Excel  →  Markdown 抽出（エンジン選択可：pymupdf4llm or MinerU）
 [Step 2]    Markdown        →  構造化中間表現 JSON（LLM：Claude / ChatGPT / Gemini）
-[Step 3]    JSON            →  GTFS-JP の各CSVファイル
+[条件確認]   JSON            →  条件確認サマリを提示し、要入力項目をユーザーが補完
+[Step 3]    JSON            →  GTFS-JP の各CSVファイル（JP拡張 agency_jp/office_jp 含む）
 [Step 3.5a] stops.txt       →  緯度経度補完：旧GTFS-JPフィードから再利用
 [Step 3.5b] stops.txt       →  緯度経度補完：国土数値情報 P11
 [Step 3.5c] stops.txt       →  緯度経度補完：Nominatim（OSM）フォールバック
@@ -29,8 +30,14 @@ description: Use this skill when the user wants to create, generate, validate, o
 [Step 4]    stop_times      →  shapes.txt 生成（OSRM routing /route）
 [Step 6]    stops/routes    →  translations.txt 生成（ja / ja-Hrkt / en）
 [Step 5]    全ファイル群     →  zip パッケージング
-[Step 7]    zip             →  バリデーション（MobilityData GTFS Validator）
+[Step 7]    zip             →  バリデーション（GTFS Validator + JP拡張独自検証）
 ```
+
+**条件確認（Step 2 と Step 3 の間）**：PDF から取れない事業者情報（住所・
+正式名称など）は、Step 2 完了時に `scripts/condition_summary.py` で
+「条件確認サマリ」として一覧提示する。各項目を 🟦自動検出 / 🟨自動補完 /
+🟧要入力 の3分類で示し、ユーザーは 🟧 をまとめて補完してから生成へ進む。
+逐次質問を避け、確認を1回に集約する設計（`画面操作フロー設計_v2.md`）。
 
 **Step 3 以降は `scripts/run_pipeline.py` で一括自動実行できる**（config JSON 1枚で
 Step 3〜7 をオーケストレーション）。Step 1（PDF抽出）と Step 2（LLM）は個別に実施する。
@@ -76,16 +83,29 @@ LLMプロンプト: `references/prompts/01_pdf_extraction.md`
 - LLMプロンプト: `references/prompts/02_structured_extraction.md`
 - **対応 LLM**: Claude（Skill 自動）/ ChatGPT / Gemini（プロンプトをコピペ）
 - Markdown と JSON の2つの中間表現を挟む理由は `Markdown_JSON_設計説明書` を参照
-- スキーマには `calendar_dates` / `fare_attributes` / `fare_rules` も含む
-  （PDF に運休日・運賃の記載があれば抽出）
+- スキーマには `calendar_dates` / `fare_attributes` / `fare_rules` のほか、
+  GTFS-JP拡張の `agency_jp` / `office_jp` も含む
+  （PDF に運休日・運賃の記載があれば抽出。事業者情報は条件確認で補完）
+
+### 条件確認画面
+
+- スクリプト: `scripts/condition_summary.py`
+- Step 2 出力 JSON から「条件確認サマリ」（Markdown）を生成し、全項目を
+  🟦自動検出 / 🟨自動補完 / 🟧要入力 に分類して一覧提示する。
+- ユーザーが補完した値は中間 JSON の `_meta.user_overrides` に
+  `"table.field"` 形式（例 `agency_jp.agency_zip_number`）で書き戻す。
+  対応テーブル: `agency` / `agency_jp` / `feed_info`。
+- 設計の詳細は `画面操作フロー設計_v2.md` を参照。
 
 ### Step 3: GTFS-JPファイル生成
 
 - スクリプト: `scripts/generate_gtfs_files.py`
 - 仕様: `references/gtfs-jp-spec-v4.0-summary.md` および `references/field-definitions/`
-- 生成ファイル: `agency.txt` `routes.txt` `routes_jp.txt` `stops.txt` `trips.txt`
-  `stop_times.txt` `calendar.txt` `calendar_dates.txt` `fare_attributes.txt`
-  `fare_rules.txt` `feed_info.txt`
+- 生成ファイル: `agency.txt` `agency_jp.txt`（JP拡張・必須）`routes.txt`
+  `routes_jp.txt` `stops.txt` `trips.txt` `stop_times.txt` `calendar.txt`
+  `calendar_dates.txt` `fare_attributes.txt` `fare_rules.txt` `feed_info.txt`
+- `office_jp.txt`（JP拡張・任意）は `office_jp` セクションがある場合のみ生成
+- 生成前に `_meta.user_overrides`（条件確認画面の補完値）を最終値へ反映
 - `calendar.end_date` が未指定なら start_date から日本の年度末を自動計算
 
 ### Step 3.5: 緯度経度補完（3段階階層）
@@ -128,8 +148,12 @@ stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に
 ### Step 7: バリデーション
 
 - スクリプト: `scripts/validate_gtfs.py`（MobilityData GTFS Validator のラッパー）
-- 必要環境: Java 11以上のJRE + `gtfs-validator-cli.jar`（`tools/` に配置）
+- 必要環境: Java 17以上のJRE + `gtfs-validator-cli.jar`（`tools/` に配置）
 - ERROR / WARNING / INFO を severity 別に集計してサマリ表示
+- **JP拡張の独自検証**: `scripts/validate_gtfs_jp_extensions.py`
+  - MobilityData Validator は GTFS-JP拡張（agency_jp/office_jp/pattern_jp/
+    routes_jp）に未対応のため、本スクリプトで必須カラム・参照整合性
+    （agency_id/route_id）・値域（郵便番号形式・direction_id）を検証する
 
 ### ワンコマンド実行
 
@@ -145,7 +169,7 @@ stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に
 ## 必要環境
 
 - Python 3.10以上
-- Java 11以上のJRE（Step 7 GTFS Validator実行用）
+- Java 17以上のJRE（Step 7 GTFS Validator v8 系の実行に必要）
 - インターネット接続（Step 4 OSRM API・Step 3.5c Nominatim・MinerU初回モデルDL用）
 - 推奨実行環境: Cowork mode（Claude desktop app）
 

@@ -263,3 +263,13 @@ test_demo_csv.zip
 test_output_gtfs/
 test_mineru_output/
 test_suetown.md
+
+# P11 / shapes / translations の実行時レポート・キャッシュ（再生成可能）
+p11_enrichment_report.json
+shapes_cache.json
+shapes_report.json
+translations_report.json
+
+# GTFS Validator 本体（サイズが大きいので含めない。各自 DL して tools/ に配置）
+*.jar
+skills/gtfs-jp-creator/tools/

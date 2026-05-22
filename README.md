@@ -27,6 +27,7 @@ gtfs-jp-creator/                       # プラグイン＆マーケットプレ
 │       │   └── prompts/               # LLM用プロンプト集
 │       ├── scripts/                   # 実行スクリプト群
 │       │   ├── pdf_to_markdown.py             # Step 1:   PDF→Markdown
+│       │   ├── condition_summary.py           # 条件確認:  要入力項目のサマリ生成
 │       │   ├── generate_gtfs_files.py         # Step 3:   JSON→GTFS-JP CSV
 │       │   ├── merge_stop_coords.py           # Step 3.5a: 旧フィードから座標再利用
 │       │   ├── enrich_stops_p11.py            # Step 3.5b: 国土数値情報 P11 で座標補完
@@ -36,6 +37,7 @@ gtfs-jp-creator/                       # プラグイン＆マーケットプレ
 │       │   ├── generate_translations.py       # Step 6:   translations.txt生成 (3言語)
 │       │   ├── package_gtfs_zip.py            # Step 5:   zipパッケージング
 │       │   ├── validate_gtfs.py               # Step 7:   GTFS Validator実行
+│       │   ├── validate_gtfs_jp_extensions.py # Step 7b:  GTFS-JP拡張の独自検証
 │       │   ├── run_pipeline.py                # ワンコマンド: Step 3〜7 を一括実行
 │       │   ├── eval_compare.py                # 精度評価: 公式フィードとの集合比較
 │       │   └── analyze_stop_times_diff.py     # 精度評価: trip単位の時刻 diff
@@ -132,6 +134,21 @@ notepad test_demo\extracted.json
 
 詳細：[`## 複数LLM対応ガイド`](#複数llm対応ガイドclaude--chatgpt--gemini)
 
+### 条件確認: 要入力項目のサマリを確認
+
+Step 2 の JSON から「条件確認サマリ」を生成し、PDF から取れない項目
+（事業者の住所・正式名称など）を一覧で確認します。
+
+```powershell
+python skills\gtfs-jp-creator\scripts\condition_summary.py `
+  test_demo\extracted.json
+```
+
+→ 各項目が 🟦自動検出 / 🟨自動補完 / 🟧要入力 に分類して表示されます。
+🟧 の値は、JSON の `_meta.user_overrides` に `"table.field"` 形式
+（例 `"agency_jp.agency_zip_number": "811-2192"`）で追記してから Step 3 に進むと、
+生成時に自動で反映されます。対応テーブルは `agency` / `agency_jp` / `feed_info`。
+
 ### Step 3: JSON → CSV（決定的・LLM 不要）
 
 ```powershell
@@ -140,7 +157,11 @@ python skills\gtfs-jp-creator\scripts\generate_gtfs_files.py `
   -o test_demo\gtfs_output
 ```
 
-→ `test_demo\gtfs_output\` に GTFS-JP 8 ファイル（`agency.txt`, `routes.txt`, `stops.txt`, `trips.txt`, `stop_times.txt`, `calendar.txt`, `feed_info.txt`, `routes_jp.txt`）が生成されます。
+→ `test_demo\gtfs_output\` に GTFS-JP の各ファイル（`agency.txt`,
+`agency_jp.txt`, `routes.txt`, `routes_jp.txt`, `stops.txt`, `trips.txt`,
+`stop_times.txt`, `calendar.txt`, `feed_info.txt` ほか、PDF に運賃・運休日が
+あれば `fare_*`・`calendar_dates.txt`、営業所情報があれば `office_jp.txt`）が
+生成されます。
 
 > 🔑 **なぜ LLM ではなく Python で CSV を作るのか**：LLM だと長い CSV の末尾省略や、8 ファイル相互参照（`trips.route_id` ↔ `routes.route_id` など）の整合性破綻が起きます。Python による決定的変換で、エンコーディング（UTF-8 with BOM + CRLF）も含めて GTFS 仕様準拠を保証します。詳細は `Markdown_JSON_設計説明書_v1.md` を参照。
 

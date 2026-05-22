@@ -11,20 +11,30 @@ Input:
 Output:
     指定ディレクトリに以下の CSV ファイルを生成:
         agency.txt          (GTFS必須)
+        agency_jp.txt       (GTFS-JP拡張・必須)
         routes.txt          (GTFS必須)
         routes_jp.txt       (GTFS-JP拡張)
         stops.txt           (GTFS必須)
         trips.txt           (GTFS必須)
         stop_times.txt      (GTFS必須)
         calendar.txt        (GTFS必須)
+        calendar_dates.txt  (任意・PDFに記載があれば)
+        fare_attributes.txt (任意・PDFに記載があれば)
+        fare_rules.txt      (任意・PDFに記載があれば)
         feed_info.txt       (GTFS-JP必須)
+        office_jp.txt       (GTFS-JP拡張・任意・営業所情報があれば)
 
 Encoding:
     UTF-8 with BOM, CRLF line endings (GTFS仕様で許容される形式)
 
+条件確認画面との連携:
+    入力 JSON の `_meta.user_overrides`（"table.field" 形式のキー）に
+    ユーザーが条件確認画面で上書きした値があれば、生成前に最終値へ反映する。
+    対象テーブル: agency / agency_jp / feed_info。
+
 Status:
-    Phase 1 — 国際標準 GTFS と GTFS-JP の最低限の拡張に対応。
-    agency_jp.txt / office_jp.txt / pattern_jp.txt は将来対応。
+    Phase 1.1 — 国際標準 GTFS に加え、GTFS-JP 拡張 (agency_jp / office_jp /
+    routes_jp) と条件確認画面の user_overrides に対応。pattern_jp.txt は将来対応。
 
 Usage:
     python generate_gtfs_files.py <input.json> -o <output_dir>
@@ -93,6 +103,43 @@ def write_csv(output_path: Path, rows: list[dict], fieldnames: list[str]) -> Non
 
 
 # ----------------------------------------------------------------------
+# 条件確認画面からの上書き反映
+# ----------------------------------------------------------------------
+
+# user_overrides を反映できるテーブル（いずれも単一レコードのセクション）
+OVERRIDABLE_TABLES = {"agency", "agency_jp", "feed_info"}
+
+
+def apply_user_overrides(data: dict) -> list[str]:
+    """`_meta.user_overrides` を中間表現の最終値に反映する。
+
+    条件確認画面（v2 設計）でユーザーが上書きした値は、
+    `_meta.user_overrides` に "table.field" 形式のキーで格納される。
+    例: {"agency.agency_url": "https://...", "agency_jp.agency_zip_number": "811-2192"}
+
+    Returns: 反映したキーの一覧（ログ表示用）。
+    """
+    overrides = (data.get("_meta") or {}).get("user_overrides") or {}
+    applied: list[str] = []
+    for key, value in overrides.items():
+        if "." not in key:
+            print(f"[WARN] user_overrides: 不正なキー形式 '{key}' をスキップ", file=sys.stderr)
+            continue
+        table, field = key.split(".", 1)
+        if table not in OVERRIDABLE_TABLES:
+            print(f"[WARN] user_overrides: 未対応テーブル '{table}' をスキップ "
+                  f"(対応: {sorted(OVERRIDABLE_TABLES)})", file=sys.stderr)
+            continue
+        section = data.get(table)
+        if not isinstance(section, dict):
+            section = {}
+            data[table] = section
+        section[field] = value
+        applied.append(key)
+    return applied
+
+
+# ----------------------------------------------------------------------
 # 各ファイル生成関数
 # ----------------------------------------------------------------------
 
@@ -117,6 +164,65 @@ def generate_agency(data: dict, output_dir: Path) -> str:
     ]
     write_csv(output_dir / "agency.txt", [row], fieldnames)
     return agency_id
+
+
+def generate_agency_jp(data: dict, output_dir: Path, default_agency_id: str) -> None:
+    """agency_jp.txt を生成 (GTFS-JP 拡張・必須)。
+
+    事業者の日本固有情報（正式名称・住所・代表者など）。
+    PDF からは取得できない値が多く、条件確認画面でユーザーが入力する。
+    未入力の項目は空欄のまま出力する（GTFS-JP ファイル自体は必ず生成）。
+    """
+    aj = data.get("agency_jp") or {}
+    ag = data.get("agency") or {}
+
+    # 後方互換: 旧スキーマでは agency_jp 系の項目が agency に直接入っていた
+    def pick(key: str) -> str:
+        return aj.get(key) or ag.get(key) or ""
+
+    row = {
+        "agency_id": aj.get("agency_id") or default_agency_id,
+        "agency_official_name": pick("agency_official_name"),
+        "agency_zip_number": pick("agency_zip_number"),
+        "agency_address": pick("agency_address"),
+        "agency_president_pos": pick("agency_president_pos"),
+        "agency_president_name": pick("agency_president_name"),
+    }
+    fieldnames = [
+        "agency_id", "agency_official_name", "agency_zip_number",
+        "agency_address", "agency_president_pos", "agency_president_name",
+    ]
+    write_csv(output_dir / "agency_jp.txt", [row], fieldnames)
+
+
+def generate_office_jp(data: dict, output_dir: Path) -> bool:
+    """office_jp.txt を生成 (GTFS-JP 拡張・任意)。
+
+    営業所情報。`office_jp` セクションがある場合のみ生成する。
+    単一の dict でも、複数営業所の list でも受け付ける。
+
+    Returns: 生成したら True、営業所情報が無くスキップしたら False。
+    """
+    offices = data.get("office_jp")
+    if not offices:
+        return False
+    if isinstance(offices, dict):
+        offices = [offices]
+    rows = []
+    for i, o in enumerate(offices, start=1):
+        if not isinstance(o, dict):
+            continue
+        rows.append({
+            "office_id": o.get("office_id") or f"OFFICE{i:02d}",
+            "office_name": o.get("office_name") or "",
+            "office_url": o.get("office_url") or "",
+            "office_phone": o.get("office_phone") or "",
+        })
+    if not rows:
+        return False
+    fieldnames = ["office_id", "office_name", "office_url", "office_phone"]
+    write_csv(output_dir / "office_jp.txt", rows, fieldnames)
+    return True
 
 
 def generate_routes(data: dict, output_dir: Path, default_agency_id: str) -> None:
@@ -316,16 +422,23 @@ def generate_fare_rules(data: dict, output_dir: Path) -> None:
 
 
 def generate_feed_info(data: dict, output_dir: Path) -> None:
-    """feed_info.txt を生成 (GTFS-JP では必須扱い)。"""
+    """feed_info.txt を生成 (GTFS-JP では必須扱い)。
+
+    `feed_info` セクション（条件確認画面でユーザーが入力・上書き可能）が
+    あればその値を優先し、無ければ agency 情報から既定値を導出する。
+    """
     agency = data["agency"]
+    fi = data.get("feed_info") or {}
     today = datetime.now().strftime("%Y%m%d")
     row = {
-        "feed_publisher_name": agency.get("agency_name") or "Unknown Publisher",
-        "feed_publisher_url": agency.get("agency_url") or PLACEHOLDER_URL,
+        "feed_publisher_name": fi.get("feed_publisher_name")
+        or agency.get("agency_name") or "Unknown Publisher",
+        "feed_publisher_url": fi.get("feed_publisher_url")
+        or agency.get("agency_url") or PLACEHOLDER_URL,
         "feed_lang": DEFAULT_LANG,
-        "feed_start_date": "",
-        "feed_end_date": "",
-        "feed_version": today,
+        "feed_start_date": fi.get("feed_start_date") or "",
+        "feed_end_date": fi.get("feed_end_date") or "",
+        "feed_version": fi.get("feed_version") or today,
     }
     fieldnames = [
         "feed_publisher_name", "feed_publisher_url", "feed_lang",
@@ -386,18 +499,27 @@ def main():
         print(f"Error: 必須キーが不足: {missing}", file=sys.stderr)
         sys.exit(3)
 
+    # 条件確認画面でユーザーが上書きした値を反映
+    applied = apply_user_overrides(data)
+    if applied:
+        print(f"[INFO] 条件確認の上書きを {len(applied)} 件反映: "
+              f"{', '.join(applied)}", file=sys.stderr)
+
     # ファイル生成
     agency_id = generate_agency(data, output_dir)
+    generate_agency_jp(data, output_dir, agency_id)     # GTFS-JP拡張・必須
     generate_routes(data, output_dir, agency_id)
     generate_routes_jp(data, output_dir)
     generate_stops(data, output_dir)
     generate_trips(data, output_dir)
     generate_stop_times(data, output_dir)
     generate_calendar(data, output_dir)
-    generate_calendar_dates(data, output_dir)          # NEW: 例外日
-    generate_fare_attributes(data, output_dir, agency_id)  # NEW: 運賃
-    generate_fare_rules(data, output_dir)              # NEW: 運賃ルール
+    generate_calendar_dates(data, output_dir)          # 例外日
+    generate_fare_attributes(data, output_dir, agency_id)  # 運賃
+    generate_fare_rules(data, output_dir)              # 運賃ルール
     generate_feed_info(data, output_dir)
+    if generate_office_jp(data, output_dir):           # GTFS-JP拡張・任意
+        print("[INFO] office_jp.txt を生成しました（営業所情報あり）", file=sys.stderr)
 
     print_stats(output_dir)
 
