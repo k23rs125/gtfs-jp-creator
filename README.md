@@ -7,10 +7,18 @@ A Claude Code / Cowork mode plugin containing a Skill that helps non-experts (bu
 ## 状態
 
 **動作する実装段階（中間発表に向けた開発フェーズ）**
-Step 1〜7 の全スクリプトが実装済み。古賀市・須恵町の 2 自治体の実データで
-PDF → GTFS-JP 生成を検証し、いずれも MobilityData GTFS Validator で
-エラー 0 件を達成している。条件確認画面・GTFS-JP 拡張ファイル生成
-（agency_jp / office_jp）・JP 拡張検証にも対応済み。
+Step 1〜7 の全スクリプトが実装済み。条件確認画面・GTFS-JP 拡張ファイル
+生成（agency_jp / office_jp）・JP 拡張検証にも対応済み。
+3 自治体の実データで PDF → GTFS-JP 生成を実証：
+
+- **古賀市**（再作成タスク・旧フィードあり）: Validator エラー **0** 件、
+  時刻精度 99.7%
+- **須恵町**（再現性タスク・旧フィードあり）: Validator エラー **0** 件、
+  trip-aligned 時刻精度 99.2%
+- **うるま市**（横展開タスク・旧フィード無し）: 旧フィード未使用条件下
+  での座標補完カバレッジ 39%（P11 6 件＋Nominatim 10 件／41 停留所）。
+  本 Skill の適用範囲（再作成タスクに強い／新規導入には人手補完が要る）
+  を示す実証結果として整理。
 
 ## 構成（プラグイン形式）
 
