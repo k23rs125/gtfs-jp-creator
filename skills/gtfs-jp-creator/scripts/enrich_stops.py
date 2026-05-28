@@ -235,15 +235,97 @@ def matches_municipality(result: dict, expected_municipality: str | None) -> boo
     return False
 
 
+# 停留所名に含まれるキーワードと、その意味的に不適合な OSM (class, type) の対応表。
+# Nominatim が name 一致だけで返してきた誤マッチを「種別」で弾く。
+# 例: 「与那城出張所」(役所支所) と Nominatim が返した「与勝消防署平安座出張所」
+#     (class=amenity, type=fire_station) → keyword="出張所" の deny に該当 → 棄却。
+# 値は OSM の (class, type) タプル。"*" はワイルドカード。
+NAME_TYPE_DENY: dict[str, list[tuple[str, str]]] = {
+    "出張所":   [("amenity", "fire_station"), ("amenity", "police")],
+    "支所":     [("amenity", "fire_station"), ("amenity", "police")],
+    "公民館":   [("shop", "*"), ("amenity", "restaurant"), ("amenity", "fast_food"),
+                ("amenity", "cafe")],
+    "集会所":   [("shop", "*"), ("amenity", "restaurant"), ("amenity", "fast_food")],
+    "保育園":   [("shop", "*"), ("amenity", "restaurant"), ("amenity", "fast_food")],
+    "幼稚園":   [("shop", "*"), ("amenity", "restaurant"), ("amenity", "fast_food")],
+    "病院":     [("shop", "*"), ("amenity", "restaurant"), ("amenity", "fast_food")],
+    "郵便局":   [("shop", "*"), ("amenity", "restaurant"), ("amenity", "fast_food")],
+    "小学校":   [("shop", "*"), ("amenity", "restaurant"), ("amenity", "fast_food")],
+    "中学校":   [("shop", "*"), ("amenity", "restaurant"), ("amenity", "fast_food")],
+}
+
+
+# 施設名の「幹」を作るときに落とす末尾語（停留所名固有の付加部分）。
+# 例: 「与那城出張所」→ "与那城" / 「上江洲公民館前」→ "上江洲公民館"
+NAME_TRAILING_SUFFIXES = ["前", "入口", "口", "出張所", "支所", "店"]
+
+
+def core_of_stop_name(stop_name: str) -> str:
+    """停留所名から地点特定に効かない末尾語を1つ落として「幹」を返す。
+    最低2文字は残す。"""
+    if not stop_name:
+        return ""
+    for s in NAME_TRAILING_SUFFIXES:
+        if stop_name.endswith(s) and len(stop_name) - len(s) >= 2:
+            return stop_name[:-len(s)]
+    return stop_name
+
+
+def matches_facility_name(result: dict, stop_name: str | None) -> bool:
+    """Nominatim 結果の「施設名」（display_name の最初の構成要素 ＋ name）に
+    停留所名の幹が含まれるかを確認する。
+
+    例:
+      - 「与那城出張所」幹="与那城" → 「沖縄税関支署平安座出張所」には不在 → 棄却
+      - 「上江洲公民館前」幹="上江洲公民館" → P11/OSM の「江洲公民館前」には不在 → 棄却
+      - 「うるみん」幹="うるみん" → 「うるま市健康福祉センター うるみん」に含む → 採用
+
+    幹も停留所名本体も施設名側に出現しない場合は誤マッチと見なし棄却する。
+    """
+    if not stop_name:
+        return True
+    display = (result.get("display_name") or "")
+    name = (result.get("name") or "")
+    # display_name の先頭コンポーネント（カンマ前）= 施設名そのもの
+    facility = display.split(",", 1)[0].strip()
+    target = facility + " " + name
+    core = core_of_stop_name(stop_name)
+    return (core and core in target) or (stop_name in target)
+
+
+def matches_facility_type(result: dict, stop_name: str | None) -> bool:
+    """Nominatim 結果の (class, type) が停留所名と意味的に整合するかチェック。
+
+    停留所名に NAME_TYPE_DENY のキーワードが含まれていて、結果の class/type が
+    deny リストに当てはまる場合 False（棄却）を返す。それ以外は True。
+    """
+    if not stop_name:
+        return True
+    cls = (result.get("class") or "").lower()
+    typ = (result.get("type") or "").lower()
+    for kw, deny_list in NAME_TYPE_DENY.items():
+        if kw in stop_name:
+            for (deny_cls, deny_typ) in deny_list:
+                if deny_cls != "*" and deny_cls != cls:
+                    continue
+                if deny_typ != "*" and deny_typ != typ:
+                    continue
+                return False
+    return True
+
+
 def pick_best_candidate(results: list[dict],
                          expected_prefecture: str | None = None,
-                         expected_municipality: str | None = None) -> dict | None:
+                         expected_municipality: str | None = None,
+                         stop_name: str | None = None) -> dict | None:
     """Nominatim応答リストから最良候補を選ぶ。
 
     Args:
         results:               Nominatim 応答リスト
         expected_prefecture:   期待される県/都/府/道（例: "福岡県"）。指定するとこの県外は除外。
         expected_municipality: 期待される市町村名（例: "須恵町"）。指定するとこの市町村外は除外。
+        stop_name:             停留所名。指定すると施設種別不一致（消防署が出張所として
+                               返ってきた等）を NAME_TYPE_DENY 経由で棄却する。
 
     優先順位:
         1. 県＆市町村と一致 AND class=highway/type=bus_stop
@@ -258,6 +340,10 @@ def pick_best_candidate(results: list[dict],
     filtered = [r for r in results if matches_prefecture(r, expected_prefecture)]
     # 市町村フィルタ
     filtered = [r for r in filtered if matches_municipality(r, expected_municipality)]
+    # 施設種別フィルタ（出張所 → 消防署 のような意味的不整合を排除）
+    filtered = [r for r in filtered if matches_facility_type(r, stop_name)]
+    # 施設名フィルタ（停留所名の幹が施設名側に出現しなければ別物として棄却）
+    filtered = [r for r in filtered if matches_facility_name(r, stop_name)]
 
     if not filtered:
         return None
@@ -325,6 +411,7 @@ def enrich_one_stop(stop_name: str, context: str | None, agency_name: str | None
             results,
             expected_prefecture=expected_prefecture,
             expected_municipality=expected_municipality,
+            stop_name=stop_name,
         )
         if candidate:
             try:
