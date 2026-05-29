@@ -218,6 +218,69 @@ def build_match_index(p11_stops: list[dict]) -> dict:
     return {"by_exact": by_exact, "all_normalized": list(set(all_norm))}
 
 
+# 日本語の停留所名で「ここが落ちると別停留所」になりやすい方位接頭辞。
+# 例: 「上江洲公民館前」と「江洲公民館前」は別停留所（数km離れる）。
+#     「東山」と「山」も別停留所。
+DIRECTIONAL_PREFIXES = ("上", "中", "下", "東", "西", "南", "北", "新", "旧")
+
+
+def _directional_prefix(name: str) -> str:
+    """名前の先頭文字が方位接頭辞ならそれを返す。なければ空文字。"""
+    if name and name[0] in DIRECTIONAL_PREFIXES:
+        return name[0]
+    return ""
+
+
+def directional_compatible(target: str, candidate: str) -> bool:
+    """方位接頭辞（上/中/下/東/西/南/北/新/旧）の付き方を見て、
+    target と candidate が「実質的に同じ停留所」と扱えるかを判定する。
+
+    片方にだけ接頭辞があり、接頭辞を取り除いた残りが他方と一致／部分一致する
+    場合（例: 「上江洲公民館前」と「江洲公民館前」）は False を返し、別停留所
+    として棄却対象とする。異なる接頭辞同士（「上の原」と「東の原」など）で
+    残りが揃う場合も False。それ以外は True（既存のロジックに判定を委ねる）。
+    """
+    if not target or not candidate:
+        return True
+    tp = _directional_prefix(target)
+    cp = _directional_prefix(candidate)
+    if tp == cp:
+        return True  # 接頭辞が一致（双方無しを含む）
+    # 残り（接頭辞を除いた部分）が 1 文字だと substring 誤検出が起きるため、
+    # 部分一致系の判定は残り 2 文字以上に限定する（完全一致は 1 文字でも有効）。
+    if tp and not cp:
+        tr = target[1:]
+        if not tr:
+            return True
+        if tr == candidate:
+            return False
+        if len(tr) >= 2 and (
+            candidate.startswith(tr) or candidate.endswith(tr)
+            or tr.startswith(candidate) or tr.endswith(candidate)
+        ):
+            return False
+    elif cp and not tp:
+        cr = candidate[1:]
+        if not cr:
+            return True
+        if cr == target:
+            return False
+        if len(cr) >= 2 and (
+            target.startswith(cr) or target.endswith(cr)
+            or cr.startswith(target) or cr.endswith(target)
+        ):
+            return False
+    else:
+        # 双方に方位接頭辞があり、かつ異なる文字
+        tr, cr = target[1:], candidate[1:]
+        if tr and cr:
+            if tr == cr:
+                return False
+            if len(tr) >= 2 and len(cr) >= 2 and (tr in cr or cr in tr):
+                return False
+    return True
+
+
 def match_exact(target: str, index: dict) -> list[dict]:
     return index["by_exact"].get(target, [])
 
@@ -274,13 +337,19 @@ def find_best_match(target_name: str, index: dict, fuzzy_threshold: float,
     if not target:
         return None, "none", 0.0
 
+    # 方位接頭辞（上/中/下/東/西/南/北/新/旧）の不整合を弾くフィルタ。
+    # exact は対象外（接頭辞も一致しているはずなので無条件採用）。
+    def filt_dir(cands):
+        return [c for c in cands
+                if directional_compatible(target, normalize_name(c["name"]))]
+
     # 1. 完全一致
     cands = match_exact(target, index)
     if cands:
         return cands[0], "exact", 1.0
 
     # 2. 前方/後方一致（fuzzy_threshold 以上の類似度がある場合のみ採用）
-    cands = match_prefix_suffix(target, index)
+    cands = filt_dir(match_prefix_suffix(target, index))
     if cands:
         cands_with_score = [
             (c, difflib.SequenceMatcher(None, target, normalize_name(c["name"])).ratio())
@@ -293,7 +362,7 @@ def find_best_match(target_name: str, index: dict, fuzzy_threshold: float,
         # 類似度不足なら fall-through（substring / fuzzy へ）
 
     # 3. 部分一致（fuzzy_threshold 以上の類似度がある場合のみ採用）
-    cands = match_substring(target, index)
+    cands = filt_dir(match_substring(target, index))
     if cands:
         cands_with_score = [
             (c, difflib.SequenceMatcher(None, target, normalize_name(c["name"])).ratio())
@@ -307,6 +376,8 @@ def find_best_match(target_name: str, index: dict, fuzzy_threshold: float,
 
     # 4. fuzzy（最終手段）
     fuzzy_cands = match_fuzzy(target, index, fuzzy_threshold, max_fuzzy)
+    fuzzy_cands = [(c, s) for (c, s) in fuzzy_cands
+                   if directional_compatible(target, normalize_name(c["name"]))]
     if fuzzy_cands:
         fuzzy_cands.sort(key=lambda x: x[1], reverse=True)
         best, score = fuzzy_cands[0]
