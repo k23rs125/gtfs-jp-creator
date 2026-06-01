@@ -142,6 +142,8 @@ def main() -> int:
     bbox = cfg.get("bbox")
     reference_feed = cfg.get("reference_feed")
     p11_shapefile = cfg.get("p11_shapefile")
+    p11_prefecture = cfg.get("p11_prefecture")   # 例 "沖縄県"。指定時は第3.0版を自動取得
+    p11_cache_dir = cfg.get("p11_cache_dir")      # 省略時は "p11_data"
     canonical_reference = cfg.get("canonical_reference")
     use_nominatim = cfg.get("use_nominatim", False)
     translations_en_json = cfg.get("translations_en_json")
@@ -208,6 +210,25 @@ def main() -> int:
     else:
         record("Step 3.5a 旧フィード座標", True, skipped=True)
         log("Step 3.5a: reference_feed 未指定のためスキップ")
+
+    # p11_shapefile 未指定 & p11_prefecture 指定時は download_p11 で第3.0版を自動取得
+    if not p11_shapefile and p11_prefecture:
+        if args.dry_run:
+            log(f"(dry-run) P11 自動取得予定: 都道府県={p11_prefecture} (第3.0版)")
+        else:
+            try:
+                here = str(SCRIPT_DIR.resolve())
+                if here not in sys.path:
+                    sys.path.insert(0, here)
+                from download_p11 import get_p11_shapefile
+                cache = p11_cache_dir or "p11_data"
+                log(f"P11 自動取得: 都道府県={p11_prefecture} (第3.0版) → {cache}")
+                p11_shapefile = get_p11_shapefile(p11_prefecture, out_dir=cache)
+                log(f"P11 取得完了: {p11_shapefile}")
+            except Exception as e:
+                log(f"P11 自動取得に失敗: {e}", "ERROR")
+                log("  → p11_shapefile を手動指定するか download_p11.py を直接実行してください。")
+                p11_shapefile = None
 
     # ---- Step 3.5b: enrich_stops_p11 ----
     if p11_shapefile:
