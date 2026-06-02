@@ -39,6 +39,9 @@ BLUE = "🟦"
 YELLOW = "🟨"
 ORANGE = "🟧"
 
+# user_overrides に書き戻せるテーブル（apply_overrides と同じ範囲）
+ALLOWED_OVERRIDE_TABLES = ("agency", "agency_jp", "feed_info")
+
 
 def _has(v) -> bool:
     return v not in (None, "", [], {})
@@ -271,12 +274,106 @@ def build_summary(data: dict) -> tuple[str, int]:
     return "\n".join(L), missing
 
 
+def build_questions(data: dict) -> list[dict]:
+    """要入力（🟧 必須・空欄）の項目を質問リストとして返す。
+
+    Returns: list of {key, label, example, note}
+    """
+    groups = build_fields(data)
+    questions: list[dict] = []
+    for g in groups.values():
+        for f in g:
+            if f.is_missing_required:
+                questions.append({
+                    "key": f.key,
+                    "label": f.label,
+                    "example": f.example,
+                    "note": f.note,
+                })
+    return questions
+
+
+def export_questions(data: dict, path: Path) -> int:
+    """PDF に無い要入力項目を、回答テンプレ付きの質問ファイル(Markdown)に書き出す。
+
+    パイプラインを止めずに「質問形式」を実現するための出力。利用者または
+    会話中の Claude がこのファイルを読んで回答し、JSON を埋めて
+    --merge-answers に渡す。Returns: 質問件数。
+    """
+    questions = build_questions(data)
+    L: list[str] = []
+    L.append("# 条件確認：PDF に無い項目への質問")
+    L.append("")
+    L.append("Step 2 で PDF から取得できなかった必須項目です。各項目に回答し、")
+    L.append("末尾の JSON を埋めて answers.json として保存してください。")
+    L.append("（その後 `--merge-answers answers.json` で取り込めます）")
+    L.append("")
+    if not questions:
+        L.append("✅ 要入力の項目はありません。そのまま生成できます。")
+        path.write_text("\n".join(L) + "\n", encoding="utf-8")
+        return 0
+
+    for i, q in enumerate(questions, start=1):
+        L.append(f"## Q{i}. {q['label']}")
+        L.append(f"- 設定先キー: `{q['key']}`")
+        if q["example"]:
+            L.append(f"- 例: {q['example']}")
+        if q["note"]:
+            L.append(f"- 補足: {q['note']}")
+        L.append("- 回答: ____________")
+        L.append("")
+
+    # 回答テンプレート（純粋な JSON。コメントは入れない＝そのまま json として読める）
+    L.append("## 回答テンプレート（この JSON を埋めて answers.json として保存）")
+    L.append("")
+    L.append("キーと項目の対応: " +
+             "、".join(f"{q['key']}={q['label']}" for q in questions))
+    L.append("")
+    L.append("```json")
+    L.append("{")
+    for i, q in enumerate(questions):
+        comma = "," if i < len(questions) - 1 else ""
+        L.append(f'  "{q["key"]}": ""{comma}')
+    L.append("}")
+    L.append("```")
+    path.write_text("\n".join(L) + "\n", encoding="utf-8")
+    return len(questions)
+
+
+def merge_answers(data: dict, answers: dict) -> tuple[int, list[str]]:
+    """回答（"table.field": value）を _meta.user_overrides にマージする。
+
+    既存の user_overrides は保持し、空回答（None/""）は無視する。
+    書き戻せるのは ALLOWED_OVERRIDE_TABLES のテーブルのみ。
+    Returns: (適用件数, スキップしたキー一覧)
+    """
+    meta = data.setdefault("_meta", {})
+    overrides = meta.setdefault("user_overrides", {})
+    applied = 0
+    skipped: list[str] = []
+    for key, value in answers.items():
+        if "." not in key or key.split(".", 1)[0] not in ALLOWED_OVERRIDE_TABLES:
+            skipped.append(key)
+            continue
+        if value in (None, ""):
+            continue  # 空回答は未入力のまま据え置く
+        overrides[key] = value
+        applied += 1
+    return applied, skipped
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="条件確認画面（v2）のサマリを中間 JSON から生成する")
     parser.add_argument("input", help="Step 2 出力の中間 JSON")
     parser.add_argument("-o", "--output",
                         help="サマリ Markdown の出力先（省略時は標準出力）")
+    parser.add_argument("--export-questions", default=None,
+                        help="PDF外の要入力項目を質問ファイル(Markdown)として書き出す")
+    parser.add_argument("--merge-answers", default=None,
+                        help="回答JSON({\"table.field\": value})を user_overrides に反映して書き戻す")
+    parser.add_argument("--write-json", default=None,
+                        help="--merge-answers の書き戻し先（省略時は入力JSONを上書き）")
     args = parser.parse_args()
 
     in_path = Path(args.input)
@@ -290,7 +387,33 @@ def main() -> int:
         return 2
 
     apply_overrides(data)  # 既に編集済みの値があれば反映してから集計
+
+    # --merge-answers: 回答(JSON)を user_overrides に反映して中間JSONに書き戻す
+    if args.merge_answers:
+        ans_path = Path(args.merge_answers)
+        if not ans_path.exists():
+            print(f"Error: answers not found: {ans_path}", file=sys.stderr)
+            return 2
+        try:
+            answers = json.loads(ans_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            print(f"Error: answers JSON パース失敗: {e}", file=sys.stderr)
+            return 2
+        applied, skipped = merge_answers(data, answers)
+        apply_overrides(data)  # 反映した値をサマリにも映す
+        out_json = Path(args.write_json) if args.write_json else in_path
+        out_json.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                            encoding="utf-8")
+        print(f"[OK] 回答を {applied} 件反映し {out_json} に書き戻しました", file=sys.stderr)
+        if skipped:
+            print(f"[WARN] 対象外キーをスキップ: {', '.join(skipped)}", file=sys.stderr)
+
     summary, missing = build_summary(data)
+
+    # --export-questions: PDF外の要入力項目を質問ファイルに書き出す
+    if args.export_questions:
+        qn = export_questions(data, Path(args.export_questions))
+        print(f"[OK] 質問ファイルを出力: {args.export_questions}（{qn} 件）", file=sys.stderr)
 
     if args.output:
         Path(args.output).write_text(summary + "\n", encoding="utf-8")
