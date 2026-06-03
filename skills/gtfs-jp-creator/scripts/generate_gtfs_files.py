@@ -304,19 +304,37 @@ def generate_trips(data: dict, output_dir: Path) -> None:
 
 
 def generate_stop_times(data: dict, output_dir: Path) -> None:
-    """stop_times.txt を生成。"""
+    """stop_times.txt を生成。
+
+    要予約バス停（stop_name に「要予約」を含む）を通る行には
+    pickup_type / drop_off_type = 2（電話で営業所に連絡）を付与し、
+    デマンド型停留所であることを GTFS 標準の方法で表現する。
+    中間JSONに pickup_type / drop_off_type の明示指定があればそれを優先する。
+    """
+    id_to_name = {s["stop_id"]: s.get("stop_name", "") for s in data.get("stops", [])}
     rows = []
     for st in data["stop_times"]:
+        sid = st["stop_id"]
+        name = id_to_name.get(sid, "")
+        is_reserve = "要予約" in name
+        pickup = st.get("pickup_type")
+        dropoff = st.get("drop_off_type")
+        if pickup is None:
+            pickup = 2 if is_reserve else 0
+        if dropoff is None:
+            dropoff = 2 if is_reserve else 0
         rows.append({
             "trip_id": st["trip_id"],
             "arrival_time": st["arrival_time"],
             "departure_time": st["departure_time"],
-            "stop_id": st["stop_id"],
+            "stop_id": sid,
             "stop_sequence": st["stop_sequence"],
+            "pickup_type": pickup,
+            "drop_off_type": dropoff,
         })
     fieldnames = [
         "trip_id", "arrival_time", "departure_time",
-        "stop_id", "stop_sequence",
+        "stop_id", "stop_sequence", "pickup_type", "drop_off_type",
     ]
     write_csv(output_dir / "stop_times.txt", rows, fieldnames)
 
