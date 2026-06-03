@@ -67,9 +67,18 @@ def is_noise_name(nm: str) -> bool:
         return True
     return False
 
+# 末尾の方向付記（（西行き）（東行き）（上り）（下り）等）。乗り場違いでも
+# 番号が同じなら同一停留所として扱う方針(案ア)に基づき、名称からは除去する。
+DIRECTION_SUFFIX = re.compile(r'[（(](?:[東西南北]行き?|上り|下り|のりば\d*|\d+番のりば)[）)]\s*$')
+
 def normalize_name(s: str) -> str:
-    """先頭のアイコン文字・全角空白を除去（停留所名の正規化）。"""
-    return ICON_PREFIX.sub('', s).strip()
+    """停留所名の正規化。
+    1) 先頭のアイコン文字(店/駅 等)・全角空白を除去
+    2) 末尾の方向付記（（西行き）等）を除去（案ア: stopは番号単位で1つ）
+    """
+    s = ICON_PREFIX.sub('', s).strip()
+    s = DIRECTION_SUFFIX.sub('', s).strip()
+    return s
 
 def cluster_rows(items, thr):
     """top 座標で行クラスタリング。"""
