@@ -157,30 +157,30 @@ def build_trip_sequences(gtfs_dir: Path) -> dict[str, list[tuple[int, str, str]]
 # trip マッチング
 # ---------------------------------------------------------------------------
 
-def trip_signature(seq_list: list[tuple[int, str, str]]) -> tuple[str, str] | None:
-    """trip の「最初の停留所の (name, time)」をシグネチャとして使う。"""
+def trip_signature(seq_list: list[tuple[int, str, str]]) -> tuple[str, ...] | None:
+    """trip の「停留所名の並び（時刻を除いた正規化名のタプル）」をシグネチャとする。"""
     if not seq_list:
         return None
-    _, name, time = seq_list[0]
-    return (name, time)
+    return tuple(name for _, name, _ in seq_list)
+
+
+def _first_time(seq_list: list[tuple[int, str, str]]) -> str:
+    return seq_list[0][2] if seq_list else ""
 
 
 def match_trips(off_seq: dict, our_seq: dict) -> tuple[list[tuple[str, str]],
                                                          list[str], list[str]]:
-    """trip を signature で1対1対応付ける。
+    """trip を「停留所列シグネチャ」で対応付ける。
 
-    Returns:
-        matched: [(off_tid, our_tid), ...]
-        only_official: [off_tid, ...]  公式にあって当方にない
-        only_ours:     [our_tid, ...]  当方にあって公式にない
+    同一の停留所列を持つ便が複数ある場合は、先頭発車時刻が近い順に1対1対応。
     """
-    off_sig: dict[tuple[str, str], list[str]] = defaultdict(list)
+    off_sig: dict[tuple[str, ...], list[str]] = defaultdict(list)
     for tid, seq in off_seq.items():
         sig = trip_signature(seq)
         if sig:
             off_sig[sig].append(tid)
 
-    our_sig: dict[tuple[str, str], list[str]] = defaultdict(list)
+    our_sig: dict[tuple[str, ...], list[str]] = defaultdict(list)
     for tid, seq in our_seq.items():
         sig = trip_signature(seq)
         if sig:
@@ -190,11 +190,9 @@ def match_trips(off_seq: dict, our_seq: dict) -> tuple[list[tuple[str, str]],
     only_official: list[str] = []
     only_ours: list[str] = []
 
-    all_sigs = set(off_sig.keys()) | set(our_sig.keys())
-    for sig in all_sigs:
-        off_tids = off_sig.get(sig, [])
-        our_tids = our_sig.get(sig, [])
-        # 1対1対応付け（同じ signature が複数あれば順に対応）
+    for sig in set(off_sig.keys()) | set(our_sig.keys()):
+        off_tids = sorted(off_sig.get(sig, []), key=lambda t: _first_time(off_seq[t]))
+        our_tids = sorted(our_sig.get(sig, []), key=lambda t: _first_time(our_seq[t]))
         n = min(len(off_tids), len(our_tids))
         for i in range(n):
             matched.append((off_tids[i], our_tids[i]))
