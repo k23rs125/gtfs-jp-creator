@@ -8,7 +8,8 @@ generate_calendar_dates.py
   - 有効期間(start_date/end_date)は PDF 外情報。利用者が指定する。
   - 祝日は内閣府公開CSV(syukujitsu.csv, Shift_JIS)を一次データとして使う。
     ライブラリによる祝日「計算」はせず、公式データをそのまま展開する。
-  - お盆(既定8/13-15)・年末年始(既定12/29-1/3)は固定ルールで付加。範囲は調整可。
+  - お盆・年末年始は既定では展開しない。PDFに運休記載がある場合のみ、利用者が
+    --obon / --nenmatsu で範囲を明示指定したときに展開する(市ごとに異なるため推測しない)。
   - 日曜運休は calendar.txt の sunday=0 で表現されるため、ここでは扱わない
     (二重計上を避ける)。祝日が日曜と重なっても calendar_dates には祝日として
     1行だけ出す(重複排除)。
@@ -18,8 +19,8 @@ generate_calendar_dates.py
   --service-id   : 運休日を付与する service_id (カンマ区切りで複数可)
   --syukujitsu   : 内閣府祝日CSV (任意。無ければ祝日は付加しない=要確認)
   --start / --end: 有効期間 YYYYMMDD (任意。未指定なら calendar.txt から読む)
-  --obon         : お盆の運休範囲 "MM-DD:MM-DD" (既定 08-13:08-15、空文字で無効)
-  --nenmatsu     : 年末年始 "MM-DD:MM-DD" (既定 12-29:01-03、空文字で無効)
+  --obon         : お盆の運休範囲 "MM-DD:MM-DD" (既定: 無効。PDF記載時のみ指定)
+  --nenmatsu     : 年末年始 "MM-DD:MM-DD" (既定: 無効。PDF記載時のみ指定)
 出力:
   --output       : calendar_dates.txt (既存があれば追記マージ・重複排除)
 
@@ -111,8 +112,8 @@ def main():
     ap.add_argument("--syukujitsu", default=None, help="内閣府祝日CSV(任意)")
     ap.add_argument("--start", default=None, help="YYYYMMDD(未指定ならcalendarから)")
     ap.add_argument("--end", default=None)
-    ap.add_argument("--obon", default="08-13:08-15")
-    ap.add_argument("--nenmatsu", default="12-29:01-03")
+    ap.add_argument("--obon", default="", help="お盆運休 \"MM-DD:MM-DD\"。PDFに記載があれば指定(例 08-13:08-15)。未指定なら展開しない")
+    ap.add_argument("--nenmatsu", default="", help="年末年始運休 \"MM-DD:MM-DD\"。PDFに記載があれば指定(例 12-29:01-03)。未指定なら展開しない")
     ap.add_argument("-o", "--output", required=True)
     args = ap.parse_args()
 
@@ -168,8 +169,12 @@ def main():
     print(f"  有効期間: {start} 〜 {end}", file=sys.stderr)
     print(f"  祝日(CSV内・期間内): {len(holi_in)}日 / お盆: {len(obon)}日 / 年末年始: {len(nenmatsu)}日", file=sys.stderr)
     print(f"  運休日(重複排除後): {len(closed)}日 × service {len(sids)}種 = 追加{added}行", file=sys.stderr)
-    if not args.syukujitsu:
-        print("  [警告] 祝日CSV未指定のため祝日は未展開。--syukujitsu を指定してください(要確認)。", file=sys.stderr)
+    if not args.syukujitsu and not args.obon and not args.nenmatsu:
+        print("  [警告] 運休条件が何も指定されていません。calendar_dates は変更されません。", file=sys.stderr)
+        print("         運休日は市・事業者ごとに異なります。PDFの記載を確認し、必要な条件のみ", file=sys.stderr)
+        print("         (--syukujitsu / --obon / --nenmatsu)を明示指定してください(推測しません)。", file=sys.stderr)
+    elif not args.syukujitsu:
+        print("  [注意] 祝日CSV(--syukujitsu)未指定のため祝日は展開していません。", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
