@@ -1,21 +1,37 @@
 # gtfs-jp-creator scripts dependencies
 # Install: pip install -r requirements.txt
-# Optional add-on: pip install -U "mineru[core]"  (for --engine mineru)
+#
+# 本スキルの主経路は「座標方式」(pdfplumber) です。
+# pymupdf4llm / MinerU は画像主体の高密度PDFで表が崩れる、または GPU 非搭載で
+# タイムアウトするため、座標方式を Step1 の主経路としています。
+# scripts 本体の多くは Python 標準ライブラリのみで動作し、外部依存は最小です。
+# (動作確認済みバージョンを下限として記載)
 
-# Phase 1: PDF to Markdown extraction (default engine: pymupdf4llm)
-pymupdf>=1.24.4
-pymupdf4llm>=0.0.17
+# --- Step1 座標方式 (主経路・必須) ---
+pdfplumber>=0.11.0          # 時刻表PDFから座標付きテキスト抽出 (extract_timetable_coords.py)
 
-# Phase 1 alternative engine: MinerU (high quality for decorative layouts)
-# Not in this requirements.txt because of large model downloads (~3GB).
-# Users opt-in by running: pip install -U "mineru[core]"
-# See SKILL.md for guidance on when to use --engine mineru.
+# --- Step3.5 P11 座標補完 (必須) ---
+pyshp>=2.3.0                # 国土数値情報 P11 シェープファイル読込 (import shapefile)
 
-# Phase 2 (future): OCR for image-based PDFs
-# olmocr>=0.x  # commented out until Phase 2
+# --- Step4 shapes 生成 (必須) ---
+requests>=2.31.0            # OSRM ルート問い合わせ (generate_shapes.py)
 
-# Phase 3 (future): GTFS validation via java -jar gtfs-validator-cli.jar
-# (downloaded separately, not a Python package)
+# --- Step6 翻訳 よみがな (任意: 無くても ja / en は生成可) ---
+pykakasi>=2.2.0             # 漢字→ひらがな ja-Hrkt (generate_translations.py)
 
-# Phase 4 (future): OSRM map-matching for shapes.txt
-requests>=2.31.0
+# --- Step1 旧経路 pymupdf4llm (任意) ---
+# 座標方式が主経路のため通常は不要。テキスト主体PDFで使う場合のみ。
+# 注意: pdfplumber と pdfminer.six / PyMuPDF のバージョンが競合することがある。
+#       MinerU と併用する場合は仮想環境の分離を推奨。
+# pymupdf>=1.24.4
+# pymupdf4llm>=0.0.17
+
+# --- Step1 MinerU (任意・GPU環境向け) ---
+# GPU 非搭載では実用困難。使う場合のみ pip install -U "mineru[core]" で別途導入。
+
+# --- Step7 GTFS Validator (Python パッケージではない) ---
+# java -jar gtfs-validator-cli.jar を skills/gtfs-jp-creator/tools/ に別途配置。
+
+# --- 運休日 calendar_dates 展開 ---
+# 祝日は内閣府公開CSV(syukujitsu.csv)を利用者が用意。追加ライブラリ不要。
+# generate_calendar_dates.py は標準ライブラリのみで動作。
