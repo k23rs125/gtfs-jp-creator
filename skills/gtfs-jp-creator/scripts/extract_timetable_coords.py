@@ -211,6 +211,28 @@ def main():
         page = best
     words = page.extract_words()
     page_no = pdf.pages.index(page) + 1
+    # --- 画像PDF検出 (課題: 画像化された時刻表は座標方式が使えない) ---
+    # 選択ページの文字オブジェクトが極端に少ない場合、時刻表が画像として
+    # 貼り付けられている(テキストレイヤなし)と判定する。座標方式はpdfplumberの
+    # 文字座標に依存するため、この場合は原理的に機能しない。OCR経路が必要。
+    n_chars = len(page.chars)
+    if n_chars < 20:
+        result = {"source": str(args.input), "page": page_no, "blocks": [],
+                  "warnings": [
+                      f"ページ{page_no}の文字オブジェクトが{n_chars}個しかありません。"
+                      "時刻表が画像化されている(テキストレイヤなし)可能性が高く、"
+                      "座標方式は使えません。OCR経路またはMinerU(GPU環境)が必要です。"],
+                  "needs_confirmation": [{
+                      "type": "image_pdf_detected", "page": page_no, "n_chars": n_chars,
+                      "message": (f"このPDFのページ{page_no}は画像化されており、座標方式で"
+                                  "文字を抽出できません。(1)テキストレイヤのある別ページ/別PDFを"
+                                  "確認するか、(2)OCRで画像から文字を起こす経路が必要です。")}]}
+        Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"[INFO] ページ {page_no} を使用", file=sys.stderr)
+        print(f"[警告] 文字オブジェクト{n_chars}個 → 画像化PDFと判定。座標方式は使えません。", file=sys.stderr)
+        print(f"[INFO] OCR経路またはMinerU(GPU環境)が必要です。", file=sys.stderr)
+        print(f"[OK] 出力: {args.output}", file=sys.stderr)
+        return
 
     # 名前列(日本語)の x0 分布から「ブロック(方向)」を検出
     # 縦書き1文字ラベル(校区名 等)を除くため、幅のある(>=2文字相当)トークンに限定
