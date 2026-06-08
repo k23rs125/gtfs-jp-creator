@@ -253,7 +253,7 @@ def main():
     raw_blocks = []
     for bi, cx in enumerate(block_centers):
         x_lo, x_hi = cx - 20, cx + 120
-        num_x_lo, num_x_hi = cx - 45, cx - 12
+        num_x_lo, num_x_hi = cx - 58, cx - 12  # 左端を-45→-58に拡大: 3桁番号(名前の左約46pt)を取りこぼさないため
         next_cx = block_centers[bi + 1] if bi + 1 < len(block_centers) else page_w
         time_x_lo, time_x_hi = cx + 120, next_cx - 60 if next_cx < page_w else page_w
         blk = extract_block(words, x_lo, x_hi,
