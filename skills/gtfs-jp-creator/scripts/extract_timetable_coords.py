@@ -220,17 +220,18 @@ def main():
         result = {"source": str(args.input), "page": page_no, "blocks": [],
                   "warnings": [
                       f"ページ{page_no}の文字オブジェクトが{n_chars}個しかありません。"
-                      "時刻表が画像化されている(テキストレイヤなし)可能性が高く、"
-                      "座標方式は使えません。OCR経路またはMinerU(GPU環境)が必要です。"],
+                      "時刻表が画像化されており(テキストレイヤなし)、座標方式では抽出できません。"
+                      "本ツールはテキストPDFを対象とします。テキスト版PDFまたは元データ(Excel等)の入手を推奨します。"],
                   "needs_confirmation": [{
                       "type": "image_pdf_detected", "page": page_no, "n_chars": n_chars,
-                      "message": (f"このPDFのページ{page_no}は画像化されており、座標方式で"
-                                  "文字を抽出できません。(1)テキストレイヤのある別ページ/別PDFを"
-                                  "確認するか、(2)OCRで画像から文字を起こす経路が必要です。")}]}
+                      "message": (f"このPDFのページ{page_no}は時刻表が画像化されており、座標方式で"
+                                  "文字を抽出できません。発行元(自治体・交通事業者)に、テキストレイヤのある"
+                                  "PDF、またはExcel等の元データを問い合わせて入手してください。"
+                                  "本ツールはテキストPDFを対象とします。")}]}
         Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"[INFO] ページ {page_no} を使用", file=sys.stderr)
         print(f"[警告] 文字オブジェクト{n_chars}個 → 画像化PDFと判定。座標方式は使えません。", file=sys.stderr)
-        print(f"[INFO] OCR経路またはMinerU(GPU環境)が必要です。", file=sys.stderr)
+        print(f"[INFO] テキスト版PDFまたは元データ(Excel等)を発行元に問い合わせて入手してください。", file=sys.stderr)
         print(f"[OK] 出力: {args.output}", file=sys.stderr)
         return
 
