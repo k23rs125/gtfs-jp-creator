@@ -97,6 +97,8 @@ def main():
         "calendar":meta_ext.get("calendar",
             [{"service_id":args.service_id,"monday":0,"tuesday":0,"wednesday":0,
               "thursday":0,"friday":0,"saturday":0,"sunday":0,"start_date":None,"end_date":None}]),
+        "feed_info":meta_ext.get("feed_info",{"feed_publisher_name":None,"feed_publisher_url":None,
+              "feed_lang":"ja","feed_start_date":None,"feed_end_date":None}),
         "calendar_dates":[],
         "fare_attributes":meta_ext.get("fare_attributes",[]),
         "fare_rules":meta_ext.get("fare_rules",[]),
