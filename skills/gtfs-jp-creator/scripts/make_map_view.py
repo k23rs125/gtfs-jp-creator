@@ -110,6 +110,29 @@ def read_trips(path):
     return trips
 
 
+def read_stop_times(path):
+    """stop_times.txt を 便ごとの [{seq, stop_id, time}] (停車順) にまとめる。
+       time は departure_time を優先、無ければ arrival_time。"""
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        req = {"trip_id", "stop_id", "stop_sequence"}
+        missing = req - set(reader.fieldnames or [])
+        if missing:
+            sys.exit("ERROR: stop_times.txt に必要な列がありません: " + ", ".join(sorted(missing)))
+        by_trip = defaultdict(list)
+        for r in reader:
+            try:
+                seq = int(r["stop_sequence"])
+            except (ValueError, KeyError):
+                continue
+            t = (r.get("departure_time") or r.get("arrival_time") or "").strip()
+            by_trip[r["trip_id"].strip()].append({
+                "seq": seq, "stop_id": r["stop_id"].strip(), "time": t})
+    for tid in by_trip:
+        by_trip[tid].sort(key=lambda x: x["seq"])
+    return dict(by_trip)
+
+
 def parse_bbox(s):
     if s is None:
         return None
@@ -151,6 +174,14 @@ TEMPLATE = r"""<!DOCTYPE html>
   .stop-label { font-size: 13px; font-weight: 700; color: #1E4A70; }
   .stop-id { font-size: 11px; color: #6b7785; }
   .stop-warn { font-size: 11px; color: #B5791A; font-weight: 700; }
+  .stop-time { font-size: 12px; color: #145A32; font-weight: 700; }
+  .seq-badge { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: 9px;
+               background: #1C7293; color: #fff; font-size: 11px; font-weight: 700; text-align: center; }
+  .seq-marker .seq-num { width: 20px; height: 20px; line-height: 20px; border-radius: 50%;
+               background: #1C7293; color: #fff; font-size: 11px; font-weight: 700; text-align: center;
+               border: 2px solid #fff; box-shadow: 0 0 2px rgba(0,0,0,0.4); }
+  #trip-note { background: #E7F0F7; color: #1E4A70; font-size: 12px;
+               padding: 6px 16px; border-bottom: 1px solid #B9D2E6; display: none; }
 </style>
 </head>
 <body>
@@ -169,6 +200,7 @@ TEMPLATE = r"""<!DOCTYPE html>
     <select id="shape-select"></select>
     <span id="ctrl-info"></span>
   </div>
+  <div id="trip-note"></div>
   <div id="note"></div>
   <div id="map"></div>
 </div>
@@ -177,6 +209,7 @@ const STOPS  = __DATA__;
 const BBOX   = __BBOX__;     // [lon_min,lat_min,lon_max,lat_max] または null
 const SHAPES = __SHAPES__;   // {shape_id:[[lat,lon],...], ...}（無ければ {}）
 const TRIPS  = __TRIPS__;    // [{trip_id,headsign,direction_id,shape_id},...]（無ければ []）
+const STOP_TIMES = __STOP_TIMES__; // {trip_id:[{seq,stop_id,time},...], ...}（無ければ {}）
 
 const STYLE = {
   ok:          { radius: 6, color: "#1C7293", weight: 2, fillColor: "#5BA8C9", fillOpacity: 0.9 },
@@ -232,22 +265,112 @@ const HILITE_STYLE= { color: "#C0392B", weight: 5, opacity: 0.95 };
 
 function redraw(sel) {
   shapeLayer.clearLayers();
-  if (sel === "__none__") return;
+  if (sel === "__none__") { resetStops(); setTripNote(null); return; }
   if (sel === "__all__") {
     for (const sid in SHAPES) drawShape(SHAPES[sid], ALL_STYLE);
+    resetStops(); setTripNote(null);
     return;
   }
   // 特定の便/shapeを選択：背景に全ルートを薄く、選択分を濃く
   let targetShape = sel;
+  let isTrip = false;
   if (TRIPS.length > 0) {
     const t = TRIPS.find(x => x.trip_id === sel);
-    if (t) targetShape = t.shape_id;
+    if (t) { targetShape = t.shape_id; isTrip = true; }
   }
   for (const sid in SHAPES) if (sid !== targetShape) drawShape(SHAPES[sid], FAINT_STYLE);
   drawShape(SHAPES[targetShape], HILITE_STYLE);
+  // 便が選ばれていて stop_times があれば、停車停留所を番号順に強調
+  if (isTrip && STOP_TIMES[sel]) {
+    const noCoord = highlightTripStops(sel);
+    setTripNote(sel, noCoord);
+  } else {
+    resetStops(); setTripNote(null);
+  }
 }
 
-// プルダウンの組み立て（shapesがある時だけ表示）
+// 便選択時、座標未補完の停車停留所を注記で知らせる
+function setTripNote(tripId, noCoordServed) {
+  const tn = document.getElementById("trip-note");
+  if (!tripId || !noCoordServed || noCoordServed.length === 0) { tn.style.display = "none"; tn.textContent = ""; return; }
+  const names = noCoordServed.map(x => x.s.name + "(" + x.s.id + ")・順" + x.seq).join("、");
+  tn.style.display = "block";
+  tn.textContent = "この便は座標未補完の停留所に停車します（地図に表示できません）：" + names;
+}
+
+// プルダウン設定は停留所マーカー定義の後で行う（初期redrawがマーカーを参照するため）
+
+
+// 停留所の点（marker[stop_id] で後から番号・濃淡を付け替えられるよう保持）
+const markerById = {};
+const stopById = {};
+STOPS.forEach(s => { stopById[s.id] = s; });
+const bounds = [];
+placed.forEach(s => {
+  const style = STYLE[s.status] || STYLE.ok;
+  const m = L.circleMarker([s.lat, s.lon], style).addTo(map);
+  m.bindPopup(buildStopPopup(s, null, null));
+  markerById[s.id] = m;
+  bounds.push([s.lat, s.lon]);
+});
+
+// 番号ラベル（停車順）用のレイヤ。便選択時だけ表示する。
+const numberLayer = L.layerGroup().addTo(map);
+
+function buildStopPopup(s, seq, time) {
+  let p = '';
+  if (seq !== null) p += '<span class="seq-badge">' + seq + '</span> ';
+  p += '<span class="stop-label">' + s.name + '</span><br><span class="stop-id">' + s.id + '</span>';
+  if (time) p += '<br><span class="stop-time">発車 ' + time + '</span>';
+  if (s.status !== "ok") p += '<br><span class="stop-warn">' + WARN_TEXT[s.status] + '</span>';
+  return p;
+}
+
+// 便選択に応じて停留所の強調を更新する
+const DIM_STYLE = { radius: 4, color: "#B7C0C8", weight: 1, fillColor: "#D6DCE1", fillOpacity: 0.7 };
+const SERVED_STYLE = { radius: 8, color: "#1C7293", weight: 3, fillColor: "#2E9BCB", fillOpacity: 0.95 };
+
+function resetStops() {
+  numberLayer.clearLayers();
+  placed.forEach(s => {
+    const style = STYLE[s.status] || STYLE.ok;
+    markerById[s.id].setStyle(style).setRadius(style.radius);
+    markerById[s.id].setPopupContent(buildStopPopup(s, null, null));
+  });
+}
+
+function highlightTripStops(tripId) {
+  numberLayer.clearLayers();
+  const seqList = STOP_TIMES[tripId] || [];
+  const servedIds = new Set(seqList.map(x => x.stop_id));
+  // まず全部を薄く
+  placed.forEach(s => {
+    if (!servedIds.has(s.id)) {
+      markerById[s.id].setStyle(DIM_STYLE).setRadius(DIM_STYLE.radius);
+      markerById[s.id].setPopupContent(buildStopPopup(s, null, null));
+    }
+  });
+  // 停車停留所を濃く＋番号＋時刻。座標が無い停留所は注記に回す。
+  const noCoordServed = [];
+  seqList.forEach(item => {
+    const s = stopById[item.stop_id];
+    if (!s) return;
+    if (s.lat === null || s.lon === null) { noCoordServed.push({s:s, seq:item.seq, time:item.time}); return; }
+    const m = markerById[s.id];
+    if (!m) return;
+    m.setStyle(SERVED_STYLE).setRadius(SERVED_STYLE.radius);
+    m.setPopupContent(buildStopPopup(s, item.seq, item.time));
+    // 番号ラベル
+    const icon = L.divIcon({ className: "seq-marker", html: '<div class="seq-num">' + item.seq + '</div>', iconSize: [20,20], iconAnchor: [10,10] });
+    L.marker([s.lat, s.lon], { icon: icon, interactive: false, pane: "markerPane" }).addTo(numberLayer);
+  });
+  return noCoordServed;
+}
+
+if (bounds.length > 0) map.fitBounds(bounds, { padding: [30, 30] });
+else map.setView([36.0, 138.0], 5);
+
+// プルダウンの組み立て（shapesがある時だけ表示）。マーカー定義後に実行。
 const shapeIds = Object.keys(SHAPES);
 if (shapeIds.length > 0) {
   document.getElementById("ctrl").style.display = "flex";
@@ -258,7 +381,8 @@ if (shapeIds.length > 0) {
   if (TRIPS.length > 0) {
     TRIPS.forEach(t => add(t.trip_id,
       t.trip_id + "／" + (t.headsign || "(行先なし)") + "（方向" + t.direction_id + "）"));
-    document.getElementById("ctrl-info").textContent = "便数 " + TRIPS.length + " ／ ルート " + shapeIds.length + "本";
+    const extra = (Object.keys(STOP_TIMES).length > 0) ? "／便を選ぶと停車停留所を番号順に強調" : "";
+    document.getElementById("ctrl-info").textContent = "便数 " + TRIPS.length + " ／ ルート " + shapeIds.length + "本" + extra;
   } else {
     shapeIds.forEach(sid => add(sid, sid));
     document.getElementById("ctrl-info").textContent = "ルート " + shapeIds.length + "本（trips未指定のためshape_idで表示）";
@@ -267,27 +391,13 @@ if (shapeIds.length > 0) {
   sel.addEventListener("change", e => redraw(e.target.value));
   redraw("__all__");
 }
-
-// 停留所の点
-const bounds = [];
-placed.forEach(s => {
-  const style = STYLE[s.status] || STYLE.ok;
-  const m = L.circleMarker([s.lat, s.lon], style).addTo(map);
-  let popup = '<span class="stop-label">' + s.name + '</span><br><span class="stop-id">' + s.id + '</span>';
-  if (s.status !== "ok") popup += '<br><span class="stop-warn">' + WARN_TEXT[s.status] + '</span>';
-  m.bindPopup(popup);
-  bounds.push([s.lat, s.lon]);
-});
-
-if (bounds.length > 0) map.fitBounds(bounds, { padding: [30, 30] });
-else map.setView([36.0, 138.0], 5);
 </script>
 </body>
 </html>
 """
 
 
-def build_html(stops, title, bbox, shapes, trips):
+def build_html(stops, title, bbox, shapes, trips, stop_times):
     data = [{"id": s["id"], "name": s["name"], "lat": s["lat"], "lon": s["lon"], "status": s["status"]} for s in stops]
     out = TEMPLATE
     out = out.replace("__TITLE__", html.escape(title))
@@ -295,6 +405,7 @@ def build_html(stops, title, bbox, shapes, trips):
     out = out.replace("__BBOX__", json.dumps(list(bbox)) if bbox is not None else "null")
     out = out.replace("__SHAPES__", json.dumps(shapes, ensure_ascii=False))
     out = out.replace("__TRIPS__", json.dumps(trips, ensure_ascii=False))
+    out = out.replace("__STOP_TIMES__", json.dumps(stop_times, ensure_ascii=False))
     return out
 
 
@@ -303,6 +414,8 @@ def main():
     ap.add_argument("stops", help="stops.txt のパス")
     ap.add_argument("--shapes", default=None, help="shapes.txt のパス（指定するとルート線を描く）")
     ap.add_argument("--trips", default=None, help="trips_with_shapes.txt のパス（便名でルートを選べる）")
+    ap.add_argument("--stop-times", dest="stop_times", default=None,
+                    help="stop_times.txt のパス（便を選ぶと停車停留所を番号順に強調・時刻表示）")
     ap.add_argument("--out", default="map_view.html", help="出力HTMLパス（既定: map_view.html）")
     ap.add_argument("--title", default="停留所マップ", help="バーに出すサブタイトル")
     ap.add_argument("--bbox", default=None, help="想定範囲 'lon_min,lat_min,lon_max,lat_max'。指定すると範囲外を橙で強調")
@@ -328,7 +441,15 @@ def main():
             print("WARN: shapes.txtに無いshape_idを参照する便を%d件除外しました: %s"
                   % (len(dropped), ", ".join(t["trip_id"] for t in dropped)), file=sys.stderr)
 
-    out_html = build_html(stops, args.title, bbox, shapes, trips)
+    stop_times = {}
+    if args.stop_times:
+        stop_times = read_stop_times(args.stop_times)
+        # tripsを指定している場合、tripsに無い便のstop_timesは載せない（HTML肥大化防止）
+        if trips:
+            trip_ids = {t["trip_id"] for t in trips}
+            stop_times = {k: v for k, v in stop_times.items() if k in trip_ids}
+
+    out_html = build_html(stops, args.title, bbox, shapes, trips, stop_times)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(out_html)
 
@@ -345,6 +466,9 @@ def main():
             print("    （数値解釈できず除外した点 %d）" % bad_shape_pts, file=sys.stderr)
     if trips:
         print("  便 %d件（ルート選択に使用）" % len(trips), file=sys.stderr)
+    if stop_times:
+        total_st = sum(len(v) for v in stop_times.values())
+        print("  stop_times %d便（計%d停車・便選択で停留所強調）" % (len(stop_times), total_st), file=sys.stderr)
 
 
 if __name__ == "__main__":
