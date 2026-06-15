@@ -196,6 +196,8 @@ def main():
     ap.add_argument("--col-gap", type=int, default=20)
     ap.add_argument("--blocks", type=int, default=0,
                     help="方向ブロック数(0=自動: 名前列の塊を検出)。手動指定も可")
+    ap.add_argument("--multi-pattern-min", type=int, default=30,
+                    help="便内でこの分数以上の時刻逆行があれば『複数方面/パターン混在の可能性』として要確認に挙げる(既定30分)")
     args = ap.parse_args()
 
     pdf = pdfplumber.open(args.input)
@@ -243,6 +245,22 @@ def main():
     name_x0s = sorted([x for x, c in x0c.items() if c >= 10])
     # 近接するものをまとめてブロック中心に
     block_centers = cluster_cols(name_x0s, 50) if name_x0s else []
+    # --blocks 手動指定: 自動検出と異なる場合、gap を調整して指定数に近づける。
+    # 名前列が物理的に指定数ぶん立たない場合は割れない（推測で増やさない=正しく失敗）。
+    # 実際に割れたか否かの判定は、便を持つ最終ブロック(real_blocks)確定後に行う。
+    if args.blocks and name_x0s and len(block_centers) != args.blocks:
+        target = args.blocks
+        chosen = block_centers
+        for g in range(2, 201):  # gap を狭めて分割数を増やす方向に探索
+            c = cluster_cols(name_x0s, g)
+            if len(c) == target:
+                chosen = c
+                break
+            if len(c) < target:
+                # これ以上 gap を狭めても増えないところまで来たら、最も近いものを採用
+                if abs(len(c) - target) < abs(len(chosen) - target):
+                    chosen = c
+        block_centers = chosen
 
     result = {"source": str(args.input), "page": page_no,
               "blocks": [], "warnings": []}
@@ -269,6 +287,13 @@ def main():
         b["block_index"] = i
     result["blocks"] = real_blocks
 
+    # --blocks 手動指定の充足判定（便を持つ最終ブロック数で評価）
+    if args.blocks and len(real_blocks) != args.blocks:
+        result["warnings"].append(
+            f"--blocks={args.blocks} が指定されましたが、座標からは {len(real_blocks)} "
+            "ブロックしか分離できませんでした。停留所名列が複数方面で共有されている等の理由で、"
+            "座標だけでは指定数に分割できません（推測では分けません）。原典で方面ごとに確認してください。")
+
     if not real_blocks:
         result["warnings"].append("便(時刻列)を持つブロックがありません。座標抽出が効かないPDFの可能性。")
         needs.append({"type": "extraction_failed",
@@ -286,6 +311,29 @@ def main():
                 needs.append({"type": "time_nonmonotonic", "block": b["block_index"],
                               "col_x": t["col_x"],
                               "message": f"便(列x={t['col_x']})で時刻が逆行しています。要予約バス停への寄り道や折り返しの可能性。便の向き・経路順を確認してください。"})
+        # (2b) 便内に「大きな」時刻逆行(既定30分以上)がある便 → 複数方面/パターンの
+        #      混在の可能性。1つの名前列ブロックに別方面の便列が同居していると、
+        #      前方面の終わり→次方面の始まりで時刻が大きく戻る。座標だけでは分離
+        #      できないため、原典で方面ごとに分けて確認するよう促す（正しく失敗）。
+        big_jump_cols = []
+        for t in b["trips"]:
+            def _mm(tt):
+                h, m, *_ = tt.split(":")
+                return int(h) * 60 + int(m)
+            ms = [_mm(c["time"]) for c in t["cells"]]
+            worst_back = max((ms[i] - ms[i + 1] for i in range(len(ms) - 1)), default=0)
+            if worst_back >= args.multi_pattern_min:
+                big_jump_cols.append((t["col_x"], worst_back))
+        if big_jump_cols:
+            cols_desc = "、".join(f"列x={cx}(最大{w}分戻り)" for cx, w in big_jump_cols)
+            needs.append({"type": "multi_pattern_suspected", "block": b["block_index"],
+                          "threshold_min": args.multi_pattern_min,
+                          "cols": [cx for cx, _ in big_jump_cols],
+                          "message": (f"ブロック{b['block_index']}に、便内で{args.multi_pattern_min}分以上の"
+                                      f"大きな時刻逆行を含む便があります（{cols_desc}）。"
+                                      "1つの名前列に複数方面/パターンの便が同居している可能性があります。"
+                                      "座標だけでは方面を分離できないため、原典の時刻表で方面ごとに分けて"
+                                      "（行先・経路別に）確認・割り当ててください。")})
         # (3) 便ごとの停留所数のばらつき → 取りこぼし/区間便の確認
     # (4) 便名・方向は座標から確定できない → 必ず確認
     if real_blocks:
