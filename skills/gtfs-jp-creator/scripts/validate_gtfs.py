@@ -83,7 +83,7 @@ def run_validator(input_path: Path, output_dir: Path, jar_path: Path,
         timeout_sec: タイムアウト秒
 
     Returns:
-        Validator の exit code (0 = 成功、≥1 = 何らかのエラー)
+        Validator の exit code (0 = 成功、>=1 = 何らかのエラー)
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -153,11 +153,11 @@ def print_summary(report_summary: dict, report_path: Path,
 
     # 全体判定
     if err == 0 and warn == 0:
-        verdict = "✅ PASS (エラー・警告ともゼロ)"
+        verdict = "[PASS] エラー・警告ともゼロ"
     elif err == 0:
-        verdict = f"⚠️  WARNING ({warn} 件の警告あり、エラーなし)"
+        verdict = f"[WARNING] {warn} 件の警告あり、エラーなし"
     else:
-        verdict = f"❌ FAIL ({err} 件のエラーあり)"
+        verdict = f"[FAIL] {err} 件のエラーあり"
 
     print()
     print("=" * 64)
