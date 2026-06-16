@@ -341,11 +341,11 @@ def generate_markdown_report(results: dict) -> str:
     s = results["stops"]
     md.append(f"| stops (名前ベース) | {s['official_unique_names']} | {s['our_unique_names']} | {s['matched_count']} | **{s['match_rate_vs_official']}%** |")
     t = results["trips"]
-    md.append(f"| trips | {t['official_count']} | {t['our_count']} | （路線別、下記参照） | — |")
+    md.append(f"| trips | {t['official_count']} | {t['our_count']} | （路線別、下記参照） | ― |")
     st = results["stop_times"]
     md.append(f"| stop_times | {st['official_count']} | {st['our_count']} | {st['matched_pairs']} | **{st['match_rate_vs_official']}%** |")
     c = results["calendar"]
-    md.append(f"| calendar | {c['official_count']} | {c['our_count']} | {c['matched_patterns']}パターン | — |")
+    md.append(f"| calendar | {c['official_count']} | {c['our_count']} | {c['matched_patterns']}パターン | ― |")
     md.append("")
     md.append("---")
 
@@ -399,7 +399,7 @@ def generate_markdown_report(results: dict) -> str:
     for pr in t["per_route"]:
         md.append(f"| {pr['route_key']} | {pr['official_trips']} | {pr['our_trips']} | {pr['match_rate']}% |")
     if not t["per_route"]:
-        md.append("| (マッチした路線なし) | — | — | — |")
+        md.append("| (マッチした路線なし) | ― | ― | ― |")
     md.append("")
     md.append(f"- 公式 trips 路線別件数: {dict(t['official_count_by_route'])}")
     md.append(f"- 当方 trips 路線別件数: {dict(t['our_count_by_route'])}")

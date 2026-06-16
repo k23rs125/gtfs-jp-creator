@@ -33,7 +33,7 @@ Encoding:
     対象テーブル: agency / agency_jp / feed_info。
 
 Status:
-    Phase 1.1 — 国際標準 GTFS に加え、GTFS-JP 拡張 (agency_jp / office_jp /
+    Phase 1.1 ― 国際標準 GTFS に加え、GTFS-JP 拡張 (agency_jp / office_jp /
     routes_jp) と条件確認画面の user_overrides に対応。pattern_jp.txt は将来対応。
 
 Usage:

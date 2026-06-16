@@ -102,7 +102,7 @@ def build_en_prompt(items: list[tuple[str, str]]) -> str:
     """LLM 英訳プロンプトを組み立てる。
 
     Args:
-        items: list of (category, value) — category は "stop_name" 等
+        items: list of (category, value) ― category は "stop_name" 等
     """
     body = []
     body.append("あなたは GTFS-JP 多言語対応の英訳を行うアシスタントです。")

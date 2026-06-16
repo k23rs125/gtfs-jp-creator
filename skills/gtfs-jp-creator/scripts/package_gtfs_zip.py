@@ -159,7 +159,7 @@ def main() -> int:
 
     if warnings:
         print()
-        print("⚠️ 警告:")
+        print("[!] 警告:")
         for w in warnings:
             print(f"  - {w}")
         print("   （GTFS Validator でエラーになる可能性あり）")

@@ -83,10 +83,10 @@ def run_step(label: str, cmd: list[str], dry_run: bool) -> bool:
     proc = subprocess.run(cmd, check=False)
     dt = time.time() - t0
     if proc.returncode == 0:
-        log(f"  ✓ {label} 完了 ({dt:.1f}秒)")
+        log(f"  [OK] {label} 完了 ({dt:.1f}秒)")
         return True
     else:
-        log(f"  ✗ {label} 失敗 (exit {proc.returncode}, {dt:.1f}秒)", "ERROR")
+        log(f"  [NG] {label} 失敗 (exit {proc.returncode}, {dt:.1f}秒)", "ERROR")
         return False
 
 
@@ -358,7 +358,7 @@ def main() -> int:
     log("パイプライン完了")
     print("=" * 64, file=sys.stderr)
     for step, status in results:
-        mark = {"OK": "✓", "SKIP": "・", "FAIL": "✗"}.get(status, "?")
+        mark = {"OK": "[OK]", "SKIP": "・", "FAIL": "[NG]"}.get(status, "?")
         print(f"  {mark} {step:<28} [{status}]", file=sys.stderr)
     print("=" * 64, file=sys.stderr)
     if not args.dry_run:

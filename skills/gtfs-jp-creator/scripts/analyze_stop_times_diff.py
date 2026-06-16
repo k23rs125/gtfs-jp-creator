@@ -357,7 +357,7 @@ def generate_markdown(report: dict) -> str:
     md.append("")
     md.append(f"- 行ごとの比較数: **{s['total_rows_compared']}**")
     md.append(f"- 時刻一致: **{s['time_match_rows']} / {s['total_rows_compared']} "
-              f"= {s['time_match_rate_pct']}%** 🎯")
+              f"= {s['time_match_rate_pct']}%** ")
     md.append(f"- 時刻不一致: {s['time_mismatch_rows']} 件")
     md.append(f"- 停留所名（正規化後）不一致: {s['name_mismatch_rows']} 件")
     md.append(f"- 公式のみ余分行: {s['extra_in_official']}")
@@ -387,7 +387,7 @@ def generate_markdown(report: dict) -> str:
             md.append(f"| {d['off_trip']} | {d['seq']} | {d['off_name']} | "
                       f"{d['our_name']} | {d['off_time']} |")
     else:
-        md.append("（停留所名不一致なし — canonicalize と正規化が完璧）")
+        md.append("（停留所名不一致なし ― canonicalize と正規化が完璧）")
     md.append("")
     md.append("---")
     md.append("")

@@ -143,7 +143,7 @@ def call_nominatim(query: str, bbox: tuple[float, float, float, float] | None = 
 
     Args:
         query:   検索文字列
-        bbox:    (lon_min, lat_min, lon_max, lat_max) — 指定すると viewbox + bounded=1 を付ける
+        bbox:    (lon_min, lat_min, lon_max, lat_max) ― 指定すると viewbox + bounded=1 を付ける
         timeout: HTTP タイムアウト秒
 
     Returns:
@@ -430,7 +430,7 @@ def enrich_one_stop(stop_name: str, context: str | None, agency_name: str | None
             # display_name も保存しておくと検証時に便利
             entry["display_name"] = candidate.get("display_name", "")
             entries[stop_name] = entry
-            print(f"    ✓ found: ({lat:.6f}, {lon:.6f}) [class={candidate.get('class')}, type={candidate.get('type')}]")
+            print(f"    [OK] found: ({lat:.6f}, {lon:.6f}) [class={candidate.get('class')}, type={candidate.get('type')}]")
             print(f"      display_name: {candidate.get('display_name', '')[:90]}")
             return entry, api_calls
         else:
@@ -448,7 +448,7 @@ def enrich_one_stop(stop_name: str, context: str | None, agency_name: str | None
     # 全戦略失敗
     entry = make_cache_entry_failure(attempted)
     entries[stop_name] = entry
-    print(f"    ✗ not found (tried {len(attempted)} queries)")
+    print(f"    [NG] not found (tried {len(attempted)} queries)")
     return entry, api_calls
 
 
@@ -642,9 +642,9 @@ def main() -> int:
     print(f"Output:       {out_path}")
     print(f"Cache:        {cache_path}")
     print(f"Context:      {args.context or '(none)'}")
-    print(f"Prefecture:   {expected_prefecture or '(none — no filter)'}")
-    print(f"Municipality: {expected_municipality or '(none — no filter)'}")
-    print(f"BBox:         {bbox if bbox else '(none — global JP)'}")
+    print(f"Prefecture:   {expected_prefecture or '(none ― no filter)'}")
+    print(f"Municipality: {expected_municipality or '(none ― no filter)'}")
+    print(f"BBox:         {bbox if bbox else '(none ― global JP)'}")
     print(f"Rate:         {args.rate} sec/req")
     print()
 

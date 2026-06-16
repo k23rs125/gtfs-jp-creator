@@ -226,7 +226,7 @@ def main() -> int:
                 "reference_entries": multi,
             })
             note = f" (旧フィードに {multi} 件あり、先頭を採用)" if multi > 1 else ""
-            print(f"  ✓ {raw_name}: ({lat}, {lon}){note}")
+            print(f"  [OK] {raw_name}: ({lat}, {lon}){note}")
         else:
             n_unmatched += 1
             unmatched_details.append({
@@ -234,7 +234,7 @@ def main() -> int:
                 "stop_name": raw_name,
                 "normalized": norm,
             })
-            print(f"  ✗ {raw_name}: 旧フィードに該当なし")
+            print(f"  [NG] {raw_name}: 旧フィードに該当なし")
 
     # --- 書き出し ---
     write_stops_csv(out_path, rows, fieldnames)
