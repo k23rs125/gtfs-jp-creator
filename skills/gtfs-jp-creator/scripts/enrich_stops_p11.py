@@ -39,6 +39,7 @@ import argparse
 import csv
 import difflib
 import json
+import math
 import sys
 import unicodedata
 from datetime import datetime
@@ -54,6 +55,11 @@ except ImportError:
 
 DEFAULT_FUZZY_THRESHOLD = 0.80
 DEFAULT_MAX_FUZZY_CANDIDATES = 5
+# 同名の P11 候補が複数あるとき、最大ペア距離がこの値(m)を超えたら「別地点の疑い」
+# として要確認警告を出す。P11 は上り/下りを別レコードで持つため近接重複は正常
+# （多くは 0m）。既定 100m は方向ペアを誤検出せず、別地点（実測で 182m・18km の
+# 例あり）を捕捉できる値。
+DEFAULT_AMBIGUITY_THRESHOLD_M = 100.0
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +128,7 @@ def load_p11_stops(shapefile_path: Path,
 
     Args:
         shapefile_path: .shp ファイルのパス（.dbf 等も同名で同じディレクトリに）
-        bbox:           (lon_min, lat_min, lon_max, lat_max) — 範囲外は除外
+        bbox:           (lon_min, lat_min, lon_max, lat_max) / 範囲外は除外
 
     Returns:
         list of dict with keys: name (str), lat (float), lon (float), fields (dict)
@@ -387,6 +393,51 @@ def find_best_match(target_name: str, index: dict, fuzzy_threshold: float,
 
 
 # ---------------------------------------------------------------------------
+# 同名あいまい判定（座標選択は変えず、別地点の疑いを警告するためだけに使う）
+# ---------------------------------------------------------------------------
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """2点の緯度経度から直線距離(m)を返す。"""
+    R = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def compute_match_ambiguity(match: dict, index: dict, threshold_m: float
+                            ) -> dict | None:
+    """選ばれた P11 名に同名レコードが複数あり、かつ候補間の最大距離が閾値を
+    超えるとき「別地点の疑い（要確認）」として情報を返す。閾値以内（方向ペア等の
+    近接重複）や同名が1件なら None。
+
+    座標の採否は変更しない（呼び出し側は従来どおり先頭を採用する）。本関数は
+    「黙って1つに決めてよいか」を後判定し、危ういときだけ人に確認を促すためのもの。
+    """
+    same = index["by_exact"].get(normalize_name(match["name"]), [])
+    if len(same) < 2:
+        return None
+    max_d = 0.0
+    for i in range(len(same)):
+        for j in range(i + 1, len(same)):
+            d = _haversine_m(same[i]["lat"], same[i]["lon"],
+                             same[j]["lat"], same[j]["lon"])
+            if d > max_d:
+                max_d = d
+    if max_d <= threshold_m:
+        return None
+    return {
+        "p11_name": match["name"],
+        "candidate_count": len(same),
+        "max_pair_m": round(max_d),
+        "chosen": {"lat": match["lat"], "lon": match["lon"]},
+        "candidates": [{"lat": round(s["lat"], 6), "lon": round(s["lon"], 6)}
+                       for s in same],
+    }
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -405,6 +456,9 @@ def main() -> int:
                         help=f"fuzzy match の最低類似度（既定 {DEFAULT_FUZZY_THRESHOLD}）")
     parser.add_argument("--max-fuzzy-candidates", type=int, default=DEFAULT_MAX_FUZZY_CANDIDATES,
                         help=f"fuzzy match で考慮する候補数（既定 {DEFAULT_MAX_FUZZY_CANDIDATES}）")
+    parser.add_argument("--ambiguity-threshold", type=float, default=DEFAULT_AMBIGUITY_THRESHOLD_M,
+                        help=f"同名候補が複数あるとき、最大ペア距離がこの m を超えたら要確認"
+                             f"警告を出す（既定 {DEFAULT_AMBIGUITY_THRESHOLD_M}m。座標選択は変えない）")
     parser.add_argument("--report", default="p11_enrichment_report.json",
                         help="レポート出力先（既定: ./p11_enrichment_report.json）")
     parser.add_argument("--overwrite", action="store_true",
@@ -443,7 +497,7 @@ def main() -> int:
     print(f"Input:           {in_path}")
     print(f"P11 Shapefile:   {p11_path}")
     print(f"Output:          {out_path}")
-    print(f"BBox:            {bbox if bbox else '(none — 全国)'}")
+    print(f"BBox:            {bbox if bbox else '(none / 全国)'}")
     print(f"Fuzzy threshold: {args.fuzzy_threshold}")
     print()
 
@@ -468,6 +522,7 @@ def main() -> int:
     counters = {"exact": 0, "prefix_suffix": 0, "substring": 0, "fuzzy": 0, "none": 0}
     matched_details = []
     unmatched_details = []
+    ambiguous_details = []
     skipped_already = 0
 
     for row in rows:
@@ -485,7 +540,9 @@ def main() -> int:
         if match is not None:
             row["stop_lat"] = f"{match['lat']:.6f}"
             row["stop_lon"] = f"{match['lon']:.6f}"
-            matched_details.append({
+            # 同名候補が別地点に散らばっていないか後判定（座標は変えず、警告のみ）
+            ambiguity = compute_match_ambiguity(match, index, args.ambiguity_threshold)
+            detail = {
                 "stop_id": row.get("stop_id"),
                 "stop_name": name,
                 "strategy": strategy,
@@ -493,15 +550,27 @@ def main() -> int:
                 "p11_name": match["name"],
                 "lat": match["lat"],
                 "lon": match["lon"],
-            })
-            print(f"  ✓ {name}: [{strategy} sim={score:.2f}] "
+            }
+            if ambiguity is not None:
+                detail["ambiguous"] = ambiguity
+                ambiguous_details.append({
+                    "stop_id": row.get("stop_id"),
+                    "stop_name": name,
+                    **ambiguity,
+                })
+            matched_details.append(detail)
+            print(f"  [一致] {name}: [{strategy} sim={score:.2f}] "
                   f"→ {match['name']} ({match['lat']:.5f}, {match['lon']:.5f})")
+            if ambiguity is not None:
+                print(f"      [要確認] 同名のP11候補が {ambiguity['candidate_count']}件、"
+                      f"最大 {ambiguity['max_pair_m']}m 離れています（先頭を採用）。"
+                      f"別地点の疑い。原典で位置を確認してください。")
         else:
             unmatched_details.append({
                 "stop_id": row.get("stop_id"),
                 "stop_name": name,
             })
-            print(f"  ✗ {name}: 未マッチ")
+            print(f"  [未] {name}: 未マッチ")
 
     # --- 書き出し ---
     write_stops_csv(out_path, rows, fieldnames)
@@ -517,10 +586,12 @@ def main() -> int:
             "newly_enriched": enriched,
             "by_strategy": counters,
             "unmatched": counters["none"],
+            "ambiguous": len(ambiguous_details),
             "coverage_pct": round(coverage, 1),
         },
         "matched": matched_details,
         "unmatched": unmatched_details,
+        "ambiguous_matches": ambiguous_details,
         "p11_file": str(p11_path),
         "bbox": list(bbox) if bbox else None,
         "fuzzy_threshold": args.fuzzy_threshold,
@@ -541,7 +612,16 @@ def main() -> int:
     print(f"Newly enriched (substring):     {counters['substring']}")
     print(f"Newly enriched (fuzzy):         {counters['fuzzy']}")
     print(f"Unmatched:                      {counters['none']}")
+    print(f"Ambiguous (要確認・同名別地点):  {len(ambiguous_details)}")
     print(f"Coverage:                       {report['summary']['coverage_pct']}%")
+    if ambiguous_details:
+        print()
+        print("[要確認] 同名のP11候補が別地点に散らばっています（先頭を採用済み・原典で確認を）:")
+        for a in ambiguous_details[:10]:
+            print(f"  {a['stop_id']}  {a['stop_name']}  "
+                  f"（候補{a['candidate_count']}件・最大{a['max_pair_m']}m）")
+        if len(ambiguous_details) > 10:
+            print(f"  ... and {len(ambiguous_details) - 10} more (see report)")
     if unmatched_details:
         print()
         print("Unmatched stops (Nominatim へフォールバック対象):")
