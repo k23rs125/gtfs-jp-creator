@@ -138,6 +138,8 @@ stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に
 - スクリプト: `scripts/generate_translations.py`
 - 3言語対応: `ja`（原文）/ `ja-Hrkt`（pykakasi で漢字→ひらがな）/ `en`（LLM 英訳）
 - 2段階構成: 抽出フェーズで LLM 用プロンプトを export → 英訳 JSON を merge
+- 難読地名のふりがな・英訳の誤りは `scripts/apply_manual_readings.py` で手動上書きできる
+  （ja-Hrkt / en のみ・field_value をキーに上書き。`apply_manual_coords.py` と同じ思想）
 
 ### Step 5: パッケージング
 
@@ -154,6 +156,27 @@ stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に
   - MobilityData Validator は GTFS-JP拡張（agency_jp/office_jp/pattern_jp/
     routes_jp）に未対応のため、本スクリプトで必須カラム・参照整合性
     （agency_id/route_id）・値域（郵便番号形式・direction_id）を検証する
+
+### 目視検証支援ツール（任意・推奨）
+
+機械的な Validator は「形式の正しさ」しか保証できない。**「PDF 通りか」「座標は妥当か」
+の最終確認は目視**になる（現場のプロも機械Validator＋目視で品質を担保している）。
+以下の3ツールは、その目視を楽に・確実にするための補助で、いずれも決定的処理（推測なし）。
+おかしい点は無理に整形せず色・注記で人に確認を促す（「正しく失敗」）。公式データが無くても使える。
+
+- **対応表**: `scripts/make_correspondence_table.py`
+  - 座標抽出結果(extract JSON)とstops.txtを突き合わせ、便ごとに 番号・名前・時刻・緯度経度
+    を並べたCSVを出力。座標なし・bbox範囲外を自動マーク。人がPDFと照合する作業を助ける。
+  - 例: `python scripts/make_correspondence_table.py extract.json --stops gtfs/stops.txt -o correspondence.csv --bbox 130.34,33.18,130.52,33.32`
+- **速度チェック**: `scripts/check_speed.py`
+  - 停留所間の直線距離(haversine)と時刻差から区間速度を計算し、速すぎ(既定>60km/h)・
+    遅すぎ(<2km/h)・距離あり所要0分 を検出。公式データ無しで時刻の妥当性を機械チェックできる。
+  - 例: `python scripts/check_speed.py --stops gtfs/stops.txt --stop-times gtfs/stop_times.txt -o speed.csv`
+- **地図表示**: `scripts/make_map_view.py`
+  - stops.txt（+任意で shapes/trips/stop_times）から検証用マップHTML(1枚完結・データ埋め込み・
+    外部送信なし)を生成。範囲外座標を橙で強調、ルート線を重ね、便を選ぶと停車停留所を番号順に強調。
+  - 例: `python scripts/make_map_view.py gtfs/stops.txt --shapes gtfs/shapes.txt --trips gtfs/trips.txt --stop-times gtfs/stop_times.txt --bbox 130.34,33.18,130.52,33.32 --title "事業者名" --out map_view.html`
+  - 注意: 地図タイル表示にはネット接続が要る（サンドボックス不可・利用者環境で開く）。
 
 ### ワンコマンド実行
 
