@@ -28,7 +28,7 @@ description: Use this skill when the user wants to create, generate, validate, o
 [Step 3.5c] stops.txt       →  緯度経度補完：Nominatim（OSM）フォールバック
 [Step 3.x]  stops.txt       →  停留所名の表記揺れ正規化（canonicalize）
 [Step 4]    stop_times      →  shapes.txt 生成（OSRM routing /route）
-[Step 6]    stops/routes    →  translations.txt 生成（ja / ja-Hrkt / en）
+[Step 6]    stops/routes    →  translations.txt 生成（既定 ja-Hrkt / en、--include-ja で ja も）
 [Step 5]    全ファイル群     →  zip パッケージング
 [Step 7]    zip             →  バリデーション（GTFS Validator + JP拡張独自検証）
 ```
@@ -136,7 +136,9 @@ stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に
 ### Step 6: translations.txt 生成
 
 - スクリプト: `scripts/generate_translations.py`
-- 3言語対応: `ja`（原文）/ `ja-Hrkt`（pykakasi で漢字→ひらがな）/ `en`（LLM 英訳）
+- 既定は `ja-Hrkt`（pykakasi で漢字→ひらがな）/ `en`（LLM 英訳）の2言語。`--include-ja` で
+  `ja`（原文）行も出せる。既定で ja を出さないのは、feed_lang=ja のとき停留所名の日本語原本は
+  stops.txt が持ち、translations.txt の ja 行は重複になるため（公式フィードも ja-Hrkt / en 構成）
 - 2段階構成: 抽出フェーズで LLM 用プロンプトを export → 英訳 JSON を merge
 - 難読地名のふりがな・英訳の誤りは `scripts/apply_manual_readings.py` で手動上書きできる
   （ja-Hrkt / en のみ・field_value をキーに上書き。`apply_manual_coords.py` と同じ思想）

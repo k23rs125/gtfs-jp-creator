@@ -5,13 +5,17 @@ generate_translations.py
 Step 6 (translations.txt 生成): GTFS-JP 拡張ファイル translations.txt を
 半自動で生成する。
 
-3 言語対応の戦略:
-    [ja]      原文コピー                    → 本スクリプトが直接生成
+言語対応の戦略（既定は ja-Hrkt / en の2言語）:
     [ja-Hrkt] 漢字 → ひらがな読み           → pykakasi（pip install pykakasi）
     [en]      日本語 → 英語                 → LLM（Claude/Gemini/ChatGPT）
+    [ja]      原文コピー（--include-ja 時のみ）→ 本スクリプトが直接生成
+
+    既定で ja 行を出さないのは、feed_lang=ja のとき停留所名の日本語原本は stops.txt
+    が持つため、translations.txt の ja 行は重複になるから（公式 GTFS-JP フィードも
+    ja-Hrkt / en の2言語構成）。ja 行も欲しい場合は --include-ja を指定する。
 
 2 段階構成:
-    1. 抽出フェーズ: ja + ja-Hrkt を生成、LLM 用プロンプトを export
+    1. 抽出フェーズ: ja-Hrkt を生成、LLM 用プロンプトを export
     2. マージフェーズ: ユーザーが LLM から得た en.json を読み込んで最終CSV
 
 設計の根拠:
@@ -187,6 +191,9 @@ def main() -> int:
                         help="LLM 英訳結果 JSON （{name: translation, ...}）を読み込んでマージ")
     parser.add_argument("--no-hiragana", action="store_true",
                         help="pykakasi 未インストール時の救済（ja-Hrkt を生成しない）")
+    parser.add_argument("--include-ja", action="store_true",
+                        help="ja（原文コピー）行も出力する（既定は ja-Hrkt / en のみ。"
+                             "feed_lang=ja では ja 名は stops.txt が持つため既定では重複を避ける）")
     parser.add_argument("--report", default="translations_report.json",
                         help="レポート出力先")
     args = parser.parse_args()
@@ -248,15 +255,16 @@ def main() -> int:
     stats = {"ja": 0, "ja-Hrkt": 0, "en": 0, "en_missing": 0}
 
     for table_name, field_name, value in targets:
-        # ja: 原文そのまま
-        rows.append({
-            "table_name": table_name,
-            "field_name": field_name,
-            "language": "ja",
-            "translation": value,
-            "field_value": value,
-        })
-        stats["ja"] += 1
+        # ja: 原文そのまま（--include-ja 指定時のみ。既定は出さない）
+        if args.include_ja:
+            rows.append({
+                "table_name": table_name,
+                "field_name": field_name,
+                "language": "ja",
+                "translation": value,
+                "field_value": value,
+            })
+            stats["ja"] += 1
 
         # ja-Hrkt: pykakasi
         if kks is not None:
@@ -315,7 +323,8 @@ def main() -> int:
     print("TRANSLATIONS REPORT")
     print("=" * 64)
     print(f"翻訳対象（ユニーク件数）:  {len(targets)}")
-    print(f"ja 行:                     {stats['ja']}")
+    if args.include_ja:
+        print(f"ja 行:                     {stats['ja']}")
     print(f"ja-Hrkt 行:                {stats['ja-Hrkt']}")
     print(f"en 行:                     {stats['en']}")
     print(f"en 未充足:                 {stats['en_missing']}")
