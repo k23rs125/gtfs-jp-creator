@@ -326,7 +326,7 @@ def main() -> int:
         print(f"En prompt:       {args.export_en_prompt}")
     if stats["en_missing"] > 0:
         print()
-        print("⏳ 英訳 (en) が未充足です。次のステップ:")
+        print("[未完了] 英訳 (en) が未充足です。次のステップ:")
         print(f"   1. {args.export_en_prompt or '(export_en_prompt を指定して再実行)'} を Claude/Gemini/ChatGPT にコピペ")
         print(f"   2. LLM から返ってきた JSON を en.json として保存")
         print(f"   3. 本スクリプトを --merge-en en.json で再実行")
