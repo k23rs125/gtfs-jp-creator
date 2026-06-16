@@ -192,7 +192,12 @@ stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に
 ### 精度評価（任意）
 
 - `scripts/eval_compare.py` — 公式フィードとの集合比較（routes/stops/stop_times）
-- `scripts/analyze_stop_times_diff.py` — trip 単位対応付けで時刻の真の精度を測定
+- `scripts/analyze_stop_times_diff.py` — trip 単位対応付けで時刻の真の精度を測定（公式フィードと比較）
+- `scripts/verify_stop_times_vs_extract.py` — **内部整合性検証**：Step1 座標抽出JSON と
+  生成 stop_times.txt の時刻を便ごとに照合し、Step2(LLM)/Step3(生成) で抽出時刻が改変・
+  取りこぼされていないかを検出する。公式フィード不要・版差の影響を受けない（自己完結）。
+  「PDF に忠実に抽出した時刻が最終成果物まで保たれている」ことの保証になる。
+  例: `python scripts/verify_stop_times_vs_extract.py extract.json --gtfs gtfs/ -o verify.md`
 
 ## 必要環境
 
