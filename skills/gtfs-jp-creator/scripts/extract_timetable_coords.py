@@ -108,17 +108,54 @@ def detect_name_x0(name_tokens):
         return None
     return Counter(round(w['x0']) for w in name_tokens).most_common(1)[0][0]
 
+# 方面/方向セクションの見出し行（縦ブロック分割の境界）。
+# コスモス号 弓削線のように、同じ時刻列を共有して方面ごとに縦2セクション積層する
+# 時刻表で、セクションの区切りを与える。詳細: references/notes/kitano_yuge_direction_split_design_v1.md
+# 行内のどこかに時刻があれば（括弧付き (9:02) 含む）その行は見出しではない。
+# 「久留米方面への発車時刻(9:02)…」のような注記行を見出しと誤検出しないため。
+TIME_ANYWHERE = re.compile(r'\d{1,2}:\d{2}')
+# 方面/方向/循環 が括弧（【】（））の内側にある＝方向見出しとみなす。
+# 「久留米方面への発車時刻」(括弧外) のような散文は見出しにしない。
+BRACKET_DIR = re.compile(r'[（(【][^）)】]*(?:方面|方向|循環)')
+HEADING_EXCLUDE_KW = ("問い合わせ", "運行に関する", "お問", "について")
+
+def detect_section_headings(words):
+    """『方面見出し』のトークンを検出して返す（top昇順）。
+    pdfplumber は「【弓削線（古賀茶屋駅方面）】」のような見出しを1トークンに
+    まとめるため、行クラスタせずトークン単位で判定する（同じtopに別ブロックの
+    時刻行が並んでも混ざらない）。
+    条件: (1)トークン内に時刻(括弧付き含む)が無い (2)括弧内に方面/方向/循環
+    (3)案内文でない。縦に積層した方面（例: コスモス号弓削線）を分ける境界に使う。
+    返り値: list of {top, x0, x1, text}"""
+    heads = []
+    for w in words:
+        norm = w['text'].replace("　", "").replace(" ", "")
+        if TIME_ANYWHERE.search(norm):
+            continue  # 時刻(括弧付き含む)を含むトークンは見出しではない
+        if not BRACKET_DIR.search(norm):
+            continue  # 括弧内の方面/方向/循環 でなければ見出しではない
+        if any(k in norm for k in HEADING_EXCLUDE_KW):
+            continue  # 案内文(footer)等を除外
+        heads.append({"top": round(w['top'], 1), "x0": round(w['x0'], 1),
+                      "x1": round(w['x1'], 1), "text": w['text'].strip()})
+    return sorted(heads, key=lambda h: h['top'])
+
 def extract_block(words, x_lo, x_hi, name_margin_left, name_margin_right,
-                  num_x_lo, num_x_hi, time_x_lo, time_x_hi, row_thr, col_gap):
+                  num_x_lo, num_x_hi, time_x_lo, time_x_hi, row_thr, col_gap,
+                  y_lo=float("-inf"), y_hi=float("inf"), skip_tops=()):
     """1つの方向ブロックを抽出する。
 
     x_lo, x_hi: このブロックの停留所名トークンを大まかに含むx範囲（粗い枠）
+    y_lo, y_hi: 縦セクションのy(top)範囲（既定 ±∞＝ページ全体。縦分割時のみ指定）。
+    skip_tops: 停留所として扱わない行のtop（セクション見出し行の除外用）。
+    既定（y_lo=-∞, y_hi=+∞, skip_tops=()）では従来と完全に同じ挙動。
     返り値: dict(stops=[{num,name,top}], trips=[{col_x, cells=[{seq,num,name,time}]}], warnings=[])
     """
     warnings_list = []
     # --- 停留所名列 ---
     jp_in_block = [w for w in words
-                   if x_lo <= w['x0'] <= x_hi and JP_RE.search(w['text'])]
+                   if x_lo <= w['x0'] <= x_hi and JP_RE.search(w['text'])
+                   and y_lo <= w['top'] <= y_hi]
     if not jp_in_block:
         return {"stops": [], "uncertain": [], "trips": [], "warnings": ["停留所名(日本語)トークンが取得できません。座標抽出は不適。"]}
     xmode = detect_name_x0(jp_in_block)
@@ -126,7 +163,8 @@ def extract_block(words, x_lo, x_hi, name_margin_left, name_margin_right,
     name_tokens = [w for w in jp_in_block if lo <= w['x0'] <= hi and w['x0'] >= xmode - name_margin_left]
 
     # --- 番号列（停留所名列の少し左の数字） ---
-    nums = [w for w in words if num_x_lo <= w['x0'] <= num_x_hi and NUM_RE.match(w['text'])]
+    nums = [w for w in words if num_x_lo <= w['x0'] <= num_x_hi and NUM_RE.match(w['text'])
+            and y_lo <= w['top'] <= y_hi]
     numlist = sorted([(sum(t['top'] for t in r) / len(r),
                        "".join(x['text'] for x in sorted(r, key=lambda w: w['x0'])))
                       for r in cluster_rows(nums, row_thr)])
@@ -135,6 +173,8 @@ def extract_block(words, x_lo, x_hi, name_margin_left, name_margin_right,
     uncertain = []  # 番号が取れず、停留所か不確実なもの(要確認)
     for r in cluster_rows(name_tokens, row_thr):
         top = sum(t['top'] for t in r) / len(r)
+        if skip_tops and any(abs(top - h) < row_thr for h in skip_tops):
+            continue  # セクション見出し行は停留所として扱わない
         nm = normalize_name("".join(x['text'] for x in sorted(r, key=lambda w: w['x0'])))
         if is_noise_name(nm):
             continue
@@ -148,7 +188,8 @@ def extract_block(words, x_lo, x_hi, name_margin_left, name_margin_right,
         stops.append(rec)
 
     # --- 時刻列（便） ---
-    times = [w for w in words if time_x_lo <= w['x0'] <= time_x_hi and TIME_RE.match(w['text'])]
+    times = [w for w in words if time_x_lo <= w['x0'] <= time_x_hi and TIME_RE.match(w['text'])
+             and y_lo <= w['top'] <= y_hi]
     if not times:
         warnings_list.append("時刻トークンが取得できません。")
         return {"stops": stops, "uncertain": uncertain, "trips": [], "warnings": warnings_list}
@@ -267,6 +308,8 @@ def main():
     if not block_centers:
         result["warnings"].append("名前列を検出できません。座標抽出が効かないPDFの可能性（停留所名が画像化など）。")
     page_w = page.width
+    # ページ全体から方面見出しトークンを検出（各見出しは後で最も近い名前列ブロックへ割り当て）
+    all_headings = detect_section_headings(words)
     needs = []  # 要確認項目（利用者に質問を投げる材料）
     raw_blocks = []
     for bi, cx in enumerate(block_centers):
@@ -274,12 +317,49 @@ def main():
         num_x_lo, num_x_hi = cx - 58, cx - 12  # 左端を-45→-58に拡大: 3桁番号(名前の左約46pt)を取りこぼさないため
         next_cx = block_centers[bi + 1] if bi + 1 < len(block_centers) else page_w
         time_x_lo, time_x_hi = cx + 120, next_cx - 60 if next_cx < page_w else page_w
-        blk = extract_block(words, x_lo, x_hi,
-                            args.name_x_margin_left, args.name_x_margin_right,
-                            num_x_lo, num_x_hi, time_x_lo, time_x_hi,
-                            args.row_thr, args.col_gap)
-        blk["name_col_x"] = round(cx, 1)
-        raw_blocks.append(blk)
+
+        # --- 方面見出しによる縦セクション分割 ---
+        # このブロックの水平範囲内の見出し行を検出し、時刻帯の「中段」にある見出し
+        # （= 同じ列を共有して縦積みされた別方面の境界）でブロックを縦に分割する。
+        # 中段見出しが無ければ従来どおり 1 ブロック（下の else 節は従来と完全に同一）。
+        # この名前列ブロックに属する見出し（x0が最も近い名前列ブロックに割り当て）
+        headings = [h for h in all_headings
+                    if min(range(len(block_centers)),
+                           key=lambda j: abs(h['x0'] - block_centers[j])) == bi]
+        block_time_tops = [w['top'] for w in words
+                           if time_x_lo <= w['x0'] <= time_x_hi and TIME_RE.match(w['text'])]
+        inbody = []
+        if block_time_tops:
+            tmin, tmax = min(block_time_tops), max(block_time_tops)
+            inbody = sorted(h['top'] for h in headings if tmin < h['top'] < tmax)
+
+        if not inbody:
+            # 従来パス（中段見出しなし）。jojima 等はここを通り、出力は従来と完全一致。
+            blk = extract_block(words, x_lo, x_hi,
+                                args.name_x_margin_left, args.name_x_margin_right,
+                                num_x_lo, num_x_hi, time_x_lo, time_x_hi,
+                                args.row_thr, args.col_gap)
+            blk["name_col_x"] = round(cx, 1)
+            raw_blocks.append(blk)
+        else:
+            # 中段見出しで縦分割。各セクションを別ブロックとして抽出し、方面ラベルを付与。
+            section_bounds = [float("-inf")] + inbody + [float("inf")]
+            for si in range(len(section_bounds) - 1):
+                lo, hi = section_bounds[si], section_bounds[si + 1]
+                if si == 0:
+                    above = [h for h in headings if h['top'] < inbody[0]]
+                    label = above[-1]['text'] if above else None
+                else:
+                    at = [h for h in headings if abs(h['top'] - lo) < 1]
+                    label = at[0]['text'] if at else None
+                blk = extract_block(words, x_lo, x_hi,
+                                    args.name_x_margin_left, args.name_x_margin_right,
+                                    num_x_lo, num_x_hi, time_x_lo, time_x_hi,
+                                    args.row_thr, args.col_gap,
+                                    y_lo=lo, y_hi=hi, skip_tops=inbody)
+                blk["name_col_x"] = round(cx, 1)
+                blk["direction_heading"] = label
+                raw_blocks.append(blk)
 
     # 便を持つブロックのみ「方向ブロック」として採用（校区ラベル等の誤検出を除外）
     real_blocks = [b for b in raw_blocks if b["trips"]]
