@@ -47,7 +47,35 @@ Step 3〜7 をオーケストレーション）。Step 1（PDF抽出）と Step 
 
 ## 各ステップの詳細
 
-### Step 1: PDF/画像 → Markdown
+### Step 1: 入力（Excel / PDF / 画像）→ 抽出
+
+**入力源の選び方（確実な順）**。元データが機械可読なほど高精度なので、上から検討する:
+
+| 入力 | 経路 | スクリプト | 精度 |
+|---|---|---|---|
+| **Excel(.xlsx)** | グリッドを直接読む（最確実・推奨） | `scripts/extract_timetable_excel.py` | 高（OCR/座標不要） |
+| テキストPDF | 座標方式（文字座標で決定的抽出） | `scripts/extract_timetable_coords.py` | 高（誤差ゼロ実証） |
+| 装飾的PDF | Markdown化→LLM構造化 | `scripts/pdf_to_markdown.py`（MinerU） | 中〜高 |
+| 画像化PDF | 適用外（OCR不確実）→ 元データ入手を案内 | （正しく失敗） | 低 |
+
+**テキストPDFか画像PDFか（よくある質問）**: Word/Excel から「PDFとして保存／エクスポート」した
+PDFは**通常テキストPDF**（文字オブジェクトが埋め込まれ、選択・抽出でき座標方式が効く）。
+画像PDFになるのは「紙をスキャン」「画像として書き出し」等の例外のみ。判定法: PDFで文字を
+ドラッグ選択できればテキストPDF。座標方式は文字数 < 20 で画像PDFと自動判定し「正しく失敗」する。
+→ **元データが Excel/Office にあるなら、PDF化せず Excel を直接読むのが最善**（下記）。
+画像PDFしか無い場合は、発行元に元データ(Excel)やテキストPDFの再エクスポートを依頼する。
+
+**Excel を直接読む（`extract_timetable_excel.py`）**:
+```bash
+python scripts/extract_timetable_excel.py timetable.xlsx -o extract.json
+#   [--sheet シート名] [--name-col A] [--header-rows N]
+```
+- 停留所名の列・便（時刻列）を自動検出し、**座標方式と同じ抽出JSON形式**で出力する。
+  以降の Step2(構造化)・Step3〜7 は PDF と完全に共通（`blocks[].trips[].cells[]`）。
+- セルの datetime 時刻・文字列時刻どちらも対応。要予約停留所（名前に「要予約」）も検出。
+- 自動検出が外れる場合は `--name-col`/`--sheet` で上書き。読めない時は推測せず警告（正しく失敗）。
+
+**PDF → Markdown（`pdf_to_markdown.py`）** ※装飾的PDFをLLMで構造化する経路:
 
 スクリプト: `scripts/pdf_to_markdown.py`
 
@@ -208,6 +236,8 @@ stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に
 
 ### ステップ別の追加要件
 
+- **Step 1 Excel**（`extract_timetable_excel.py`）: `pip install openpyxl`
+- **Step 1 座標方式**（`extract_timetable_coords.py`、テキストPDF用）: `pip install pdfplumber`
 - **Step 1 pymupdf4llm**（default）: `pip install pymupdf pymupdf4llm`
 - **Step 1 mineru**（opt-in、装飾PDF用）: `pip install -U "mineru[core]"`（初回 ~3GB のMLモデルDLあり）
 - **Step 3.5b P11**: `pip install pyshp` + 国土数値情報 P11 Shapefile（都道府県別 DL）
