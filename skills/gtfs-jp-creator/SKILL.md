@@ -56,12 +56,13 @@ Step 3〜7 をオーケストレーション）。Step 1（PDF抽出）と Step 
 | **Excel(.xlsx)** | グリッドを直接読む（最確実・推奨） | `scripts/extract_timetable_excel.py` | 高（OCR/座標不要） |
 | テキストPDF | 座標方式（文字座標で決定的抽出） | `scripts/extract_timetable_coords.py` | 高（誤差ゼロ実証） |
 | 装飾的PDF | Markdown化→LLM構造化 | `scripts/pdf_to_markdown.py`（MinerU） | 中〜高 |
-| 画像化PDF | 適用外（OCR不確実）→ 元データ入手を案内 | （正しく失敗） | 低 |
+| 画像化PDF | OCR(MinerU)で抽出を試みる（**精度低下・要目視確認**）。元データ(Excel)があればそちらが最善 | `pdf_to_markdown.py --engine mineru` | 低 |
 
 **テキストPDFか画像PDFか（よくある質問）**: Word/Excel から「PDFとして保存／エクスポート」した
 PDFは**通常テキストPDF**（文字オブジェクトが埋め込まれ、選択・抽出でき座標方式が効く）。
 画像PDFになるのは「紙をスキャン」「画像として書き出し」等の例外のみ。判定法: PDFで文字を
-ドラッグ選択できればテキストPDF。座標方式は文字数 < 20 で画像PDFと自動判定し「正しく失敗」する。
+ドラッグ選択できればテキストPDF。座標方式は文字数 < 20 で画像PDFと自動判定し、**OCR(MinerU)経路へ
+誘導する**（精度が下がるため要目視確認の警告つき）。元データ(Excel)があれば下記で直接読むのが最善。
 → **元データが Excel/Office にあるなら、PDF化せず Excel を直接読むのが最善**（下記）。
 画像PDFしか無い場合は、発行元に元データ(Excel)やテキストPDFの再エクスポートを依頼する。
 

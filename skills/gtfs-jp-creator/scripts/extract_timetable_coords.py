@@ -260,21 +260,34 @@ def main():
     # 文字座標に依存するため、この場合は原理的に機能しない。OCR経路が必要。
     n_chars = len(page.chars)
     if n_chars < 20:
+        # 画像PDF: 座標方式は文字座標に依存するため使えない。拒否せず「精度低下を明示して
+        # OCR(MinerU)経路へ誘導」する。OCRは誤読が起きるため、抽出結果は必ず原典と目視照合
+        # する前提（"正しく失敗"の精神は強い警告と要確認フラグで担保する）。
+        ocr_msg = (f"ページ{page_no}の文字オブジェクトが{n_chars}個しかなく、時刻表が画像化"
+                   "(テキストレイヤなし)と判定しました。座標方式はこのページには使えません。"
+                   "代わりに OCR 経路(MinerU)で抽出を試してください: "
+                   "`python scripts/pdf_to_markdown.py <PDF> --engine mineru --lang japan -o out.md` "
+                   "→ 得られた Markdown を Step2(構造化)へ。"
+                   "ただし OCR は誤読が起きるため精度が下がります。抽出後は必ず原典と目視照合してください。"
+                   "元データ(Excel)があれば extract_timetable_excel.py で直接読むのが最も確実です。")
         result = {"source": str(args.input), "page": page_no, "blocks": [],
                   "warnings": [
-                      f"ページ{page_no}の文字オブジェクトが{n_chars}個しかありません。"
-                      "時刻表が画像化されており(テキストレイヤなし)、座標方式では抽出できません。"
-                      "本ツールはテキストPDFを対象とします。テキスト版PDFまたは元データ(Excel等)の入手を推奨します。"],
+                      f"ページ{page_no}の文字オブジェクトが{n_chars}個しかありません(画像化PDF)。"
+                      "座標方式は使えないため、OCR(MinerU)経路での抽出に切り替えてください"
+                      "（精度低下・要目視確認）。"],
                   "needs_confirmation": [{
-                      "type": "image_pdf_detected", "page": page_no, "n_chars": n_chars,
-                      "message": (f"このPDFのページ{page_no}は時刻表が画像化されており、座標方式で"
-                                  "文字を抽出できません。発行元(自治体・交通事業者)に、テキストレイヤのある"
-                                  "PDF、またはExcel等の元データを問い合わせて入手してください。"
-                                  "本ツールはテキストPDFを対象とします。")}]}
+                      "type": "image_pdf_use_ocr", "page": page_no, "n_chars": n_chars,
+                      "recommended_engine": "mineru",
+                      "accuracy_warning": "OCRのため精度が下がります。抽出結果は必ず原典と目視照合してください。",
+                      "message": ocr_msg}]}
         Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"[INFO] ページ {page_no} を使用", file=sys.stderr)
         print(f"[警告] 文字オブジェクト{n_chars}個 → 画像化PDFと判定。座標方式は使えません。", file=sys.stderr)
-        print(f"[INFO] テキスト版PDFまたは元データ(Excel等)を発行元に問い合わせて入手してください。", file=sys.stderr)
+        print(f"[誘導] OCR経路(MinerU)で抽出してください: "
+              f"pdf_to_markdown.py --engine mineru → Markdown → Step2(構造化)", file=sys.stderr)
+        print(f"[注意] OCRは精度が下がります。抽出結果は必ず原典と目視照合してください。", file=sys.stderr)
+        print(f"[INFO] 元データ(Excel)があれば extract_timetable_excel.py で直接読むのが最も確実です。",
+              file=sys.stderr)
         print(f"[OK] 出力: {args.output}", file=sys.stderr)
         return
 
