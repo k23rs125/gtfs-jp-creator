@@ -43,8 +43,10 @@ def build_extract_sequences(extract: dict, keep_reserve: bool = False) -> dict:
     seqs = {}
     for b in extract.get("blocks", []):
         bi = b.get("block_index", "?")
-        for t in b.get("trips", []):
-            key = f"b{bi}_x{t.get('col_x')}"
+        for ti, t in enumerate(b.get("trips", [])):
+            # PDFは col_x、Excelは col。indexも併用して便キーを一意にする。
+            col = t.get("col_x", t.get("col"))
+            key = f"b{bi}_t{ti}_x{col}"
             rows = []
             s = 0
             for c in t.get("cells", []):
