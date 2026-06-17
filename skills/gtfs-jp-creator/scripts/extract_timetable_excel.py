@@ -121,22 +121,28 @@ def main() -> int:
         print("[警告] シートが空です。", file=sys.stderr)
         return 0
 
-    # --- 時刻セルと便(列) ---
-    time_cells = {(r, c): cell_time(v) for (r, c), v in cells.items() if cell_time(v)}
-    if not time_cells:
+    # --- スケジュール時刻セルと便(列) ---
+    # 時刻型セルのうち「実時刻(hour>=4)」だけを便の時刻とみなす。所要時間列
+    # (例: I/J/L/M列の 0:01, 0:05 など hour=0)を便の時刻と誤検出しないため。
+    sched_cells = {}
+    for (r, c), v in cells.items():
+        t = cell_time(v)
+        if t and int(t.split(":")[0]) >= 4:
+            sched_cells[(r, c)] = t
+    if not sched_cells:
         result = {"source": str(in_path), "sheet": ws.title, "blocks": [],
-                  "warnings": ["時刻(HH:MM)セルが見つかりません。レイアウト/シートを確認してください。"],
+                  "warnings": ["実時刻(4:00以降)のセルが見つかりません。レイアウト/シートを確認してください。"],
                   "needs_confirmation": [{"type": "no_time_cells",
-                      "message": "時刻セルが無いため抽出できません。--sheet で正しいシートを指定するか、時刻が HH:MM 形式か確認してください。"}]}
+                      "message": "便の時刻セル(4:00以降のHH:MM)が無いため抽出できません。--sheet で正しいシートを指定するか、時刻が HH:MM 形式か確認してください。"}]}
         Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2),
                                      encoding="utf-8")
-        print("[警告] 時刻セルが見つかりません。", file=sys.stderr)
+        print("[警告] 便の時刻セルが見つかりません。", file=sys.stderr)
         return 0
 
-    col_time_count = Counter(c for (r, c) in time_cells)
-    trip_cols = sorted([c for c, n in col_time_count.items() if n >= 2])
+    col_sched_count = Counter(c for (r, c) in sched_cells)
+    trip_cols = sorted([c for c, n in col_sched_count.items() if n >= 2])
     if not trip_cols:
-        trip_cols = sorted(col_time_count)  # 各列1便しか無い場合も拾う
+        trip_cols = sorted(col_sched_count)  # 各列1便しか無い場合も拾う
 
     # --- 停留所名の列（自動検出 or 指定） ---
     if args.name_col:
@@ -158,60 +164,95 @@ def main() -> int:
     stop_rows = sorted(row_name)
 
     warnings_list = []
-    # ヘッダ行数の推定（最初の時刻行より上は見出し）
-    first_time_row = min(r for (r, c) in time_cells)
-    if args.header_rows is not None:
-        pass  # 情報用（現状は使用しない。将来便名見出し抽出に使う）
 
-    # --- 便(列)ごとにセルを構築 ---
-    trips = []
-    for tc in trip_cols:
-        cell_list = []
-        seq = 0
-        for r in stop_rows:
-            if (r, tc) in time_cells:
-                seq += 1
-                nm = row_name[r]
-                cell_list.append({"seq": seq, "num": None, "name": nm,
-                                  "time": time_cells[(r, tc)],
-                                  "reserve": nm.startswith("要予約") or "要予約" in nm})
-        if cell_list:
-            def _m(t):
-                h, m, *_ = t.split(":")
-                return int(h) * 60 + int(m)
-            mins = [_m(c["time"]) for c in cell_list]
-            mono = all(mins[i] <= mins[i + 1] for i in range(len(mins) - 1))
-            trips.append({"col": tc, "n_stops": len(cell_list),
-                          "monotonic": mono, "cells": cell_list})
+    # --- セクション(縦表)検出: 便番号ヘッダ行で分割 ---
+    # 便列の位置に小整数(便番号)が並び、実時刻が無い行を「便番号ヘッダ行」とみなす。
+    # その行を境に、同じ列を共有して縦に積まれた別方向の表(例: 上り/下り)を分割する。
+    def _is_int_cell(v):
+        if isinstance(v, bool):
+            return False
+        if isinstance(v, int):
+            return 0 < v < 1000
+        if isinstance(v, str) and v.strip().isdigit():
+            return 0 < int(v.strip()) < 1000
+        return False
 
-    # 停留所は「いずれかの便で時刻を持つ行」に限定する。
-    # （名前列に紛れる見出し行『停留所名』『路線名』等は時刻が無いので自然に除外される）
-    served_rows = sorted({r for r in stop_rows
-                          if any((r, tc) in time_cells for tc in trip_cols)})
-    stops = [{"num": None, "name": row_name[r], "row": r,
-              "reserve": row_name[r].startswith("要予約")} for r in served_rows]
+    header_rows = []
+    for r in range(1, ws.max_row + 1):
+        ints = sum(1 for tc in trip_cols
+                   if _is_int_cell(cells.get((r, tc))) and (r, tc) not in sched_cells)
+        has_sched = any((r, tc) in sched_cells for tc in trip_cols)
+        if ints >= 2 and not has_sched:
+            header_rows.append(r)
+    header_rows.sort()
 
-    block = {"block_index": 0, "name_col": name_col, "stops": stops,
-             "trips": trips, "warnings": warnings_list}
+    # 各セクションの範囲: (ヘッダ行, 開始行, 終了行)。ヘッダが無ければ単一表。
+    if header_rows:
+        bounds = header_rows + [ws.max_row + 1]
+        sections = [(header_rows[i], header_rows[i], bounds[i + 1])
+                    for i in range(len(header_rows))]
+    else:
+        sections = [(None, 0, ws.max_row + 1)]
+
+    def _m(t):
+        h, m, *_ = t.split(":")
+        return int(h) * 60 + int(m)
+
+    blocks = []
     needs = []
-    for t in trips:
-        if not t["monotonic"]:
-            needs.append({"type": "time_nonmonotonic", "col": t["col"],
-                          "message": f"便(列{t['col']})で時刻が逆行しています。要予約への寄り道や折り返し、"
-                                     "または別方面の混在の可能性。原典で確認してください。"})
+    all_served = set()
+    for hdr, r_lo, r_hi in sections:
+        sec_rows = sorted(r for r in row_name
+                          if r_lo <= r < r_hi and (hdr is None or r > hdr))
+        trips = []
+        for tc in trip_cols:
+            cell_list = []
+            seq = 0
+            for r in sec_rows:
+                if (r, tc) in sched_cells:
+                    seq += 1
+                    nm = row_name[r]
+                    cell_list.append({"seq": seq, "num": None, "name": nm,
+                                      "time": sched_cells[(r, tc)],
+                                      "reserve": "要予約" in nm})
+            if cell_list:
+                mins = [_m(c["time"]) for c in cell_list]
+                mono = all(mins[i] <= mins[i + 1] for i in range(len(mins) - 1))
+                tnum = cells.get((hdr, tc)) if hdr is not None else None
+                trips.append({"col": tc,
+                              "trip_number": str(tnum) if tnum is not None else None,
+                              "n_stops": len(cell_list), "monotonic": mono,
+                              "cells": cell_list})
+        served = sorted({r for r in sec_rows
+                         if any((r, tc) in sched_cells for tc in trip_cols)})
+        all_served |= set(served)
+        if not trips:
+            continue
+        stops = [{"num": None, "name": row_name[r], "row": r,
+                  "reserve": "要予約" in row_name[r]} for r in served]
+        bi = len(blocks)
+        blocks.append({"block_index": bi, "name_col": name_col, "section_row": hdr,
+                       "stops": stops, "trips": trips, "warnings": []})
+        for t in trips:
+            if not t["monotonic"]:
+                needs.append({"type": "time_nonmonotonic", "block": bi, "col": t["col"],
+                              "message": f"ブロック{bi} 便(列{t['col']})で時刻が逆行しています。"
+                                         "要予約への寄り道や折り返しの可能性。原典で確認してください。"})
     needs.append({"type": "assign_required",
                   "message": "便名・方向(direction_id)・循環の展開は表構造から確定できません。原典と照合して割り当ててください(Step2)。"})
 
     result = {"source": str(in_path), "sheet": ws.title,
-              "blocks": [block], "warnings": warnings_list,
+              "blocks": blocks, "warnings": warnings_list,
               "needs_confirmation": needs}
     Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2),
                                  encoding="utf-8")
 
     # サマリ（cp932安全・絵文字なし）
+    total_trips = sum(len(b["trips"]) for b in blocks)
     print(f"[INFO] シート: {ws.title}", file=sys.stderr)
-    print(f"[INFO] 停留所名の列: {name_col}列  便(時刻列): {len(trip_cols)}列", file=sys.stderr)
-    print(f"[INFO] 停留所 {len(stops)} / 便 {len(trips)} を抽出", file=sys.stderr)
+    print(f"[INFO] 停留所名の列: {name_col}列  便(時刻列): {len(trip_cols)}列  "
+          f"セクション(表): {len(blocks)}", file=sys.stderr)
+    print(f"[INFO] 停留所 {len(all_served)} / 便 {total_trips} を抽出", file=sys.stderr)
     if needs:
         print(f"[INFO] 要確認: {len(needs)}件", file=sys.stderr)
     print(f"[OK] 出力: {args.output}", file=sys.stderr)
