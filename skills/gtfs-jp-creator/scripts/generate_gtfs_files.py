@@ -462,6 +462,16 @@ def generate_feed_info(data: dict, output_dir: Path) -> None:
         "feed_publisher_name", "feed_publisher_url", "feed_lang",
         "feed_start_date", "feed_end_date", "feed_version",
     ]
+    # 連絡先（GTFS/GTFS-JP 推奨。feed_info か agency.email から補完して出力する。
+    # 無いと Validator が missing_feed_contact_email_and_url を出すため）。
+    contact_email = fi.get("feed_contact_email") or agency.get("agency_email") or ""
+    contact_url = fi.get("feed_contact_url") or ""
+    if contact_email:
+        row["feed_contact_email"] = contact_email
+        fieldnames.append("feed_contact_email")
+    if contact_url:
+        row["feed_contact_url"] = contact_url
+        fieldnames.append("feed_contact_url")
     write_csv(output_dir / "feed_info.txt", [row], fieldnames)
 
 
