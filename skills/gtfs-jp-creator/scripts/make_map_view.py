@@ -433,6 +433,12 @@ def main():
         if not args.shapes:
             sys.exit("ERROR: --trips を使うには --shapes も必要です")
         trips = read_trips(args.trips)
+        # shape_id を持つ便が1件も無い → 便選択(時刻表示)が機能しない。よくある原因は
+        # shape_id が空の trips.txt を渡したこと（shape_id 入りは trips.with_shapes.txt）。
+        if not trips:
+            print("WARN: 指定された trips に shape_id を持つ便がありません。便選択(クリックで"
+                  "時刻表示)が機能しません。shape_id 入りの trips.with_shapes.txt を --trips に"
+                  "指定してください。", file=sys.stderr)
         # tripsが参照するshapeがshapesに無い場合は除外して警告
         valid = set(shapes)
         dropped = [t for t in trips if t["shape_id"] not in valid]
