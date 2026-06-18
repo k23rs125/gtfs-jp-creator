@@ -332,6 +332,8 @@ run_pipeline.py --config <config.json>
 | `canonical_reference` | — | 表記揺れ正規化の参照フィード（Step 3.x 用）|
 | `use_nominatim` | — | `true` で Step 3.5c を有効化（既定 false）|
 | `translations_en_json` | — | LLM 英訳済み JSON。無ければ en プロンプトを export |
+| `manual_coords` | — | 手動座標 JSON（Step 3.5d）。P11/Nominatim で当たらない停留所を確定。**shapes 生成より前**に適用するので経路がその停留所を通る（stop_too_far_from_shape を防ぐ）|
+| `manual_readings` | — | 手動読み JSON（Step 6b）。難読地名のふりがな/英訳を上書き |
 | `validate` | — | `true` で Step 7 GTFS Validator を実行 |
 
 ### 使い方
