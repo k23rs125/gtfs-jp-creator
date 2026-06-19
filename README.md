@@ -4,6 +4,11 @@
 
 A Claude Code / Cowork mode plugin containing a Skill that helps non-experts (bus operators, municipal staff, citizens, researchers) create [GTFS-JP](https://www.mlit.go.jp/sogoseisaku/transport/sosei_transport_tk_000054.html) (Japan public transit data standard, v4.0) data from non-machine-readable sources such as bus timetable PDFs, photographed paper schedules, Excel spreadsheets, or textual route descriptions.
 
+> 📖 **まずはこちら → [使い方・統合ガイド（人間向け導線 ＋ LLM司令書）](使い方_統合ガイド.md)**
+> バス時刻表（PDF / Excel）から GTFS-JP を作る最短の流れと、ツール付きLLMに実行させる手順・条件確認・品質ゲートを1枚にまとめている。
+>
+> ⚠️ 正確さの源は **スクリプト（決定的処理）** であり、本ガイドは「司令書」である。LLM単体（貼るだけ）では正確なデータにならない。**スキル一式（スクリプト＋ガイド）をツール付きLLMで実行**すること。
+
 ## 状態
 
 **動作する実装段階（中間発表に向けた開発フェーズ）**
