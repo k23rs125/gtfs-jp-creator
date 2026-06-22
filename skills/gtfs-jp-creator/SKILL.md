@@ -75,6 +75,13 @@ python scripts/extract_timetable_excel.py timetable.xlsx -o extract.json
   以降の Step2(構造化)・Step3〜7 は PDF と完全に共通（`blocks[].trips[].cells[]`）。
 - セルの datetime 時刻・文字列時刻どちらも対応。要予約停留所（名前に「要予約」）も検出。
 - 自動検出が外れる場合は `--name-col`/`--sheet` で上書き。読めない時は推測せず警告（正しく失敗）。
+- **転置レイアウト（停留所が「列」・便が「行」）**には本スクリプトは非対応。その場合は
+  `scripts/extract_excel_transposed.py` を使う（各シート＝1方向、JR接続時刻・所要時間など
+  停留所でない列は見出しパターンで自動除外）。実証: 芦屋タウンバス（2方向32停留所116便）で
+  内部整合 1945/1945＝100\%。
+  ```bash
+  python scripts/extract_excel_transposed.py timetable.xlsx -o extract.json [--header-row 2]
+  ```
 
 **PDF → Markdown（`pdf_to_markdown.py`）** ※装飾的PDFをLLMで構造化する経路:
 
