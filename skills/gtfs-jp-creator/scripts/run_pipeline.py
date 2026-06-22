@@ -308,6 +308,27 @@ def main() -> int:
         record("Step 3.5d 手動座標", True, skipped=True)
         log("Step 3.5d: manual_coords 未指定のためスキップ")
 
+    # ---- Step 3.5e: 経路内挿による「推定座標（要確認）」補完（既定OFF・opt-in） ----
+    # 旧feed/P11/Nominatim/手動でも埋まらない停留所を、便の停留所順で前後の既知座標から
+    # 内挿する。内挿値は推定（誤差中央値約146m）なのでレポートで要確認として明示し、
+    # 市域外に出た内挿は外れ値として採用しない（座標補完評価.tex 参照）。
+    # 「正しく失敗」の原則上、既定はOFF。config で "interpolate_coords": true にすると有効。
+    if cfg.get("interpolate_coords"):
+        out = work_dir / "stops_3.5e.txt"
+        cmd = [PYTHON, script("interpolate_coords.py"), str(stops_current),
+               "--stop-times", str(gtfs_dir / "stop_times.txt"), "-o", str(out),
+               "--report", str(work_dir / "interpolate_report.json")]
+        if context and any(s in context for s in ("市", "町", "村", "区")):
+            cmd += ["--municipality", context]
+        ok = run_step("Step 3.5e: 経路内挿で推定座標を補完 (interpolate_coords)",
+                      cmd, args.dry_run)
+        record("Step 3.5e 経路内挿(推定)", ok)
+        if ok:
+            stops_current = out
+    else:
+        record("Step 3.5e 経路内挿(推定)", True, skipped=True)
+        log("Step 3.5e: interpolate_coords 未指定のためスキップ（既定OFF）")
+
     # ---- 最終 stops.txt を gtfs_dir に反映 ----
     if not args.dry_run and stops_current != (gtfs_dir / "stops.txt"):
         shutil.copy(stops_current, gtfs_dir / "stops.txt")
