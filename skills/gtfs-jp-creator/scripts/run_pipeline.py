@@ -242,6 +242,10 @@ def main() -> int:
                "--report", str(work_dir / "p11_report.json")]
         if bbox:
             cmd += ["--bbox", bbox]
+        # context（例: 福岡県久留米市）から市域bboxを取得し、県内同名別自治体への
+        # 誤マッチを防ぐ（市区町村名を含む context のときのみ）。
+        if context and any(context.endswith(s) or s in context for s in ("市", "町", "村", "区")):
+            cmd += ["--municipality", context]
         ok = run_step("Step 3.5b: 国土数値情報 P11 で補完 (enrich_stops_p11)",
                       cmd, args.dry_run)
         record("Step 3.5b P11補完", ok)

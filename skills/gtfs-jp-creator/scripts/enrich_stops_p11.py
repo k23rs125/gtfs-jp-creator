@@ -42,9 +42,36 @@ import json
 import math
 import sys
 import unicodedata
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+
+def fetch_municipality_bbox(name: str, margin_deg: float = 0.02, timeout: int = 20
+                            ) -> tuple[float, float, float, float] | None:
+    """自治体名を Nominatim で引き、その範囲 bbox(lon_min,lat_min,lon_max,lat_max) を返す。
+
+    P11 候補を市域に限定し、県内の同名別自治体への誤マッチ（例: うるま市の
+    「城前郵便局前」が名護方面の同名にヒット）を防ぐために使う。取得できなければ None。
+    """
+    url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode(
+        {"q": name, "format": "json", "limit": 1, "countrycodes": "jp"})
+    req = urllib.request.Request(url, headers={"User-Agent": "gtfs-jp-creator/1.0"})
+    try:
+        data = json.load(urllib.request.urlopen(req, timeout=timeout))
+    except Exception as e:  # noqa: BLE001
+        print(f"  ! 自治体bbox取得失敗({type(e).__name__}): {name}", file=sys.stderr)
+        return None
+    if not data:
+        return None
+    bb = data[0].get("boundingbox")   # [lat_min, lat_max, lon_min, lon_max]（文字列）
+    if not bb or len(bb) != 4:
+        return None
+    lat_min, lat_max, lon_min, lon_max = (float(x) for x in bb)
+    m = margin_deg
+    return (lon_min - m, lat_min - m, lon_max + m, lat_max + m)
 
 try:
     import shapefile  # pyshp
@@ -452,6 +479,11 @@ def main() -> int:
                         help="出力 stops.txt（既定: <input>.p11.txt）")
     parser.add_argument("--bbox", default=None,
                         help="P11 を絞る範囲 (lon_min,lat_min,lon_max,lat_max)")
+    parser.add_argument("--municipality", default=None,
+                        help="自治体名（例: 'うるま市 沖縄県'）。Nominatim でその範囲bboxを取得し、"
+                             "P11候補を市域に限定して県内の同名別自治体への誤マッチを防ぐ")
+    parser.add_argument("--municipality-margin", type=float, default=0.02,
+                        help="--municipality bbox に加える余裕(度)。既定 0.02（約2km）")
     parser.add_argument("--fuzzy-threshold", type=float, default=DEFAULT_FUZZY_THRESHOLD,
                         help=f"fuzzy match の最低類似度（既定 {DEFAULT_FUZZY_THRESHOLD}）")
     parser.add_argument("--max-fuzzy-candidates", type=int, default=DEFAULT_MAX_FUZZY_CANDIDATES,
@@ -493,6 +525,21 @@ def main() -> int:
         except ValueError as e:
             print(f"Error: --bbox parse failed: {e}", file=sys.stderr)
             return 1
+
+    # 自治体名から bbox を自動取得し、P11候補を市域に限定（県内同名の誤マッチ防止）
+    if args.municipality:
+        mb = fetch_municipality_bbox(args.municipality, args.municipality_margin)
+        if mb:
+            if bbox:   # 明示bboxとの交差をとる
+                bbox = (max(bbox[0], mb[0]), max(bbox[1], mb[1]),
+                        min(bbox[2], mb[2]), min(bbox[3], mb[3]))
+            else:
+                bbox = mb
+            print(f"自治体bbox({args.municipality}): "
+                  f"({mb[0]:.4f},{mb[1]:.4f},{mb[2]:.4f},{mb[3]:.4f})")
+        else:
+            print(f"! 自治体bboxを取得できず、bbox制約なしで続行: {args.municipality}",
+                  file=sys.stderr)
 
     print(f"Input:           {in_path}")
     print(f"P11 Shapefile:   {p11_path}")
