@@ -308,6 +308,24 @@ def main() -> int:
         record("Step 3.5d 手動座標", True, skipped=True)
         log("Step 3.5d: manual_coords 未指定のためスキップ")
 
+    # ---- Step 3.5d2: 経路ジオメトリ外れ値の棄却（同名誤マッチ検出・既定ON） ----
+    # 座標が付いていても経路から大きく外れる停留所（南北に長い自治体のbbox内での同名別地点
+    # への誤マッチ等）を棄却し、後段の内挿/手動に回す。公式データと比較しないと見えない誤りを
+    # 自動検出する（例: 築城巡回線の八津田が約10km、京築恵みの郷が約8km離れた同名にヒット）。
+    if cfg.get("reject_geom_outliers", True):
+        out = work_dir / "stops_3.5d2.txt"
+        ok = run_step("Step 3.5d2: 経路ジオメトリ外れ値の棄却 (reject_geom_outliers)",
+                      [PYTHON, script("reject_geom_outliers.py"), str(stops_current),
+                       "--stop-times", str(gtfs_dir / "stop_times.txt"), "-o", str(out),
+                       "--report", str(work_dir / "geom_outlier_report.json")],
+                      args.dry_run)
+        record("Step 3.5d2 経路外れ値棄却", ok)
+        if ok:
+            stops_current = out
+    else:
+        record("Step 3.5d2 経路外れ値棄却", True, skipped=True)
+        log("Step 3.5d2: reject_geom_outliers=false のためスキップ")
+
     # ---- Step 3.5e: 経路内挿による「推定座標（要確認）」補完（既定OFF・opt-in） ----
     # 旧feed/P11/Nominatim/手動でも埋まらない停留所を、便の停留所順で前後の既知座標から
     # 内挿する。内挿値は推定（誤差中央値約146m）なのでレポートで要確認として明示し、
