@@ -65,7 +65,7 @@ def main() -> int:
     ap.add_argument("--municipality", default=None,
                     help="自治体名。範囲bboxを取得し、市域外に出た内挿を外れ値として棄却")
     ap.add_argument("--bbox", default=None, help="外れ値ガード範囲 (lon_min,lat_min,lon_max,lat_max)")
-    ap.add_argument("--municipality-margin", type=float, default=0.02)
+    ap.add_argument("--municipality-margin", type=float, default=0.04)
     args = ap.parse_args()
 
     in_path = Path(args.input)

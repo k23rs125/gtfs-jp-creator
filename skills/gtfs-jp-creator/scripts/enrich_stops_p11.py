@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Any
 
 
-def fetch_municipality_bbox(name: str, margin_deg: float = 0.02, timeout: int = 20
+def fetch_municipality_bbox(name: str, margin_deg: float = 0.04, timeout: int = 20
                             ) -> tuple[float, float, float, float] | None:
     """自治体名を Nominatim で引き、その範囲 bbox(lon_min,lat_min,lon_max,lat_max) を返す。
 
@@ -494,8 +494,10 @@ def main() -> int:
     parser.add_argument("--municipality", default=None,
                         help="自治体名（例: 'うるま市 沖縄県'）。Nominatim でその範囲bboxを取得し、"
                              "P11候補を市域に限定して県内の同名別自治体への誤マッチを防ぐ")
-    parser.add_argument("--municipality-margin", type=float, default=0.02,
-                        help="--municipality bbox に加える余裕(度)。既定 0.02（約2km）")
+    parser.add_argument("--municipality-margin", type=float, default=0.04,
+                        help="--municipality bbox に加える経路余裕(corridor margin・度)。"
+                             "既定 0.04（約4km）。路線が隣接自治体にまたがる停留所も拾いつつ、"
+                             "数十km離れた遠方の同名は引き続き除外する")
     parser.add_argument("--fuzzy-threshold", type=float, default=DEFAULT_FUZZY_THRESHOLD,
                         help=f"fuzzy match の最低類似度（既定 {DEFAULT_FUZZY_THRESHOLD}）")
     parser.add_argument("--max-fuzzy-candidates", type=int, default=DEFAULT_MAX_FUZZY_CANDIDATES,
