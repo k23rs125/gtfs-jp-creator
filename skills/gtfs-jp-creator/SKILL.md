@@ -253,6 +253,9 @@ stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に
 - config JSON 1枚で Step 3〜7 を一括オーケストレーション
 - 実行前に条件確認サマリ（要入力項目）を表示し、最後に Step 7b として
   GTFS-JP 拡張検証（`validate_gtfs_jp_extensions.py`）も自動実行する
+- config に `extract_json`（blocks/cells形式の抽出JSON）を指定すると **Step 7c 内部整合検証**
+  （`verify_stop_times_vs_extract.py --strict`）も自動実行し、抽出時刻が stop_times まで
+  保たれているかを照合する（不一致はFAIL・`output_dir/stoptimes_verify.{md,json}` に出力）
 - `translations_en_json` を指定すると Step 6 で英訳を自動マージ
 - `--dry-run` で実行計画のプレビュー可能
 

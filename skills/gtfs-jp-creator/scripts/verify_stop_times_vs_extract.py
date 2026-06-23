@@ -113,6 +113,9 @@ def main() -> int:
     ap.add_argument("--json", default=None, help="JSON レポート出力先（任意）")
     ap.add_argument("--keep-reserve", action="store_true",
                     help="要予約バス停も照合に含める（既定は除外＝生成と同条件）")
+    ap.add_argument("--strict", action="store_true",
+                    help="判定がPASSでないとき終了コード2を返す（パイプライン組み込み用）。"
+                         "既定は常に0で、レポートのみ出力する")
     args = ap.parse_args()
 
     ext_path = Path(args.extract)
@@ -186,6 +189,8 @@ def main() -> int:
     print(f"[OK] Markdown: {args.output}", file=sys.stderr)
     if args.json:
         print(f"[OK] JSON: {args.json}", file=sys.stderr)
+    if args.strict and not verdict_ok:
+        return 2   # パイプラインで FAIL として拾わせる
     return 0
 
 
