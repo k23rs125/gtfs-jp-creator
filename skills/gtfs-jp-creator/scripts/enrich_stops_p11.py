@@ -135,6 +135,30 @@ def write_stops_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None
             writer.writerow({k: row.get(k, "") for k in fieldnames})
 
 
+def write_review_csv(path: Path, ambiguous: list[dict]) -> None:
+    """同名複数候補（別地点の疑い）の停留所を『要確認リスト』CSVに書き出す。
+
+    黙って先頭候補を採用しているので、利用者/手動で正しい位置を確認してもらうための
+    成果物。Excel で開けるよう utf-8-sig。あいまいが0件なら呼び出し側で抑止する。
+    列: stop_id, stop_name, 理由, 詳細, 採用lat, 採用lon, 候補一覧
+    """
+    fields = ["stop_id", "stop_name", "理由", "詳細", "採用lat", "採用lon", "候補一覧"]
+    with path.open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields, lineterminator="\r\n")
+        w.writeheader()
+        for a in ambiguous:
+            cands = " | ".join(f"{c['lat']},{c['lon']}" for c in a.get("candidates", []))
+            w.writerow({
+                "stop_id": a.get("stop_id", ""),
+                "stop_name": a.get("stop_name", ""),
+                "理由": "同名複数候補",
+                "詳細": f"候補{a.get('candidate_count')}件・最大{a.get('max_pair_m')}m離れ（先頭を仮採用）",
+                "採用lat": a.get("chosen", {}).get("lat", ""),
+                "採用lon": a.get("chosen", {}).get("lon", ""),
+                "候補一覧": cands,
+            })
+
+
 def has_coords(row: dict) -> bool:
     lat = (row.get("stop_lat") or "").strip()
     lon = (row.get("stop_lon") or "").strip()
@@ -507,6 +531,10 @@ def main() -> int:
                              f"警告を出す（既定 {DEFAULT_AMBIGUITY_THRESHOLD_M}m。座標選択は変えない）")
     parser.add_argument("--report", default="p11_enrichment_report.json",
                         help="レポート出力先（既定: ./p11_enrichment_report.json）")
+    parser.add_argument("--review-csv", default=None,
+                        help="同名で複数候補があり別地点の疑いがある停留所を『要確認リスト』CSVに出力する。"
+                             "黙って先頭を採用せず、利用者/手動で位置を確認してもらうための成果物。"
+                             "あいまいが0件なら書き出さない（feed フォルダに置く想定）")
     parser.add_argument("--overwrite", action="store_true",
                         help="既に座標がある stop も上書きする")
     args = parser.parse_args()
@@ -660,6 +688,13 @@ def main() -> int:
     }
     with report_path.open("w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
+
+    # --- 要確認リスト CSV（同名複数候補のみ・あいまいが有るときだけ書く） ---
+    if args.review_csv and ambiguous_details:
+        review_path = Path(args.review_csv)
+        review_path.parent.mkdir(parents=True, exist_ok=True)
+        write_review_csv(review_path, ambiguous_details)
+        print(f"要確認リスト書き出し: {review_path}（{len(ambiguous_details)}件）")
 
     # --- サマリ ---
     print()

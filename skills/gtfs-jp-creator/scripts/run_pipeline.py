@@ -239,7 +239,10 @@ def main() -> int:
         out = work_dir / "stops_3.5b.txt"
         cmd = [PYTHON, script("enrich_stops_p11.py"), str(stops_current),
                "--p11", p11_shapefile, "-o", str(out),
-               "--report", str(work_dir / "p11_report.json")]
+               "--report", str(work_dir / "p11_report.json"),
+               # 同名複数候補（別地点の疑い）は黙って先頭採用せず、feed と一緒に
+               # 要確認リストを置いて利用者/手動確認に回す（あいまい0件なら生成されない）。
+               "--review-csv", str(output_dir / "座標_要確認.csv")]
         if bbox:
             cmd += ["--bbox", bbox]
         # context（例: 福岡県久留米市）から市域bboxを取得し、県内同名別自治体への
@@ -443,6 +446,15 @@ def main() -> int:
     print("=" * 64, file=sys.stderr)
     if not args.dry_run:
         log(f"成果物 zip: {output_zip}")
+        # 同名複数候補の要確認リストがあれば最終サマリで明示（黙って先頭採用しているため）。
+        review_csv = output_dir / "座標_要確認.csv"
+        if review_csv.exists():
+            try:
+                n_review = max(0, sum(1 for _ in review_csv.open(encoding="utf-8-sig")) - 1)
+            except OSError:
+                n_review = 0
+            log(f"[要確認] 同名で複数候補がある停留所 {n_review}件: {review_csv}")
+            log("  → 黙って先頭候補を採用済み。利用者に位置を確認（どちらの○○か）してください。")
 
     n_fail = sum(1 for _, s in results if s == "FAIL")
     return 0 if n_fail == 0 else 1
