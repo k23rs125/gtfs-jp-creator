@@ -256,6 +256,8 @@ stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に
 - config に `extract_json`（blocks/cells形式の抽出JSON）を指定すると **Step 7c 内部整合検証**
   （`verify_stop_times_vs_extract.py --strict`）も自動実行し、抽出時刻が stop_times まで
   保たれているかを照合する（不一致はFAIL・`output_dir/stoptimes_verify.{md,json}` に出力）
+- **Step 4b 検証用マップ**（`make_map_view.py`）を既定で自動生成し、`output_dir/map_view.html`
+  を出力する（座標の範囲外・未補完を色分け、便選択で停車順を強調）。`map_view: false` で抑止
 - `translations_en_json` を指定すると Step 6 で英訳を自動マージ
 - `--dry-run` で実行計画のプレビュー可能
 
