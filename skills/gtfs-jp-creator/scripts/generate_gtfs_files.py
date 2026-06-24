@@ -181,7 +181,9 @@ def generate_agency_jp(data: dict, output_dir: Path, default_agency_id: str) -> 
         return aj.get(key) or ag.get(key) or ""
 
     row = {
-        "agency_id": aj.get("agency_id") or default_agency_id,
+        # JP拡張レコードは必ずフィード本体の事業者を指す。spec が AGENCY_TBD 等の
+        # プレースホルダや異なる値を持っていても agency.txt の agency_id に統一する。
+        "agency_id": default_agency_id,
         "agency_official_name": pick("agency_official_name"),
         "agency_zip_number": pick("agency_zip_number"),
         "agency_address": pick("agency_address"),
@@ -403,8 +405,15 @@ def generate_fare_attributes(data: dict, output_dir: Path, default_agency_id: st
         return
     rows = []
     for f in fares:
+        # fare は必ずフィードの事業者に属する。spec が AGENCY_TBD 等のプレースホルダや
+        # agency と異なる値を持っていても agency.txt の agency_id に強制統一し、
+        # fare_attributes.agency_id の foreign_key_violation 再発を決定的に防ぐ。
+        spec_aid = f.get("agency_id")
+        if spec_aid and spec_aid != default_agency_id:
+            print(f"[WARN] fare '{f.get('fare_id')}' の agency_id '{spec_aid}' を "
+                  f"agency '{default_agency_id}' に統一しました", file=sys.stderr)
         rows.append({
-            "agency_id": f.get("agency_id") or default_agency_id,
+            "agency_id": default_agency_id,
             "fare_id": f["fare_id"],
             "price": f["price"],
             "currency_type": f.get("currency_type") or "JPY",

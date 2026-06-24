@@ -177,6 +177,10 @@ LLMプロンプト: `references/prompts/01_pdf_extraction.md`
 - `office_jp.txt`（JP拡張・任意）は `office_jp` セクションがある場合のみ生成
 - 生成前に `_meta.user_overrides`（条件確認画面の補完値）を最終値へ反映
 - `calendar.end_date` が未指定なら start_date から日本の年度末を自動計算
+- **agency_id の整合を自動強制**：`fare_attributes.agency_id` と `agency_jp.agency_id` は、
+  構造化JSONが `AGENCY_TBD` 等のプレースホルダや異なる値を持っていても、必ず `agency.txt` の
+  `agency_id` に統一する（不一致時は WARN）。`fare_attributes` の foreign_key_violation 再発を
+  決定的に防ぐ。**構造化（Step2）では agency / agency_jp / fare を同一 agency_id で揃えること。**
 
 ### Step 3.5: 緯度経度補完（3段階階層）
 
