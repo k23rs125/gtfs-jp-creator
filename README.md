@@ -11,25 +11,24 @@ A Claude Code / Cowork mode plugin containing a Skill that helps non-experts (bu
 
 ## クイックスタート（clone して Claude Code で使う）
 
-このスキルは **Claude Code で動かす**。次の手順で利用できる。
+このスキルは **Claude Code で動かす**。Git・Python（任意で Java）が入っていれば、
+**下を丸ごとコピペ**するだけで準備が済む（取得・依存・検証jar自動DL・確認）。
 
-1. **取得**
-   ```bash
-   git clone https://github.com/k23rs125/gtfs-jp-creator.git
-   cd gtfs-jp-creator
-   ```
-2. **Python 依存をインストール**（Python 3.10 以上を推奨）
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. **検証ツールの準備**（Step7 の MobilityData Validator を使う場合）
-   - **Java 17 以上(JRE)** をインストール。
-   - MobilityData の [GTFS Validator リリース](https://github.com/MobilityData/gtfs-validator/releases)
-     から CLI 版 jar を入手し、`skills/gtfs-jp-creator/tools/gtfs-validator-cli.jar` に置く
-     （jar は容量が大きいため git に含めていない）。
-4. **Claude Code でこのフォルダを開く**
+```bash
+git clone https://github.com/k23rs125/gtfs-jp-creator.git
+cd gtfs-jp-creator
+pip install -r requirements.txt
+python skills/gtfs-jp-creator/scripts/download_validator.py   # 検証用jar自動DL（要 Java 17+。不要なら省略）
+python -c "import shapefile, pdfplumber, openpyxl, pykakasi, fitz, pymupdf4llm; print('deps OK')"
+```
+`deps OK` と出れば成功。Windows は `python`/`pip`、Mac/Linux は `python3`/`pip3`。
+分解した詳細・OS別1ブロック・トラブルシュートは [docs/利用手順.md](docs/利用手順.md)。
+
+続けて使う:
+
+1. **Claude Code でこのフォルダを開く**
    - `skills/gtfs-jp-creator/SKILL.md` がスキルとして自動認識される。
-5. **時刻表を渡して頼む**
+2. **時刻表を渡して頼む**
    - バス時刻表の **PDF / Excel** を添えて「**これを GTFS-JP にして**」と頼む。
    - Claude が SKILL.md に従い、抽出 → **条件確認（PDF/Excelに無い項目を一括質問）** →
      生成 → 検証（標準 Validator・JP拡張・内部整合）→ 地図確認 まで実行する。
