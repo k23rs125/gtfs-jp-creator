@@ -165,24 +165,47 @@ def main() -> int:
 
     warnings_list = []
 
-    # --- セクション(縦表)検出: 便番号ヘッダ行で分割 ---
-    # 便列の位置に小整数(便番号)が並び、実時刻が無い行を「便番号ヘッダ行」とみなす。
-    # その行を境に、同じ列を共有して縦に積まれた別方向の表(例: 上り/下り)を分割する。
-    def _is_int_cell(v):
+    # --- セクション(縦表)検出: 便ヘッダ行で分割 ---
+    # 便列の位置に便ラベル(便番号 or 「N便」文字列 or 上り/下り)が並び、実時刻が無い行を
+    # 「便ヘッダ行」とみなす。その行を境に、同じ列を共有して縦に積まれた別方向の表
+    # (例: 上り/下り、「市役所行き」「○○行き」)を分割する。
+    # 便番号が「1便」のような文字列でも検出する（整数のみだと太宰府まほろば号で2方向を
+    # 1つに連結してしまう取りこぼしがあった）。
+    def _is_trip_label(v):
         if isinstance(v, bool):
             return False
         if isinstance(v, int):
             return 0 < v < 1000
-        if isinstance(v, str) and v.strip().isdigit():
-            return 0 < int(v.strip()) < 1000
+        if isinstance(v, str):
+            s = v.strip()
+            if s.isdigit():
+                return 0 < int(s) < 1000
+            if re.match(r'^\d+\s*便$', s):        # 「1便」「10 便」
+                return True
+            if s in ("上り", "下り", "往", "復", "往路", "復路"):
+                return True
         return False
+
+    # 方向見出し（「市役所行き」「○○方面」「左回り/右回り」等）。便ヘッダの1つ上の行に
+    # あることが多い。Step2 の方向/行先の手がかりとしてブロックに保持する。
+    DIR_LABEL_RE = re.compile(r'(?:行き|方面|循環|回り)\s*$')
+
+    def _direction_hint(hdr_row):
+        if hdr_row is None:
+            return None
+        for rr in (hdr_row - 1, hdr_row - 2):
+            for cc in range(1, ws.max_column + 1):
+                v = cells.get((rr, cc))
+                if isinstance(v, str) and DIR_LABEL_RE.search(v.strip()):
+                    return v.strip()
+        return None
 
     header_rows = []
     for r in range(1, ws.max_row + 1):
-        ints = sum(1 for tc in trip_cols
-                   if _is_int_cell(cells.get((r, tc))) and (r, tc) not in sched_cells)
+        labels = sum(1 for tc in trip_cols
+                     if _is_trip_label(cells.get((r, tc))) and (r, tc) not in sched_cells)
         has_sched = any((r, tc) in sched_cells for tc in trip_cols)
-        if ints >= 2 and not has_sched:
+        if labels >= 2 and not has_sched:
             header_rows.append(r)
     header_rows.sort()
 
@@ -232,6 +255,7 @@ def main() -> int:
                   "reserve": "要予約" in row_name[r]} for r in served]
         bi = len(blocks)
         blocks.append({"block_index": bi, "name_col": name_col, "section_row": hdr,
+                       "direction_hint": _direction_hint(hdr),
                        "stops": stops, "trips": trips, "warnings": []})
         for t in trips:
             if not t["monotonic"]:
