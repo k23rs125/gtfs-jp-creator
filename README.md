@@ -36,6 +36,7 @@ A Claude Code / Cowork mode plugin containing a Skill that helps non-experts (bu
 
 > ⚠️ 正確さの源は **決定的スクリプト**。LLM 単体（貼るだけ）では正確なデータにならない。
 > 人間向けの詳しい導線は [使い方・統合ガイド](使い方_統合ガイド.md) を参照。
+> **試用してフィードバックをくれる方へ → [docs/試用ガイド.md](docs/試用ガイド.md)**（観点チェックリスト＋[記入テンプレ](docs/フィードバック記入テンプレ.md)）。
 
 ## 状態
 
