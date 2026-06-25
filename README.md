@@ -9,26 +9,55 @@ A Claude Code / Cowork mode plugin containing a Skill that helps non-experts (bu
 >
 > ⚠️ 正確さの源は **スクリプト（決定的処理）** であり、本ガイドは「司令書」である。LLM単体（貼るだけ）では正確なデータにならない。**スキル一式（スクリプト＋ガイド）をツール付きLLMで実行**すること。
 
+## クイックスタート（clone して Claude Code で使う）
+
+このスキルは **Claude Code で動かす**。次の手順で利用できる。
+
+1. **取得**
+   ```bash
+   git clone https://github.com/k23rs125/gtfs-jp-creator.git
+   cd gtfs-jp-creator
+   ```
+2. **Python 依存をインストール**（Python 3.10 以上を推奨）
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. **検証ツールの準備**（Step7 の MobilityData Validator を使う場合）
+   - **Java 17 以上(JRE)** をインストール。
+   - MobilityData の [GTFS Validator リリース](https://github.com/MobilityData/gtfs-validator/releases)
+     から CLI 版 jar を入手し、`skills/gtfs-jp-creator/tools/gtfs-validator-cli.jar` に置く
+     （jar は容量が大きいため git に含めていない）。
+4. **Claude Code でこのフォルダを開く**
+   - `skills/gtfs-jp-creator/SKILL.md` がスキルとして自動認識される。
+5. **時刻表を渡して頼む**
+   - バス時刻表の **PDF / Excel** を添えて「**これを GTFS-JP にして**」と頼む。
+   - Claude が SKILL.md に従い、抽出 → **条件確認（PDF/Excelに無い項目を一括質問）** →
+     生成 → 検証（標準 Validator・JP拡張・内部整合）→ 地図確認 まで実行する。
+
+> ⚠️ 正確さの源は **決定的スクリプト**。LLM 単体（貼るだけ）では正確なデータにならない。
+> 人間向けの詳しい導線は [使い方・統合ガイド](使い方_統合ガイド.md) を参照。
+
 ## 状態
 
-**動作する実装段階（中間発表に向けた開発フェーズ）**
-Step 1〜7 の全スクリプトが実装済み。条件確認画面・GTFS-JP 拡張ファイル
-生成（agency_jp / office_jp）・JP 拡張検証にも対応済み。
-3 自治体の実データで PDF → GTFS-JP 生成を実証：
+**実用水準の実装段階。** 抽出（PDF座標方式 / Excel直接 / 装飾PDF OCR / Publisher .pub）から、
+GTFS-JP 一式生成・座標補完・走行経路・多言語・検証までを `run_pipeline.py` で一括実行できる。
+複数自治体の実データで PDF・Excel → GTFS-JP 生成を実証済み。
 
-- **古賀市**（再作成タスク・旧フィードあり）: Validator エラー **0** 件、
-  時刻精度 99.7%
-- **須恵町**（再現性タスク・旧フィードあり）: Validator エラー **0** 件、
-  trip-aligned 時刻精度 99.2%
-- **うるま市**（横展開タスク・旧フィード無し）: 旧フィード未使用条件下
-  での座標補完カバレッジ 39%（P11 6 件＋Nominatim 10 件／41 停留所）。
-  本 Skill の適用範囲（再作成タスクに強い／新規導入には人手補完が要る）
-  を示す実証結果として整理。公式フィードとの trip-aligned 比較で
-  **時刻精度 393／393 行＝ 100%** を達成（3 自治体で最高）。
-  この比較で検出した Nominatim 誤マッチ事例（「与那城出張所」が約 5.5 km
-  ズレで消防署にヒット）を踏まえ、**enrich_stops.py に OSM 施設種別フィルタ
-  ＋ 施設名フィルタの 2 段検証を追加**。「嘘の座標」から「未取得（要手動補完）」
-  への転換、すなわち「正しく失敗する」設計を実装した。
+主な特徴:
+- **半自動・ask-first**：PDF/Excel に無い情報（事業者・運行日・運賃など）は推測せず一括質問する。
+  不明分は公式オープンデータ（BODIK 等）も能動確認し、暫定値には「要確認」を明記する。
+- **座標補完の多層化**：旧/公式フィード再利用(3.5a) → P11(3.5b) → 同名複数候補の経路位置選択(3.5b2)
+  → Nominatim(3.5c) → 手動(3.5d) → 経路ジオメトリ外れ値棄却(3.5d2) → 内挿推定(3.5e)。
+  **公式GTFSの座標自動再利用**で POI 主体路線も対公式 中央値 **0m** を達成。
+- **検証3段**：MobilityData Validator(7) ＋ GTFS-JP 拡張検証(7b) ＋ **内部整合検証(7c)**
+  （抽出時刻 ↔ stop_times を便ごと照合・公式フィード不要）。
+- **「正しく失敗」**：誤った座標・メタは作らず、未確定として要確認に回す。
+
+実証例（いずれも標準 ERROR 0・内部整合 100%）:
+- 久留米市 城島（インガット号B）／ 北野（コスモス号B・弓削2方面分離）
+- 直方市（永満寺線・往復）／ 太宰府市（まほろば号・往復）
+- 柳川市（両開にし・**公式座標再利用で対公式 中央値 0m**）
+- 築上町（築城巡回線・循環・公式比較 中央値 28m）
 
 ## 構成（プラグイン形式）
 

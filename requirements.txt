@@ -1,0 +1,29 @@
+# GTFS-JP Creator — Python 依存ライブラリ
+# インストール:  pip install -r requirements.txt
+#
+# Python 3.10 以上を推奨。
+
+pyshp          # 国土数値情報 P11(Shapefile) 読み込み（import shapefile）/ Step3.5b
+pdfplumber     # テキストPDFの座標方式抽出 / Step1
+openpyxl       # Excel 時刻表の直接読み込み / Step1
+pykakasi       # translations(ふりがな・ローマ字) 生成 / Step6
+PyMuPDF        # PDF のレンダリング・テキスト抽出（import fitz / pymupdf）
+pymupdf4llm    # 装飾PDF → Markdown（既定エンジン）/ Step1
+
+# --- 任意（装飾/画像化PDFのOCRが必要な場合のみ。重い） ---
+# mineru[core]   # 画像化・装飾PDFのOCR抽出。初回 ~3GB の ML モデル DL あり
+#                #   pip install -U "mineru[core]"
+
+# =====================================================================
+# pip 以外の外部依存（別途インストール／配置が必要）
+# =====================================================================
+# - Java 17 以上(JRE)        : Step7 MobilityData GTFS Validator の実行に必要
+# - GTFS Validator 本体(jar) : サイズが大きく git には含めない。MobilityData の
+#     リリースから CLI jar を入手し、
+#       skills/gtfs-jp-creator/tools/gtfs-validator-cli.jar
+#     に配置する（README「クイックスタート」参照）。
+# - OSRM ルーティング        : Step4 shapes 生成。公開API or 自前サーバ
+#     （generate_shapes.py 参照）。未到達でも他Stepは動く。
+# - 国土数値情報 P11 Shapefile: download_p11.py で都道府県別に自動取得（要 pyshp）
+# - (任意) 内閣府 祝日CSV     : Step3.6 で祝日運休を展開する場合のみ
+#     （syukujitsu.csv, https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv）
