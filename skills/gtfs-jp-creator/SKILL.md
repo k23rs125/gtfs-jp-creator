@@ -155,7 +155,8 @@ LLMプロンプト: `references/prompts/01_pdf_extraction.md`
 **公式GTFSの能動確認（重要・今回の反省）**：⑥は利用者が「なし」と答えても**実在することがある**
 （例：柳川市は「旧フィードなし」との回答だったが、BODIK に公式GTFSが存在した）。対象自治体の公式GTFSを
 **BODIK（`data.bodik.jp` を自治体名・自治体コードで検索）や自治体オープンデータ**で必ず確認する。
-見つかれば次に使える：(a) 停留所座標の再利用で精度向上、(b) agency名・法人番号・連絡先の確定、
+見つかれば次に使える：(a) 停留所座標の再利用で精度向上（config `official_feed_url` で自動DL→Step3.5a。
+両開にしで対公式 中央値224m→0m）、(b) agency名・法人番号・連絡先の確定、
 (c) 生成後の精度比較。**発見は利用者に報告し、使うか確認する**（勝手に上書きしない）。なお公式が手元PDFより
 古い版のこともあるため（座標は再利用可・ダイヤは新しい手元PDFを優先）、版を見て使い分ける。
 
@@ -187,7 +188,11 @@ LLMプロンプト: `references/prompts/01_pdf_extraction.md`
 stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に：
 
 - **3.5a** `scripts/merge_stop_coords.py` — 旧 GTFS-JP フィードから停留所名マッチで
-  座標を再利用。再作成タスクなら 100% 補完。
+  座標を再利用。再作成タスクなら 100% 補完。config の `reference_feed`（zip/stops.txt）で指定。
+  **能動確認で見つけた公式GTFS**は config の `official_feed_url`（BODIK等のDL URL）で
+  **自動DL→reference_feedに設定**できる（`download_official_feed.py`）。**座標のみ再利用し
+  ダイヤは手元を優先**（公式が古い版でも停留所位置は不変）。実証: 両開にし（POI主体）で
+  公式座標を再利用し対公式 中央値224m→**0m**（34/35一致）。CC-BYは feed_info 等で出典明記。
 - **3.5b** `scripts/enrich_stops_p11.py` — 国土数値情報 P11（国交省バス停データ）から
   fuzzy マッチで補完。新規自治体でも 80〜95%。
   同名のP11候補が**市域bbox内に複数あり別地点の疑い**があるときは、黙って先頭を採用せず
