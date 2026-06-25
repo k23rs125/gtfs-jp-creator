@@ -1,0 +1,2 @@
+﻿agency_id,fare_id,price,currency_type,payment_method,transfers
+8000020402044,F_200,200,JPY,0,0

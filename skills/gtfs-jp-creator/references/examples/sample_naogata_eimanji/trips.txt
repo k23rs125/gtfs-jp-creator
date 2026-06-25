@@ -1,0 +1,10 @@
+﻿route_id,service_id,trip_id,trip_headsign,direction_id,shape_id
+R01,MON_SAT,R01_0_1,直方駅,0,shape_R01_8b543360
+R01,MON_SAT,R01_0_2,直方駅,0,shape_R01_8b543360
+R01,MON_SAT,R01_0_3,直方駅,0,shape_R01_8b543360
+R01,MON_SAT,R01_0_4,直方駅,0,shape_R01_8b543360
+R01,MON_SAT,R01_0_5,直方駅,0,shape_R01_8b543360
+R01,MON_SAT,R01_1_1,永満寺団地,1,shape_R01_6eb89030
+R01,MON_SAT,R01_1_2,永満寺団地,1,shape_R01_6eb89030
+R01,MON_SAT,R01_1_3,永満寺団地,1,shape_R01_6eb89030
+R01,MON_SAT,R01_1_4,永満寺団地,1,shape_R01_6eb89030

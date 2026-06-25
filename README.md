@@ -338,18 +338,18 @@ run_pipeline.py --config <config.json>
 
 ### config JSON の書き方
 
+パスはすべて **run\_pipeline を実行するフォルダからの相対パス**（または絶対パス）。下は最小構成の例。
+
 ```json
 {
-  "feed_name": "kogabus_20260601",
-  "input_json": "test_demo/kogashi_claude.json",
-  "output_dir": "test_demo/kogabus_pipeline",
-  "context": "福岡県",
-  "bbox": "130.42,33.67,130.52,33.76",
-  "reference_feed": "C:/Users/User/Desktop/稲ゼミ/260211kogabus_gtfs-jp.zip",
-  "p11_shapefile": "C:/Users/User/Desktop/稲ゼミ/p11_fukuoka/P11-22_40_SHP/P11-22_40.shp",
-  "canonical_reference": "C:/Users/User/Desktop/稲ゼミ/Shin_kogashi.zip",
-  "use_nominatim": false,
-  "translations_en_json": "test_demo/kogashi_en.json",
+  "feed_name": "mybus_20260601",
+  "input_json": "work/structured.json",
+  "extract_json": "work/extract.json",
+  "output_dir": "work/out",
+  "context": "福岡県太宰府市",
+  "p11_prefecture": "福岡県",
+  "use_nominatim": true,
+  "interpolate_coords": true,
   "validate": true
 }
 ```
@@ -359,30 +359,37 @@ run_pipeline.py --config <config.json>
 | `feed_name` | ✅ | 出力 zip 名のプレフィックス |
 | `input_json` | ✅ | Step 2 の出力（LLM が作った構造化JSON）|
 | `output_dir` | ✅ | 成果物の出力先ディレクトリ |
-| `context` | — | Nominatim 用コンテキスト（例: "福岡県"）|
-| `bbox` | — | 座標補完の検索範囲 |
-| `reference_feed` | — | 旧 GTFS-JP（Step 3.5a 用）。あれば座標 100% |
-| `p11_shapefile` | — | 国土数値情報 P11（Step 3.5b 用）|
-| `canonical_reference` | — | 表記揺れ正規化の参照フィード（Step 3.x 用）|
-| `use_nominatim` | — | `true` で Step 3.5c を有効化（既定 false）|
-| `translations_en_json` | — | LLM 英訳済み JSON。無ければ en プロンプトを export |
-| `manual_coords` | — | 手動座標 JSON（Step 3.5d）。P11/Nominatim で当たらない停留所を確定。**shapes 生成より前**に適用するので経路がその停留所を通る（stop_too_far_from_shape を防ぐ）|
+| `extract_json` | — | 抽出JSON(blocks/cells)。指定すると **Step 7c 内部整合検証**（抽出時刻↔stop_times）を実行 |
+| `context` | — | 「都道府県＋市区町村」（例: "福岡県太宰府市"）。P11 の市域制約・Nominatim に使用 |
+| `p11_prefecture` | — | **都道府県名（例 "福岡県"）。書くと P11 を自動DL**（`p11_shapefile` のパス指定が不要）|
+| `p11_shapefile` | — | P11 の .shp を手動指定する場合（`p11_prefecture` があれば不要）|
+| `use_nominatim` | — | `true` で Step 3.5c（OSM 補完）を有効化 |
+| `interpolate_coords` | — | `true` で Step 3.5e（経路内挿の推定座標・要確認）を有効化 |
+| `reference_feed` | — | 旧 GTFS-JP（zip/stops.txt）。Step 3.5a で座標再利用 |
+| `official_feed_url` | — | 公式GTFS(BODIK等)の **DL URL**。自動DLして座標再利用（ダイヤは手元優先）|
+| `holiday_syukujitsu` / `holiday_nenmatsu` / `holiday_obon` | — | Step 3.6 で運休日を `calendar_dates` に展開（祝日CSVパス／"12-29:01-03"／"08-13:08-15"）|
+| `manual_coords` | — | 手動座標 JSON（Step 3.5d）。**shapes 生成より前**に適用 |
 | `manual_readings` | — | 手動読み JSON（Step 6b）。難読地名のふりがな/英訳を上書き |
-| `validate` | — | `true` で Step 7 GTFS Validator を実行 |
+| `translations_en_json` | — | LLM 英訳済み JSON。無ければ en プロンプトを export |
+| `bbox` | — | 座標補完の検索範囲（任意。通常は context で十分）|
+| `validate` | — | `true` で Step 7 GTFS Validator を実行（要 Java＋jar）|
+
+> `select_ambiguous_by_route` / `reject_geom_outliers` は既定 ON、`map_view` は既定で生成。必要なら `false` で抑止できる。
 
 ### 使い方
 
-```powershell
-cd C:\Users\User\Desktop\稲ゼミ\gtfs-jp-creator
+```bash
+cd gtfs-jp-creator        # clone したフォルダ
 
+# 自分の config（上記JSON）を用意（例: work/my_config.json）して実行する。
 # まず dry-run で実行計画を確認（実行はしない）
-python skills\gtfs-jp-creator\scripts\run_pipeline.py `
-  --config test_demo\kogabus_pipeline_config.json --dry-run
+python skills/gtfs-jp-creator/scripts/run_pipeline.py --config work/my_config.json --dry-run
 
 # 本実行
-python skills\gtfs-jp-creator\scripts\run_pipeline.py `
-  --config test_demo\kogabus_pipeline_config.json
+python skills/gtfs-jp-creator/scripts/run_pipeline.py --config work/my_config.json
 ```
+> 通常は Claude Code に「これを GTFS-JP にして」と頼めば、上記 config 作成・実行まで代行する。
+> 手動実行する場合のみ上記コマンドを使う。
 
 ### 出力
 
@@ -572,14 +579,17 @@ Get-Content .\test_demo\komyubasujikokuhyou\hybrid_auto\komyubasujikokuhyou.md |
 
 詳細は `国土数値情報P11統合設計書_v1.md` を参照。
 
-### データ入手手順（一度だけ）
+### データ入手手順（通常は自動DLで不要）
+
+config に `"p11_prefecture": "福岡県"` のように都道府県名を書けば、`download_p11.py` が
+P11 第3.0版を自動取得・キャッシュするため、**手動入手は不要**。手動で配置したい場合のみ以下。
 
 ```powershell
 # 1. ブラウザで以下を開く
 #    https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P11.html
-# 2. 「P11 バス停留所」最新版（v2.x）の対象都道府県を選択
+# 2. 「P11 バス停留所」最新版の対象都道府県を選択
 #    例: 福岡県 → P11-2024_40_GML.zip
-# 3. 任意のフォルダに展開（例: C:\Users\User\Desktop\稲ゼミ\p11_fukuoka\）
+# 3. 任意のフォルダに展開（例: ./p11_fukuoka/）
 # 4. 展開された .shp の絶対パスを控える
 
 # pyshp 依存をインストール

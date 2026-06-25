@@ -1,0 +1,2 @@
+﻿agency_id,agency_official_name,agency_zip_number,agency_address,agency_president_pos,agency_president_name
+8000020402044,直方市,8228501,福岡県直方市殿町7番1号,,

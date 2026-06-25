@@ -1,0 +1,2 @@
+﻿feed_publisher_name,feed_publisher_url,feed_lang,feed_start_date,feed_end_date,feed_version
+直方市,https://www.city.nogata.fukuoka.jp/,ja,,,20260625

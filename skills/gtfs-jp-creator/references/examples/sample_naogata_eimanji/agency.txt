@@ -1,0 +1,2 @@
+﻿agency_id,agency_name,agency_url,agency_timezone,agency_lang,agency_phone
+8000020402044,直方市,https://www.city.nogata.fukuoka.jp/,Asia/Tokyo,ja,0949-25-2157

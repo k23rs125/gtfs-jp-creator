@@ -1,0 +1,2 @@
+﻿route_id,agency_id,route_short_name,route_long_name,route_type,route_color
+R01,8000020402044,,永満寺線,3,
