@@ -278,6 +278,11 @@ stops.txt の `stop_lat` / `stop_lon` を埋める。優先順位の高い順に
   保たれているかを照合する（不一致はFAIL・`output_dir/stoptimes_verify.{md,json}` に出力）
 - **Step 4b 検証用マップ**（`make_map_view.py`）を既定で自動生成し、`output_dir/map_view.html`
   を出力する（座標の範囲外・未補完を色分け、便選択で停車順を強調）。`map_view: false` で抑止
+- **Step 3.6 祝日・運休日の展開**（`generate_calendar_dates.py`）：config に `holiday_syukujitsu`
+  （内閣府祝日CSVのパス・祝日運休のとき）／`holiday_nenmatsu`（例 `"12-29:01-03"`）／`holiday_obon`
+  （例 `"08-13:08-15"`）のいずれかを指定すると、有効期間内の運休日を `calendar_dates.txt` に
+  `exception_type=2` で自動展開する。**祝日は計算せず公式CSVを一次データ**にし、年末年始/お盆は
+  市ごとに異なるため**範囲指定時のみ**展開。未指定ならスキップ（運休日を付けない＝要確認）
 - `translations_en_json` を指定すると Step 6 で英訳を自動マージ
 - `--dry-run` で実行計画のプレビュー可能
 
