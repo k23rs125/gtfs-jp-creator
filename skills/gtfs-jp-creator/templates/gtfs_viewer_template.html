@@ -1026,16 +1026,39 @@ function renderMap() {
     Object.values(mapLayers).forEach(l => l && map.removeLayer(l));
     mapLayers = {};
 
-    // Shapes
+    // 経路線: shapes(実道路)を描く。shapeが無い路線は停留所を停車順に直線で結ぶ。
     const shapeGroup = L.layerGroup();
     const grp = {};
     for (const s of shapes) (grp[s.shape_id] = grp[s.shape_id] || []).push(s);
+    const drawnRoutes = new Set();
     for (const sid of Object.keys(grp)) {
       const rid = shape2route[sid];
       if (!activeRouteIds.has(rid)) continue;
       const pts = grp[sid].slice().sort((a,b) => +a.shape_pt_sequence - +b.shape_pt_sequence)
         .map(p => [+p.shape_pt_lat, +p.shape_pt_lon]);
-      L.polyline(pts, { color: routeColor(rid), weight: 5, opacity: 0.7 }).addTo(shapeGroup);
+      L.polyline(pts, { color: routeColor(rid), weight: 5, opacity: 0.8 }).addTo(shapeGroup);
+      drawnRoutes.add(rid);
+    }
+    // フォールバック: shape の無い路線は、代表便(最長)の停留所を停車順に結んだ点線で経路を示す
+    const stopById = {};
+    for (const s of stops) stopById[s.stop_id] = s;
+    const tripStops = {};
+    for (const st of stopTimes) (tripStops[st.trip_id] = tripStops[st.trip_id] || []).push(st);
+    for (const r of routes) {
+      const rid = r.route_id;
+      if (!activeRouteIds.has(rid) || drawnRoutes.has(rid)) continue;
+      let best = null, bestLen = 0;
+      for (const t of trips) {
+        if (t.route_id !== rid) continue;
+        const ts = tripStops[t.trip_id] || [];
+        if (ts.length > bestLen) { bestLen = ts.length; best = ts; }
+      }
+      if (!best) continue;
+      const pts = best.slice().sort((a,b) => +a.stop_sequence - +b.stop_sequence)
+        .map(st => stopById[st.stop_id]).filter(Boolean)
+        .map(s => [+s.stop_lat, +s.stop_lon]).filter(([a,b]) => isFinite(a) && isFinite(b));
+      if (pts.length >= 2)
+        L.polyline(pts, { color: routeColor(rid), weight: 4, opacity: 0.7, dashArray: "6,7" }).addTo(shapeGroup);
     }
     mapLayers.shapes = shapeGroup.addTo(map);
 

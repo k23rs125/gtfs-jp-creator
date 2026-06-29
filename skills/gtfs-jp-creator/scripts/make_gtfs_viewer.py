@@ -51,6 +51,10 @@ def build_viewer(feed_dir: Path, out_path: Path, title: str | None = None) -> Pa
     data = {}
     for f in GTFS_FILES:
         p = feed_dir / f
+        # trips は shape_id を埋めた trips.with_shapes.txt があればそちらを使う
+        # （これが無いと路線図で経路線が引けず点だけになる）。
+        if f == "trips.txt" and (feed_dir / "trips.with_shapes.txt").exists():
+            p = feed_dir / "trips.with_shapes.txt"
         if p.exists():
             data[f] = _read_text(p)
     if "stops.txt" not in data or "routes.txt" not in data:
