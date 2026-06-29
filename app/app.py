@@ -71,13 +71,16 @@ def do_extract(src):
         st.error("抽出に失敗しました。\n" + se[-800:])
 
 
-c_a, c_b = st.columns([1, 1])
+SAMPLES = Path(__file__).resolve().parent / "samples"
+c_a, c_b, c_c = st.columns([1, 1, 1])
 if c_a.button("抽出する", type="primary", disabled=(up is None)) and up:
     src = WORK / up.name
     src.write_bytes(up.getbuffer())
     do_extract(src)
-if c_b.button("サンプルで試す（太宰府まほろば号）"):
-    do_extract(Path(__file__).resolve().parent / "samples" / "sample_dazaifu_mahoroba.xlsx")
+if c_b.button("サンプル：太宰府まほろば号（往復）"):
+    do_extract(SAMPLES / "sample_dazaifu_mahoroba.xlsx")
+if c_c.button("サンプル：築城巡回線（循環・変則便）"):
+    do_extract(SAMPLES / "sample_tsuiki_junkai.xlsx")
 
 if "extract" in ss():
     ex = ss().extract
@@ -86,10 +89,15 @@ if "extract" in ss():
     st.info(f"ブロック {len(blocks)} / 便 計 {total_trips}")
     for b in blocks:
         trips = b.get("trips", [])
-        names = [c["name"] for c in trips[0]["cells"]] if trips else []
+        # 便ごとに停留所数が異なる（循環・区間便）ため、代表は便[0]でなく全体の停留所列を使う
+        full = [s.get("name") for s in b.get("stops", [])]
+        if not full and trips:
+            full = max(([c["name"] for c in t["cells"]] for t in trips), key=len, default=[])
+        loop = bool(full) and full[0] == full[-1]
+        tag = f"（始点=終点「{full[0]}」→循環とみられます）" if loop else ""
         st.write(f"- block {b.get('block_index')}（{b.get('direction_hint') or '方向見出しなし'}）"
-                 f": 便 {len(trips)} / 停留所 {len(names)}")
-        st.caption("　順: " + " → ".join(names))
+                 f": 便 {len(trips)} / 停留所 {len(full)}{tag}")
+        st.caption("　順: " + " → ".join(full))
 
 # =====================================================================
 # Step 2: Claude で構造化（decision-spec）
@@ -144,8 +152,12 @@ if ss().get("decision_spec"):
         dh = b.get("direction_hint")
         if dh:
             auto.append(f"方向（block {b.get('block_index')}）: 見出しから「{dh}」を自動検出")
-    circ = any(r.get("circular") for r in spec0.get("routes", []))
-    auto.append(f"循環/方向: {'循環あり' if circ else '往復（循環なし）'}（構造化の判断）")
+    # 循環は「始点=終点」のときだけ"とみられる"と提示（表からは確定不可なので断定しない／③で確認）。
+    for b in blocks0:
+        names = [s.get("name") for s in b.get("stops", [])]
+        if names and names[0] == names[-1]:
+            auto.append(f"循環の可能性（block {b.get('block_index')}）: 始点と終点が同じ"
+                        f"「{names[0]}」→循環路線とみられます（③で確認）")
     st.success("自動で分かったこと:\n" + "\n".join("・" + a for a in auto))
     nc = list(ss().extract.get("needs_confirmation", []))
     nc += [{"message": w} for w in ss().extract.get("warnings", [])]
@@ -238,13 +250,44 @@ if ss().get("result"):
         s = json.loads(sv.read_text(encoding="utf-8")).get("summary", {})
         st.metric("内部整合（抽出時刻↔stop_times）", f"{s.get('time_match','-')}/{s.get('rows_compared','-')}",
                   s.get("verdict", ""))
-    # Validator
+    # Validator（ERROR は件数だけでなく内容と対処を出す＝官公庁が原因を追える）
+    ERR_HELP = {
+        "route_both_short_and_long_name_missing":
+            ("路線名（route_short_name/long_name）が両方空", "③で路線名を入力してください。"),
+        "stop_time_with_arrival_before_previous_departure_time":
+            ("便の中で時刻が前の停留所より早い（時刻の逆行）",
+             "原典の時刻を確認してください。要予約の寄り道・折り返し・誤記が原因のことが多い。"
+             "上の『要確認』で該当便が指摘されています。"),
+        "stop_time_with_only_arrival_or_departure_time":
+            ("到着/出発の一方しか時刻が無い", "原典で時刻を補ってください。"),
+        "decreasing_or_equal_stop_time_distance":
+            ("shapeの距離が単調増加でない", "経路(shapes)の生成を確認してください。"),
+    }
     rep = out / "validation" / "report.json"
     if rep.exists():
         try:
             notices = json.loads(rep.read_text(encoding="utf-8")).get("notices", [])
-            errs = sum(n.get("totalNotices", 0) for n in notices if n.get("severity") == "ERROR")
+            err_notices = [n for n in notices if n.get("severity") == "ERROR"]
+            errs = sum(n.get("totalNotices", 0) for n in err_notices)
             st.metric("MobilityData Validator ERROR", errs)
+            if errs:
+                lines = []
+                for n in err_notices:
+                    code = n.get("code", "")
+                    meaning, how = ERR_HELP.get(code, ("", "原典・生成結果を確認してください。"))
+                    head = f"**{code}** × {n.get('totalNotices')}"
+                    if meaning:
+                        head += f" — {meaning}"
+                    lines.append(head + f"\n　→ 対処: {how}")
+                    sample = (n.get("sampleNotices") or [])[:1]
+                    if sample:
+                        ids = {k: v for k, v in sample[0].items()
+                               if k in ("tripId", "stopId", "stopSequence", "csvRowNumber", "routeId")}
+                        if ids:
+                            lines.append("　該当例: " + ", ".join(f"{k}={v}" for k, v in ids.items()))
+                st.error("Validator ERROR の内容（このままでは公式提出に不適）:\n\n" + "\n\n".join(lines))
+            else:
+                st.success("Validator ERROR は 0 件です。")
         except Exception:
             pass
     # 座標カバレッジ
