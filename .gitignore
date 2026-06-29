@@ -273,3 +273,27 @@ translations_report.json
 # GTFS Validator 本体（サイズが大きいので含めない。各自 DL して tools/ に配置）
 *.jar
 skills/gtfs-jp-creator/tools/
+
+# ====================================
+# ローカル作業用スクラッチ（リポ直下のみ。製品コードは skills/ と app/ にある）
+# ※ファイルはディスクに残り、git status を汚さない／誤コミットを防ぐだけ。
+# ====================================
+/*.py
+!/apply_decisions.py
+/*.json
+!/eval_report_v1.json
+!/eval_report_v2.json
+/*.txt
+!/requirements.txt
+/*.html
+/*.csv
+/_*
+/p11_data/
+/coverage_exp/
+/llm_compare/
+/.claude/
+/*.md
+!/README.md
+!/eval_report_v1.md
+!/eval_report_v2.md
+!/使い方_統合ガイド.md
