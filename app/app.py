@@ -206,6 +206,21 @@ if ss().get("decision_spec"):
         submitted = st.form_submit_button("GTFS-JP を生成する", type="primary")
 
     if submitted:
+        # 空抽出ガード: 停留所が1つも取れていないなら、空のfeedを黙って作らず停止する。
+        # 画像化PDF（テキストレイヤなし）が主因。原典・抽出方法の見直しを促す（＝正しく失敗）。
+        _blocks = ss().extract.get("blocks", [])
+        _nstops = sum(len(b.get("stops", [])) for b in _blocks)
+        _img_pdf = any((n.get("type") == "image_pdf_use_ocr")
+                       for n in ss().extract.get("needs_confirmation", []))
+        if _nstops == 0:
+            if _img_pdf:
+                st.error("この時刻表は画像化PDF（文字情報なし）のため、停留所を1つも抽出できませんでした。"
+                         "テキストが選択できるPDF版・Excel版を使うか、OCR(MinerU)で文字起こししてから"
+                         "取り込んでください。空のGTFSは生成しません。")
+            else:
+                st.error("停留所が抽出できませんでした（0件）。時刻表の形式が想定外の可能性があります。"
+                         "別の時刻表で試すか、抽出結果（①の表示）をご確認ください。空のGTFSは生成しません。")
+            st.stop()
         # 必須チェック: 官公庁提出物が黙って Validator ERROR にならないよう、
         # 路線名が空なら生成しない（GTFS仕様: route_short_name か route_long_name のどちらか必須）。
         eff_route = (route_name or ss()["decision_spec"]["routes"][0].get("route_long_name") or "").strip()
