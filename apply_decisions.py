@@ -116,12 +116,28 @@ def main():
                                          "agency_address": None, "agency_president_pos": None,
                                          "agency_president_name": None}
 
-    price = dec.get("fare_price")
+    # 運賃: fares(区分別: 大人/小児/障がい者…)優先、無ければ fare_price(単一=大人相当)。
     # fare の agency_id は本体 agency と一致させる（AGENCY_TBD固定をやめ desync を防ぐ）。
-    fa = [{"fare_id": "F", "price": price, "currency_type": "JPY", "payment_method": 0,
-           "transfers": 0, "agency_id": agency_id}] if price else []
-    fr = [{"fare_id": "F", "route_id": r["route_id"], "origin_id": None,
-           "destination_id": None, "contains_id": None} for r in routes] if price else []
+    fares = dec.get("fares")
+    fa, fr = [], []
+    if fares:
+        for f in fares:
+            cat = str(f.get("category") or "").strip()
+            pr = f.get("price")
+            if not cat or pr in (None, ""):
+                continue
+            # fare_id に区分名を使う（GTFSは非ASCII可。運賃表で区分が見えるように）
+            fa.append({"fare_id": cat, "price": int(pr), "currency_type": "JPY",
+                       "payment_method": 0, "transfers": 0, "agency_id": agency_id})
+            fr += [{"fare_id": cat, "route_id": r["route_id"], "origin_id": None,
+                    "destination_id": None, "contains_id": None} for r in routes]
+    else:
+        price = dec.get("fare_price")
+        if price:
+            fa = [{"fare_id": "F", "price": price, "currency_type": "JPY", "payment_method": 0,
+                   "transfers": 0, "agency_id": agency_id}]
+            fr = [{"fare_id": "F", "route_id": r["route_id"], "origin_id": None,
+                   "destination_id": None, "contains_id": None} for r in routes]
 
     out = {"agency": agency,
            "agency_jp": agency_jp,

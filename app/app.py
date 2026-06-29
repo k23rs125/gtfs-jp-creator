@@ -341,7 +341,11 @@ if ss().get("decision_spec"):
             route_name = ""  # 多路線は②の割り当てで路線名を設定
             c1.caption("路線名は②で設定済み: " + " / ".join(r["route_long_name"] for r in _routes_now))
         muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県", help="P11の都道府県/市域制約に使用")
-        fare = c1.number_input("運賃（円・0なら無料/未設定）", min_value=0, value=0, step=10)
+        c1.write("運賃（区分別・円。0は未設定）")
+        fc1, fc2, fc3 = c1.columns(3)
+        fare_adult = fc1.number_input("大人", min_value=0, value=0, step=10, key="fare_adult")
+        fare_child = fc2.number_input("小児", min_value=0, value=0, step=10, key="fare_child")
+        fare_disabled = fc3.number_input("障がい者", min_value=0, value=0, step=10, key="fare_disabled")
         ag_name = c2.text_input("事業者名", value="")
         ag_id = c2.text_input("法人番号（不明なら空）", value="")
         ag_url = c2.text_input("URL", value="")
@@ -410,8 +414,10 @@ if ss().get("decision_spec"):
                            "mon": int(days[0]), "tue": int(days[1]), "wed": int(days[2]),
                            "thu": int(days[3]), "fri": int(days[4]), "sat": int(days[5]), "sun": int(days[6]),
                            "start_date": start or "20250401", "end_date": end or "20271231"}
-        if fare > 0:
-            spec["fare_price"] = int(fare)
+        fares = [{"category": c, "price": int(p)} for c, p in
+                 (("大人", fare_adult), ("小児", fare_child), ("障がい者", fare_disabled)) if p > 0]
+        if fares:
+            spec["fares"] = fares
         aid = ag_id or "AGENCY_TBD"
         spec["agency"] = {"agency_id": aid, "agency_name": ag_name or "未定（自治体が記入）",
                           "agency_url": ag_url or None, "agency_phone": ag_phone or None}

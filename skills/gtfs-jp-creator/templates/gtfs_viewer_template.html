@@ -736,12 +736,25 @@ function renderFareControls() {
 function renderFareMatrix() {
   const rid = document.getElementById("fareRoute").value;
   const rules = (data["fare_rules.txt"]||[]).filter(f => f.route_id === rid || (!f.route_id && rid));
-  // 100円均一 等
-  if (rules.length === 1 && !rules[0].origin_id && !rules[0].destination_id) {
-    const fid = rules[0].fare_id;
-    const fa = (data["fare_attributes.txt"]||[]).find(f => f.fare_id === fid);
+  // 全区間均一（1種、または 大人/小児/障がい者 など区分別均一）
+  const flat = rules.filter(r => !r.origin_id && !r.destination_id);
+  if (flat.length && flat.length === rules.length) {
+    const fattr = data["fare_attributes.txt"] || [];
+    const items = flat.map(r => {
+      const fa = fattr.find(f => f.fare_id === r.fare_id);
+      return { cat: r.fare_id, price: fa ? fa.price : "?" };
+    });
     document.getElementById("fareSummary").innerHTML = `<strong style="color:${routeColor(rid)}">${routeName(rid)}</strong>　全区間均一料金`;
-    document.getElementById("fareMatrix").innerHTML = `<div style="font-size:48px;text-align:center;padding:40px;font-weight:700;color:#1b5e20;">¥${fa?fa.price:"?"}<div style="font-size:16px;color:#555;font-weight:normal;">全区間 均一</div></div>`;
+    if (items.length === 1) {
+      document.getElementById("fareMatrix").innerHTML = `<div style="font-size:48px;text-align:center;padding:40px;font-weight:700;color:#1b5e20;">¥${items[0].price}<div style="font-size:16px;color:#555;font-weight:normal;">全区間 均一</div></div>`;
+    } else {
+      document.getElementById("fareMatrix").innerHTML =
+        `<div style="display:flex;gap:24px;justify-content:center;flex-wrap:wrap;padding:30px;">` +
+        items.map(it => `<div style="text-align:center;min-width:120px;border:1px solid #ddd;border-radius:8px;padding:16px;">
+          <div style="font-size:16px;color:#555;">${it.cat}</div>
+          <div style="font-size:40px;font-weight:700;color:#1b5e20;">¥${it.price}</div></div>`).join("") +
+        `</div>`;
+    }
     return;
   }
 
