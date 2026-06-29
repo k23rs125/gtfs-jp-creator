@@ -21,12 +21,28 @@ License: Apache 2.0
 """
 from __future__ import annotations
 
-import argparse, csv, json, sys
+import argparse, csv, json, math, sys
 from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from reject_geom_outliers import _point_seg_dist  # 点→経路線分の距離(m)
+
+
+def _haversine(a, b):
+    """2点(lat,lon)間の距離[m]。"""
+    R = 6371000.0
+    la1, lo1, la2, lo2 = map(math.radians, [a[0], a[1], b[0], b[1]])
+    dla, dlo = la2 - la1, lo2 - lo1
+    h = math.sin(dla / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(dlo / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(h))
+
+
+def _src_type(s):
+    """ソース名を独立geocode種別に正規化（p11_exact/p11_fuzzy → p11）。"""
+    if not s:
+        return s
+    return "p11" if s.startswith("p11") else s
 
 
 def _round(v):
@@ -73,6 +89,8 @@ def main() -> int:
     ap.add_argument("--manual", default=None, help="手動座標JSON(by_stop_name)。確定扱い")
     ap.add_argument("--on-route-m", type=float, default=500.0,
                     help="P11完全一致でも経路からこのm以上外れたら要確認(同名誤マッチ疑い)")
+    ap.add_argument("--agree-m", type=float, default=100.0,
+                    help="独立な複数ソースがこのm以内で一致したら確定に昇格(第3相)。0で無効")
     ap.add_argument("-o", "--output", default=None)
     ap.add_argument("--report", default="coord_confidence_report.json")
     a = ap.parse_args()
@@ -124,6 +142,18 @@ def main() -> int:
                 return s
         return cands[-1][0] if cands else "unknown"
 
+    def agree_types(sid, c):
+        """最終座標cの周辺agree_m以内にある独立geocode種別の集合（内挿は除外）。"""
+        if not c or a.agree_m <= 0:
+            return set()
+        types = set()
+        for s, sla, slo, det in sources.get(sid, []):
+            if s == "interpolated":   # 内挿は隣接からの推定で独立geocodeでない
+                continue
+            if _haversine(c, (sla, slo)) <= a.agree_m:
+                types.add(_src_type(s))
+        return types
+
     out, counts = [], defaultdict(int)
     for r in rows:
         sid = r["stop_id"]; nm = r.get("stop_name", "")
@@ -148,6 +178,15 @@ def main() -> int:
                 conf, reason = "要確認", "経路内挿の推定座標"
             else:
                 conf, reason = "要確認", "補完源不明"
+            # 第3相: 独立な複数ソースが近接一致したら確定へ昇格（精度を落とさず要確認を減らす）。
+            # ただし経路から外れている場合(同名誤マッチ疑い)は安全側で据え置く。
+            if conf == "要確認" and "経路から" not in reason:
+                orm = offroute.get(sid)
+                if orm is None or orm <= a.on_route_m:
+                    types = agree_types(sid, c)
+                    if len(types) >= 2:
+                        conf = "確定"
+                        reason = f"複数ソース一致({'+'.join(sorted(types))}, ≤{int(a.agree_m)}m)"
         counts[conf] += 1
         out.append({"stop_id": sid, "stop_name": nm,
                     "stop_lat": r.get("stop_lat", ""), "stop_lon": r.get("stop_lon", ""),
