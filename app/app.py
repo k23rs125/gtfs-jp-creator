@@ -10,6 +10,7 @@ PDF/Excelに無いメタ情報(事業者・運行日・運賃)は推測せず条
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -238,74 +239,83 @@ if ss().get("decision_spec"):
             "運賃 / 運行する曜日 / 有効期間 / 対象自治体（座標補完用）")
 
 # =====================================================================
-# 時刻チェック: OCR誤読が疑われる時刻を検出し、修正候補を出す（人が確認・確定）。
-# 主に画像PDF→OCR(MinerU)で起きる数字の読み違いを拾う。自動では書き換えない。
+# 時刻表の確認・修正: 全便・全停留所の時刻を表で出し、原典と目視照合して直接編集する。
+# OCR誤読の疑いはヒントとして併記（検出は detect_time_anomalies）。自動では書き換えない。
 # =====================================================================
 if "extract" in ss():
     tok = ss().get("extract_token", "")
     if ss().get("anomalies_token") != tok:
         (WORK / "_ext_check.json").write_text(json.dumps(ss().extract, ensure_ascii=False), encoding="utf-8")
-        rc, so, se = run([SCRIPTS / "detect_time_anomalies.py", WORK / "_ext_check.json",
-                          "-o", WORK / "anomalies.json"])
+        run([SCRIPTS / "detect_time_anomalies.py", WORK / "_ext_check.json", "-o", WORK / "anomalies.json"])
         ap = WORK / "anomalies.json"
         ss().anomalies = json.loads(ap.read_text(encoding="utf-8")) if ap.exists() else []
         ss().anomalies_token = tok
     anomalies = ss().get("anomalies", [])
-    if anomalies:
-        st.subheader(f"⏰ 時刻チェック（OCR誤読の疑い {len(anomalies)} 件）")
-        st.caption("時刻の逆行や便間パターンからの外れを検出しました（主にOCRの数字読み違い）。"
-                   "**原典と照合**し、必要なら『採用時刻』を直して『時刻を修正して反映』を押してください。"
-                   "空欄/現在値のままなら変更しません（自動では書き換えません）。")
-        adf = pd.DataFrame([{
-            "block": a["block"], "便": a.get("trip_label") or a.get("trip_col"),
-            "停留所": a["stop_name"], "現在": a["current"],
-            "候補": a.get("suggested") or "", "確度": a.get("confidence"),
-            "理由": a["reason"], "採用時刻": a.get("suggested") or a["current"],
-            "_col": a.get("trip_col"), "_seq": a.get("seq"),
-        } for a in anomalies])
-        ed = st.data_editor(
-            adf, hide_index=True, use_container_width=True, key=f"anom_{tok}",
-            column_config={
-                "block": st.column_config.NumberColumn(disabled=True),
-                "便": st.column_config.TextColumn(disabled=True),
-                "停留所": st.column_config.TextColumn(disabled=True),
-                "現在": st.column_config.TextColumn(disabled=True),
-                "候補": st.column_config.TextColumn(disabled=True),
-                "確度": st.column_config.TextColumn(disabled=True),
-                "理由": st.column_config.TextColumn(disabled=True),
-                "採用時刻": st.column_config.TextColumn("採用時刻(HH:MM)", help="ここを原典どおりに直す"),
-                "_col": None, "_seq": None,
-            },
-        )
-        if st.button("時刻を修正して反映"):
-            import re as _re
-            n_fix = 0
-            for _, r in ed.iterrows():
-                val = str(r["採用時刻"]).strip()
-                cur = str(r["現在"]).strip()
-                if not val or val == cur:
+    blocks_t = ss().extract.get("blocks", [])
+    if blocks_t:
+        st.subheader("⏰ 時刻表の確認・修正（全便・全停留所）")
+        n_an = len(anomalies)
+        st.caption("抽出した**全時刻**です。原典（紙やPDF）と見比べて、違うセルを直接直してください。"
+                   "空欄＝通過。"
+                   + (f"OCR誤読の疑い **{n_an}件** は各表の下に列挙しています。" if n_an else "")
+                   + "直したら『この時刻表で確定して反映』を押してください（自動では書き換えません）。")
+        edited_blocks = {}
+        for b in blocks_t:
+            bi = b.get("block_index")
+            stops = [s.get("name") for s in b.get("stops", [])]
+            trips = b.get("trips", [])
+            labels = []
+            for j, t in enumerate(trips):
+                lab = t.get("label") or (f"{t.get('trip_number')}便" if t.get("trip_number") else f"便{j + 1}")
+                labels.append(f"{lab}#{j}")   # 重複ラベル対策に内部で一意化
+            # 各便の時刻を master停留所(行)に揃える（便は master の部分列）
+            per_trip = []
+            for t in trips:
+                cells = t.get("cells", []); k = 0; mp = {}
+                for i, sn in enumerate(stops):
+                    if k < len(cells) and cells[k].get("name") == sn:
+                        mp[i] = (cells[k].get("time") or "")[:5]; k += 1
+                per_trip.append(mp)
+            rows = []
+            for i, sn in enumerate(stops):
+                row = {"停留所": sn}
+                for j, lab in enumerate(labels):
+                    row[lab] = per_trip[j].get(i, "")
+                rows.append(row)
+            df = pd.DataFrame(rows)
+            dh = b.get("direction_hint")
+            st.markdown(f"**block {bi}**" + (f"（{dh}）" if dh else ""))
+            colcfg = {"停留所": st.column_config.TextColumn("停留所", disabled=True)}
+            for lab in labels:
+                colcfg[lab] = st.column_config.TextColumn(lab.split("#")[0])
+            ed = st.data_editor(df, hide_index=True, use_container_width=True,
+                                key=f"tt_{tok}_{bi}", column_config=colcfg)
+            edited_blocks[bi] = (ed, labels, stops)
+            bl_an = [a for a in anomalies if a.get("block") == bi]
+            if bl_an:
+                st.caption("⚠ OCR疑い: " + " ／ ".join(
+                    f"{a.get('trip_label')} {a['stop_name']} {a['current'][:5]}→"
+                    f"{(a['suggested'][:5] if a.get('suggested') else '要確認')}" for a in bl_an[:10]))
+        if st.button("この時刻表で確定して反映", type="primary"):
+            for b in blocks_t:
+                bi = b.get("block_index")
+                if bi not in edited_blocks:
                     continue
-                m = _re.match(r"^(\d{1,2}):(\d{2})", val)
-                if not m:
-                    continue
-                hhmmss = f"{int(m.group(1)):02d}:{m.group(2)}:00"
-                for b in ss().extract.get("blocks", []):
-                    if b.get("block_index") != int(r["block"]):
-                        continue
-                    for t in b.get("trips", []):
-                        if t.get("col") != r["_col"]:
+                ed, labels, stops = edited_blocks[bi]
+                for j, t in enumerate(b.get("trips", [])):
+                    lab = labels[j]; newcells = []
+                    for i in range(len(ed)):
+                        val = str(ed.iloc[i][lab]).strip()
+                        m = re.match(r"^(\d{1,2}):(\d{2})", val)
+                        if not m:
                             continue
-                        idx = int(r["_seq"]) - 1
-                        if 0 <= idx < len(t.get("cells", [])):
-                            t["cells"][idx]["time"] = hhmmss
-                            n_fix += 1
-            if n_fix:
-                for k in ("decision_spec", "result", "confirmed", "anomalies_token"):
-                    ss().pop(k, None)
-                st.success(f"{n_fix} 件の時刻を修正しました。③で条件を入れて再生成してください。")
-                st.rerun()
-            else:
-                st.info("変更がありませんでした。")
+                        newcells.append({"seq": len(newcells) + 1, "num": None, "name": stops[i],
+                                         "time": f"{int(m.group(1)):02d}:{m.group(2)}:00", "reserve": False})
+                    t["cells"] = newcells; t["n_stops"] = len(newcells)
+            for k in ("decision_spec", "result", "confirmed", "anomalies_token"):
+                ss().pop(k, None)
+            st.success("時刻表を反映しました。③で条件を入れて生成してください。")
+            st.rerun()
 
 # =====================================================================
 # Step 3: PDF/Excelに無い項目だけを後から質問（自動確認の後）
