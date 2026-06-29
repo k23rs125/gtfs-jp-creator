@@ -95,41 +95,73 @@ if "extract" in ss():
 # Step 2: Claude で構造化（decision-spec）
 # =====================================================================
 if "extract" in ss():
-    st.header("② Claude で構造化（路線・方向・循環の判断）")
-    key = st.text_input("ANTHROPIC_API_KEY（環境変数があれば空でOK）", type="password",
-                        value="" )
-    api_key = key or os.environ.get("ANTHROPIC_API_KEY", "")
-    col1, col2 = st.columns(2)
-    if col1.button("Claudeで構造化"):
-        if not api_key:
-            st.warning("APIキーが未設定です。下の欄に decision-spec を貼り付けても進められます。")
-        else:
-            try:
-                with st.spinner("Claude が構造を判断中..."):
-                    ss().decision_spec = claude_structure.structure(ss().extract, api_key)
-                st.success("構造化しました。")
-            except Exception as e:
-                st.error(f"Claude 呼び出し失敗: {e}")
-    # 編集/貼り付け可能な decision-spec
+    st.header("② 自動構造化（路線・方向・循環の判断）")
+    st.caption("抽出結果から路線・方向・循環をシステムが自動で割り当てます。"
+               "見出しが曖昧な時刻表だけ、下の詳細で Claude 構造化や手動調整ができます。")
+    # 既定: 抽出の direction_hint から自動構造化（APIキー無しでも成立）
     default_spec = json.dumps(ss().get("decision_spec", {
         "routes": [{"route_id": "R01", "route_long_name": "", "blocks": list(range(len(ex.get("blocks", [])))), "circular": False}],
         "block_direction": {str(i): i for i in range(len(ex.get("blocks", [])))},
         "block_headsign": {str(i): (ex["blocks"][i].get("direction_hint") or "") for i in range(len(ex.get("blocks", [])))},
         "exclude_reserve": True, "exclude_unnumbered": False, "stop_key": "name"
     }), ensure_ascii=False, indent=2)
-    spec_text = col2.text_area("decision-spec（Claude出力・編集可）", value=default_spec, height=260)
-    try:
-        ss().decision_spec = json.loads(spec_text)
-        col2.caption("✓ JSONとして妥当")
-    except Exception:
-        col2.caption("⚠ JSONが不正です")
+    with st.expander("詳細を調整（任意：Claude構造化 / decision-spec の手動編集）"):
+        key = st.text_input("ANTHROPIC_API_KEY（環境変数があれば空でOK）", type="password", value="")
+        api_key = key or os.environ.get("ANTHROPIC_API_KEY", "")
+        if st.button("Claudeで構造化"):
+            if not api_key:
+                st.warning("APIキーが未設定です。下の欄に decision-spec を貼り付けても進められます。")
+            else:
+                try:
+                    with st.spinner("Claude が構造を判断中..."):
+                        ss().decision_spec = claude_structure.structure(ss().extract, api_key)
+                    st.success("構造化しました。")
+                except Exception as e:
+                    st.error(f"Claude 呼び出し失敗: {e}")
+        spec_text = st.text_area("decision-spec（自動生成・編集可）", value=default_spec, height=260)
+        try:
+            ss().decision_spec = json.loads(spec_text)
+            st.caption("✓ JSONとして妥当")
+        except Exception:
+            st.caption("⚠ JSONが不正です")
+    # expander を開かなくても decision_spec を確定（既定 or 既存）させる
+    if not ss().get("decision_spec"):
+        ss().decision_spec = json.loads(default_spec)
 
 # =====================================================================
-# Step 3: 条件確認フォーム（PDF/Excelに無い情報）
+# 自動確認: システム側でまず時刻表から読み取れた内容を提示する。
+# （＝先に全部を質問しない。ここに無い＝PDFに無い情報だけを下の③で後から質問する）
 # =====================================================================
 if ss().get("decision_spec"):
-    st.header("③ 条件確認（PDF/Excelに無い項目・推測せず入力）")
-    st.caption("不明な項目は空欄でOK（GTFSには暫定/要確認として入ります）。")
+    spec0 = ss()["decision_spec"]
+    blocks0 = ss().extract.get("blocks", [])
+    total0 = sum(len(b.get("trips", [])) for b in blocks0)
+    st.subheader("自動確認の結果（時刻表から読み取れたこと）")
+    st.caption("システムがまず確認した内容です。ここに出ていない情報は PDF/Excel に"
+               "書かれていないため、推測せず下の③で質問します。")
+    auto = [f"便・停留所: ブロック {len(blocks0)} / 便 計 {total0}（停留所順は上に表示）"]
+    for b in blocks0:
+        dh = b.get("direction_hint")
+        if dh:
+            auto.append(f"方向（block {b.get('block_index')}）: 見出しから「{dh}」を自動検出")
+    circ = any(r.get("circular") for r in spec0.get("routes", []))
+    auto.append(f"循環/方向: {'循環あり' if circ else '往復（循環なし）'}（構造化の判断）")
+    st.success("自動で分かったこと:\n" + "\n".join("・" + a for a in auto))
+    nc = list(ss().extract.get("needs_confirmation", []))
+    nc += [{"message": w} for w in ss().extract.get("warnings", [])]
+    if nc:
+        st.warning("要確認（原典と照合してください）:\n"
+                   + "\n".join("・" + (x.get("message") if isinstance(x, dict) else str(x)) for x in nc))
+    st.info("PDF/Excel に無いので③で質問します: 路線名 / 事業者名・法人番号・URL・電話 / "
+            "運賃 / 運行する曜日 / 有効期間 / 対象自治体（座標補完用）")
+
+# =====================================================================
+# Step 3: PDF/Excelに無い項目だけを後から質問（自動確認の後）
+# =====================================================================
+if ss().get("decision_spec"):
+    st.header("③ PDF/Excel に無い項目を入力（不足分の質問）")
+    st.caption("上の②でシステムが確認した結果、時刻表に書かれていない項目です。"
+               "推測せず入力してください（不明は空欄でOK＝暫定/要確認として入る。ただし路線名は必須）。")
     c1, c2, c3 = st.columns(3)
     route_name = c1.text_input("路線名", value=ss()["decision_spec"]["routes"][0].get("route_long_name", ""))
     muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県", help="P11の都道府県/市域制約に使用")
