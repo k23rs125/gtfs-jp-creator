@@ -1,0 +1,1260 @@
+<!-- GTFS ビューア テンプレート。原典: 九州産業大学 稲永研究室(remilab) の standalone GTFS viewer。
+     gtfs-jp-creator の make_gtfs_viewer.py が埋め込みデータとタイトルを差し込み単一HTMLを生成する。 -->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>__VIEWER_TITLE__</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<style>
+  :root {
+    --bg: #f8f6f0;
+    --paper: #ffffff;
+    --ink: #222;
+    --muted: #777;
+    --line: #d0c8b8;
+    --accent: #b91c1c;
+    --ok-bg: #e8f5e9;
+    --ok-text: #1b5e20;
+    --warn-bg: #fff8e1;
+    --warn-text: #855300;
+    --err-bg: #ffebee;
+    --err-text: #b71c1c;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: "Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
+    background: var(--bg); color: var(--ink); font-size: 16px; line-height: 1.6;
+  }
+  header.top {
+    background: linear-gradient(180deg, #fff, #f1ebd9);
+    border-bottom: 3px solid var(--accent);
+    padding: 14px 24px;
+  }
+  header.top h1 { margin: 0; font-size: 22px; }
+  header.top .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .load-status { float: right; font-size: 13px; color: var(--muted); }
+  .load-status button {
+    background: #f5f5f5; border: 1px solid var(--line); padding: 5px 12px;
+    border-radius: 4px; font-size: 13px; cursor: pointer; margin-left: 6px;
+  }
+
+  nav.menu {
+    background: #fff; border-bottom: 1px solid var(--line);
+    padding: 0; display: flex; overflow-x: auto;
+  }
+  nav.menu button {
+    background: none; border: none; padding: 14px 22px; cursor: pointer;
+    font-size: 16px; color: #555; border-bottom: 3px solid transparent;
+    white-space: nowrap; font-family: inherit;
+  }
+  nav.menu button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; background: #fafaf5; }
+  nav.menu button:hover { background: #f5f0e2; }
+
+  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .page > h2 {
+    font-size: 22px; border-bottom: 2px solid var(--accent);
+    padding-bottom: 6px; margin: 0 0 10px 0;
+  }
+  .page > p.lead { color: #555; margin: 0 0 20px 0; font-size: 15px; }
+
+  /* Cards */
+  .card {
+    background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
+    padding: 18px; margin-bottom: 18px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .card h3 { margin: 0 0 12px 0; font-size: 17px; }
+
+  /* Home */
+  .route-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  .route-card {
+    background: var(--paper); border: 1px solid var(--line); border-left: 6px solid #888;
+    border-radius: 4px; padding: 14px 16px; cursor: pointer; transition: transform 0.1s;
+  }
+  .route-card:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.08); }
+  .route-card h4 { margin: 0 0 8px 0; font-size: 17px; }
+  .route-card .desc { font-size: 13px; color: #555; }
+  .route-card .meta { font-size: 13px; color: var(--muted); margin-top: 8px; }
+
+  /* Timetable */
+  .ctrls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .ctrls label { font-weight: 600; color: #444; font-size: 14px; }
+  .ctrls select { padding: 8px 12px; border: 1px solid var(--line); border-radius: 4px; font-size: 15px; font-family: inherit; background: #fff; }
+  .day-pills { display: inline-flex; gap: 0; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .day-pills button {
+    background: #fff; border: none; padding: 8px 14px; cursor: pointer; font-size: 14px; border-right: 1px solid var(--line); font-family: inherit;
+  }
+  .day-pills button:last-child { border-right: none; }
+  .day-pills button.active { background: var(--accent); color: #fff; font-weight: 600; }
+
+  .timetable-wrap { overflow-x: auto; margin-top: 12px; }
+  table.tt {
+    border-collapse: collapse; background: #fff; font-size: 14px;
+    border: 1px solid #888;
+  }
+  table.tt th, table.tt td {
+    border: 1px solid #b8b8b8; padding: 6px 10px; text-align: center; white-space: nowrap;
+  }
+  table.tt th.head { background: #f3ecd6; font-weight: 700; }
+  table.tt th.stop {
+    text-align: left; background: #faf6e8; font-weight: 600;
+    position: sticky; left: 0; z-index: 1; min-width: 160px;
+  }
+  table.tt td.time { font-variant-numeric: tabular-nums; }
+  table.tt td.empty-cell { color: #ccc; }
+  table.tt tr:nth-child(even) td:not(.stop) { background: #fafafa; }
+  table.tt .first-stop { font-weight: 700; color: var(--accent); }
+  table.tt .last-stop { font-weight: 700; color: #1565c0; }
+
+  /* Fare table */
+  table.fare {
+    border-collapse: collapse; background: #fff; font-size: 13px;
+  }
+  table.fare th, table.fare td {
+    border: 1px solid #aaa; padding: 6px 8px; text-align: center;
+    min-width: 50px;
+  }
+  table.fare th { background: #f3ecd6; font-weight: 700; font-size: 12px; white-space: nowrap; }
+  table.fare th.corner { background: #d9c89f; }
+  table.fare td.self { background: #eee; }
+  table.fare td.empty-cell { background: #fafafa; color: #ccc; }
+  table.fare td { font-variant-numeric: tabular-nums; }
+  .fare-100 { background: #e8f5e9 !important; color: #1b5e20; }
+  .fare-170 { background: #e3f2fd !important; color: #0d47a1; }
+  .fare-200, .fare-210, .fare-220, .fare-240, .fare-250 { background: #fff8e1 !important; color: #5d4037; }
+  .fare-260, .fare-270, .fare-280, .fare-290, .fare-300, .fare-310, .fare-320, .fare-330, .fare-340, .fare-350 { background: #fff3e0 !important; color: #bf360c; }
+  .fare-360, .fare-370, .fare-380, .fare-390, .fare-420 { background: #ffebee !important; color: #b71c1c; }
+  .fare-450, .fare-480 { background: #fce4ec !important; color: #880e4f; }
+
+  /* Calendar */
+  .cal-year { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
+  .cal-month { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+  .cal-month h4 { margin: 0 0 8px 0; text-align: center; font-size: 16px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .cal-cell {
+    text-align: center; padding: 4px 2px; border-radius: 3px;
+    font-size: 13px; min-height: 38px; position: relative;
+  }
+  .cal-cell.head { font-weight: 700; background: #f3ecd6; color: #555; }
+  .cal-cell.head.sun { color: #c62828; }
+  .cal-cell.head.sat { color: #1565c0; }
+  .cal-cell .date { font-weight: 600; }
+  .cal-cell.sun { background: #ffebee; }
+  .cal-cell.sat { background: #e3f2fd; }
+  .cal-cell.holiday { background: #ffebee; }
+  .cal-cell.empty { background: transparent; }
+  .cal-cell .badges { display: flex; flex-wrap: wrap; gap: 1px; justify-content: center; margin-top: 2px; }
+  .cal-cell .bdg { width: 8px; height: 8px; border-radius: 50%; }
+  .holiday-mark { position: absolute; top: 1px; right: 2px; color: #c62828; font-size: 9px; }
+
+  /* Map */
+  #map { height: 70vh; border: 1px solid var(--line); border-radius: 6px; }
+  .map-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 10px; font-size: 14px; }
+  .map-legend .item { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 10px; border-radius: 16px; background: #fff; border: 1px solid var(--line); }
+  .map-legend .item.off { opacity: 0.35; }
+  .map-legend .swatch { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.2); }
+
+  /* Stop list */
+  .stop-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+  .stop-item { background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; font-size: 14px; }
+  .stop-item .yomi { color: #777; font-size: 11px; line-height: 1.2; }
+  .stop-item .name { font-weight: 700; font-size: 15px; }
+  .stop-item .roman { color: var(--muted); font-size: 12px; }
+  .stop-item .routes { margin-top: 4px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; color: #fff; font-size: 11px; margin-right: 3px; font-weight: 600; }
+
+  /* Check result */
+  .check-overall {
+    padding: 24px; border-radius: 8px; text-align: center;
+    font-size: 22px; font-weight: 700; margin-bottom: 18px;
+  }
+  .check-overall.ok { background: var(--ok-bg); color: var(--ok-text); border: 2px solid #66bb6a; }
+  .check-overall.warn { background: var(--warn-bg); color: var(--warn-text); border: 2px solid #ffa726; }
+  .check-overall.err { background: var(--err-bg); color: var(--err-text); border: 2px solid #ef5350; }
+  .check-overall .icon { font-size: 36px; display: block; margin-bottom: 6px; }
+  .check-overall .sub { font-size: 15px; color: inherit; font-weight: normal; margin-top: 4px; }
+
+  .check-item {
+    background: #fff; border: 1px solid var(--line); border-left: 5px solid #66bb6a;
+    padding: 12px 16px; margin-bottom: 8px; border-radius: 4px;
+  }
+  .check-item.warn { border-left-color: #ffa726; }
+  .check-item.err { border-left-color: #ef5350; }
+  .check-item .title { font-weight: 700; font-size: 15px; }
+  .check-item .detail { color: #555; font-size: 13px; margin-top: 4px; }
+  .check-item .mark { font-weight: 700; margin-right: 6px; }
+  .check-item.ok .mark { color: var(--ok-text); }
+  .check-item.warn .mark { color: var(--warn-text); }
+  .check-item.err .mark { color: var(--err-text); }
+  details { margin-top: 6px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+
+  /* Summary stats */
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .summary-card { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; text-align: center; }
+  .summary-card .v { font-size: 26px; font-weight: 700; color: var(--accent); }
+  .summary-card .l { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+  .info-note { background: #fff8e1; border-left: 4px solid #ffa726; padding: 10px 14px; border-radius: 4px; font-size: 14px; margin: 12px 0; }
+  .help-toggle { color: var(--accent); cursor: pointer; font-size: 13px; }
+  .empty-msg { text-align: center; color: var(--muted); padding: 24px; }
+
+  @media print {
+    nav.menu, header.top .load-status, .ctrls { display: none; }
+    .page { display: block !important; page-break-after: always; }
+    main { max-width: 100%; padding: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="load-status">
+    <span id="loadStatus">読み込み中…</span>
+    <input type="file" id="filePicker" multiple accept=".txt" style="display:none">
+    <button onclick="document.getElementById('filePicker').click()">ファイルを開く</button>
+  </div>
+  <h1>🚌 __VIEWER_TITLE__</h1>
+  <div class="sub">時刻表・運賃・運行日・バス停の位置が正しく登録されているか、紙の資料と比べて確認するためのページです</div>
+</header>
+
+<nav class="menu" id="menu">
+  <button data-page="home" class="active">📋 路線一覧</button>
+  <button data-page="timetable">🕐 時刻表</button>
+  <button data-page="fare">💴 運賃表</button>
+  <button data-page="map">🗺️ 路線図</button>
+  <button data-page="calendar">📅 運行カレンダー</button>
+  <button data-page="stops">🚏 バス停一覧</button>
+  <button data-page="check">✓ データチェック結果</button>
+</nav>
+
+<main>
+
+<!-- ========================= HOME ========================= -->
+<section id="page-home" class="page active">
+  <h2>路線一覧</h2>
+  <p class="lead">このバス事業者が運行している路線の一覧です。クリックすると各路線の時刻表に移動します。</p>
+
+  <div class="summary-grid" id="summary"></div>
+
+  <div class="route-grid" id="routeGrid"></div>
+
+  <div class="card" style="margin-top:24px">
+    <h3>事業者情報</h3>
+    <div id="agencyInfo"></div>
+  </div>
+
+  <div class="card">
+    <h3>このデータについて</h3>
+    <div id="feedInfoBox"></div>
+  </div>
+</section>
+
+<!-- ========================= TIMETABLE ========================= -->
+<section id="page-timetable" class="page">
+  <h2>時刻表</h2>
+  <p class="lead">路線と運行日（平日／土日祝など）を選ぶと、時刻表が表示されます。<br>
+  <strong>紙の時刻表と見比べて、便数・発車時刻・停車駅が一致しているか確認してください。</strong></p>
+
+  <div class="card">
+    <div class="ctrls">
+      <label>路線：</label>
+      <select id="ttRoute"></select>
+      <label>運行日：</label>
+      <div class="day-pills" id="ttServicePills"></div>
+      <label>方向：</label>
+      <div class="day-pills" id="ttDirPills"></div>
+    </div>
+    <div id="ttSummary" style="margin: 8px 0; color: #555; font-size: 14px;"></div>
+    <div class="timetable-wrap" id="ttContainer"></div>
+  </div>
+</section>
+
+<!-- ========================= FARE ========================= -->
+<section id="page-fare" class="page">
+  <h2>運賃表</h2>
+  <p class="lead">路線を選ぶと運賃表が表示されます。<br>
+  <strong>公式の運賃表（PDF）と見比べて、すべての金額が合っているか確認してください。</strong>料金帯で色分けされています。</p>
+
+  <div class="card">
+    <div class="ctrls">
+      <label>路線：</label>
+      <select id="fareRoute"></select>
+    </div>
+    <div id="fareSummary" style="margin: 8px 0; color: #555; font-size: 14px;"></div>
+    <div style="overflow:auto; max-height: 80vh;" id="fareMatrix"></div>
+  </div>
+</section>
+
+<!-- ========================= MAP ========================= -->
+<section id="page-map" class="page">
+  <h2>路線図（バス停の位置）</h2>
+  <p class="lead">地図上にバス停と経路を表示します。マーカーは<strong>路線ごとの色</strong>で塗り分けられています。<br>
+  <strong>実際の停留所の位置と、地図上の位置が合っているか確認してください。</strong>マーカーをクリックすると、バス停名・読みがな・通る路線が表示されます。凡例の路線名をクリックすると、その路線だけの表示に絞り込めます。</p>
+
+  <div class="card">
+    <div class="map-legend" id="mapLegend"></div>
+    <div id="map"></div>
+  </div>
+</section>
+
+<!-- ========================= CALENDAR ========================= -->
+<section id="page-calendar" class="page">
+  <h2>運行カレンダー</h2>
+  <p class="lead">月ごとの運行ダイヤを表示します。各バス停の運行日と例外（祝日運休など）が正しく設定されているか確認できます。</p>
+
+  <div class="card">
+    <div class="ctrls">
+      <label>路線：</label>
+      <select id="calRoute"></select>
+    </div>
+    <div id="calLegend" style="margin: 12px 0; font-size: 14px;"></div>
+    <div class="cal-year" id="calYear"></div>
+  </div>
+</section>
+
+<!-- ========================= STOPS ========================= -->
+<section id="page-stops" class="page">
+  <h2>バス停一覧</h2>
+  <p class="lead">登録されている全バス停です。バス停名のローマ字表記と、どの路線が止まるかを確認できます。</p>
+
+  <div class="card">
+    <div class="ctrls">
+      <label>検索：</label>
+      <input type="text" id="stopSearch" placeholder="バス停名で絞り込み" style="padding:8px 12px; border:1px solid var(--line); border-radius:4px; font-size:15px; width:240px;">
+      <span id="stopCount" style="color: var(--muted); font-size: 13px;"></span>
+    </div>
+    <div class="stop-list" id="stopList"></div>
+  </div>
+</section>
+
+<!-- ========================= CHECK ========================= -->
+<section id="page-check" class="page">
+  <h2>データチェック結果</h2>
+  <p class="lead">登録されたデータに矛盾や入力漏れがないか、自動で点検した結果です。</p>
+  <div id="checkOverall"></div>
+  <div id="checkItems"></div>
+</section>
+
+</main>
+
+<!-- ============ 埋め込み GTFS データ ============ -->
+<script>
+window.__GTFS_DATA__ = __GTFS_DATA_JSON__;
+</script>
+<script>
+"use strict";
+
+const GTFS_FILES = [
+  "agency.txt","agency_jp.txt","feed_info.txt","office_jp.txt",
+  "stops.txt","routes.txt","routes_jp.txt","trips.txt","stop_times.txt",
+  "calendar.txt","calendar_dates.txt","shapes.txt",
+  "fare_attributes.txt","fare_rules.txt","translations.txt"
+];
+const DEFAULT_FOLDER = "__FEED_FOLDER__";
+const data = {};
+
+let map = null;
+let mapLayers = {};
+let activeRouteIds = null;
+const DAY_LABELS = ["月","火","水","木","金","土","日"];
+const DAY_KEYS = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+
+// ============ Menu navigation ============
+document.querySelectorAll("nav.menu button").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("nav.menu button").forEach(x => x.classList.remove("active"));
+    document.querySelectorAll(".page").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    document.getElementById("page-" + b.dataset.page).classList.add("active");
+    if (b.dataset.page === "map") setTimeout(() => map && map.invalidateSize(), 50);
+  });
+});
+
+// ============ Loading ============
+document.getElementById("filePicker").addEventListener("change", async e => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  for (const f of files) {
+    if (!GTFS_FILES.includes(f.name)) continue;
+    const text = await f.text();
+    parseStore(f.name, text);
+  }
+  document.getElementById("loadStatus").textContent = `読み込み完了 (${Object.keys(data).length}ファイル)`;
+  renderAll();
+});
+
+async function tryLoadFromServer() {
+  // 1) 埋め込みデータがあれば優先（standalone版）
+  if (window.__GTFS_DATA__) {
+    let count = 0;
+    for (const f of GTFS_FILES) {
+      if (window.__GTFS_DATA__[f] != null) {
+        parseStore(f, window.__GTFS_DATA__[f]);
+        count++;
+      }
+    }
+    document.getElementById("loadStatus").textContent = `読み込み完了 (${count}ファイル・内蔵データ)`;
+    renderAll();
+    return;
+  }
+  // 2) サーバから fetch（フォルダ配置版）
+  let count = 0;
+  for (const f of GTFS_FILES) {
+    try {
+      const res = await fetch(`${DEFAULT_FOLDER}/${f}`);
+      if (!res.ok) continue;
+      parseStore(f, await res.text());
+      count++;
+    } catch {}
+  }
+  if (count > 0) {
+    document.getElementById("loadStatus").textContent = `読み込み完了 (${count}ファイル)`;
+    renderAll();
+  } else {
+    document.getElementById("loadStatus").textContent = "「ファイルを開く」でGTFSファイルを選択してください";
+  }
+}
+
+function parseStore(name, text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const r = Papa.parse(text, { header: true, skipEmptyLines: true });
+  data[name] = r.data;
+}
+
+// ============ Helpers ============
+function hmsToMin(t) {
+  if (!t) return null;
+  const m = String(t).match(/^(\d+):(\d+):(\d+)$/);
+  return m ? +m[1]*60 + +m[2] : null;
+}
+function fmtTime(t) {
+  if (!t) return "";
+  const m = String(t).match(/^(\d+):(\d+)/);
+  return m ? `${m[1].padStart(2,"0")}:${m[2]}` : t;
+}
+function routeColor(routeId) {
+  const r = (data["routes.txt"]||[]).find(x => x.route_id === routeId);
+  return r ? "#" + (r.route_color || "888888") : "#888";
+}
+function routeName(routeId) {
+  const r = (data["routes.txt"]||[]).find(x => x.route_id === routeId);
+  return r ? (r.route_long_name || r.route_short_name) : routeId;
+}
+function stopName(stopId) {
+  const s = (data["stops.txt"]||[]).find(x => x.stop_id === stopId);
+  return s ? s.stop_name : stopId;
+}
+function stopYomi(stopId) {
+  const t = (data["translations.txt"]||[]).find(x =>
+    x.table_name==="stops" && x.field_name==="stop_name" && x.language==="ja-Hrkt" && x.record_id===stopId);
+  return t ? t.translation : "";
+}
+function routeYomi(routeId) {
+  const t = (data["translations.txt"]||[]).find(x =>
+    x.table_name==="routes" && x.field_name==="route_long_name" && x.language==="ja-Hrkt" && x.record_id===routeId);
+  return t ? t.translation : "";
+}
+function serviceLabel(c) {
+  // calendar row → friendly label
+  const runDays = DAY_KEYS.map((k,i) => c[k]==="1"?DAY_LABELS[i]:"").filter(Boolean);
+  if (runDays.length === 7) return "毎日運行";
+  if (runDays.join("") === "月火水木金") return "平日（月〜金）";
+  if (runDays.join("") === "月火水木金土") return "月〜土曜日";
+  if (runDays.join("") === "土日") return "土・日のみ";
+  if (runDays.join("") === "日") return "日曜・祝日";
+  if (runDays.join("") === "土") return "土曜のみ";
+  return runDays.join("・") + "曜日";
+}
+function serviceLabelById(sid) {
+  const c = (data["calendar.txt"]||[]).find(x => x.service_id === sid);
+  if (!c) return sid;
+  // 限定期間ならその旨追加
+  const sd = c.start_date, ed = c.end_date;
+  const fmt = d => d ? `${d.slice(0,4)}/${d.slice(4,6)}/${d.slice(6,8)}` : "";
+  let label = serviceLabel(c);
+  // 1年以上の通常運行は省略、それ未満は期間表示
+  if (sd && ed) {
+    const sY = +sd.slice(0,4), eY = +ed.slice(0,4);
+    if (eY - sY < 1 || (eY-sY===1 && +sd.slice(4) >= +ed.slice(4))) {
+      // 短期間
+      label += `（${fmt(sd)}〜${fmt(ed)}）`;
+    }
+  }
+  return label;
+}
+
+// ============ Render All ============
+function renderAll() {
+  renderHome();
+  renderTimetableControls();
+  renderFareControls();
+  renderCalendarControls();
+  renderStops();
+  renderCheck();
+  renderMap();
+}
+
+// ============ HOME ============
+function renderHome() {
+  const routes = data["routes.txt"] || [];
+  const trips = data["trips.txt"] || [];
+  const stops = data["stops.txt"] || [];
+  const calendar = data["calendar.txt"] || [];
+
+  // summary
+  const totalTrips = trips.length;
+  const systemCount = new Set(
+    trips.map(t => `${t.route_id}__${t.direction_id ?? ""}__${t.trip_headsign ?? ""}`)
+  ).size;
+  document.getElementById("summary").innerHTML = `
+    <div class="summary-card"><div class="v">${routes.length}</div><div class="l">路線数</div></div>
+    <div class="summary-card"><div class="v">${systemCount}</div><div class="l">系統数</div></div>
+    <div class="summary-card"><div class="v">${stops.length}</div><div class="l">バス停数</div></div>
+    <div class="summary-card"><div class="v">${totalTrips}</div><div class="l">登録便数（合計）</div></div>
+  `;
+
+  // route cards
+  const jpRoutes = {};
+  for (const r of (data["routes_jp.txt"]||[])) jpRoutes[r.route_id] = r;
+
+  const tripsByRoute = {};
+  for (const t of trips) (tripsByRoute[t.route_id] = tripsByRoute[t.route_id] || []).push(t);
+
+  document.getElementById("routeGrid").innerHTML = routes.map(r => {
+    const color = "#" + (r.route_color || "888888");
+    const jp = jpRoutes[r.route_id] || {};
+    const tripList = tripsByRoute[r.route_id] || [];
+    // ダイヤごとの便数
+    const byService = {};
+    for (const t of tripList) byService[t.service_id] = (byService[t.service_id]||0) + 1;
+    const serviceLines = Object.entries(byService).map(([sid,n]) =>
+      `<div>・${serviceLabelById(sid)}：${n}便</div>`
+    ).join("");
+    const route = `${jp.origin_stop||""}${jp.via_stop ? " ⇔ " + jp.via_stop : ""}${jp.destination_stop ? " ⇔ " + jp.destination_stop : ""}`;
+    const y = routeYomi(r.route_id);
+    const yomiHtml = y ? `<div style="font-size:11px;color:#888;line-height:1.2">${y}</div>` : "";
+    return `<div class="route-card" style="border-left-color:${color}" onclick="goToTimetable('${r.route_id}')">
+      ${yomiHtml}
+      <h4 style="color:${color};margin-top:2px">${r.route_long_name}</h4>
+      <div class="desc">${route}</div>
+      <div class="meta">${serviceLines}</div>
+    </div>`;
+  }).join("");
+
+  // agency
+  const a = (data["agency.txt"]||[])[0] || {};
+  const ajp = (data["agency_jp.txt"]||[])[0] || {};
+  document.getElementById("agencyInfo").innerHTML = `
+    <table style="border-collapse:collapse;width:100%;font-size:14px">
+      <tr><th style="text-align:left;padding:6px 12px;background:#faf6e8;width:140px">事業者名</th><td style="padding:6px 12px">${a.agency_name||""} （正式名称：${ajp.agency_official_name||""}）</td></tr>
+      <tr><th style="text-align:left;padding:6px 12px;background:#faf6e8">所在地</th><td style="padding:6px 12px">〒${ajp.agency_zip_number||""} ${ajp.agency_address||""}</td></tr>
+      <tr><th style="text-align:left;padding:6px 12px;background:#faf6e8">電話</th><td style="padding:6px 12px">${a.agency_phone||""}</td></tr>
+      <tr><th style="text-align:left;padding:6px 12px;background:#faf6e8">ホームページ</th><td style="padding:6px 12px"><a href="${a.agency_url||''}" target="_blank">${a.agency_url||""}</a></td></tr>
+      <tr><th style="text-align:left;padding:6px 12px;background:#faf6e8">運賃案内</th><td style="padding:6px 12px"><a href="${a.agency_fare_url||''}" target="_blank">${a.agency_fare_url||""}</a></td></tr>
+    </table>
+    <div style="margin-top:14px"><strong>営業所</strong><ul>
+      ${(data["office_jp.txt"]||[]).map(o => `<li>${o.office_name}（☎ ${o.office_phone||"-"}）</li>`).join("")}
+    </ul></div>
+  `;
+
+  const fi = (data["feed_info.txt"]||[])[0] || {};
+  const fmt = d => d ? `${d.slice(0,4)}年${+d.slice(4,6)}月${+d.slice(6,8)}日` : "";
+  document.getElementById("feedInfoBox").innerHTML = `
+    <table style="border-collapse:collapse;width:100%;font-size:14px">
+      <tr><th style="text-align:left;padding:6px 12px;background:#faf6e8;width:140px">データ提供者</th><td style="padding:6px 12px">${fi.feed_publisher_name||""}</td></tr>
+      <tr><th style="text-align:left;padding:6px 12px;background:#faf6e8">有効期間</th><td style="padding:6px 12px">${fmt(fi.feed_start_date)} 〜 ${fmt(fi.feed_end_date)}</td></tr>
+      <tr><th style="text-align:left;padding:6px 12px;background:#faf6e8">データ版数</th><td style="padding:6px 12px">${fi.feed_version||""}</td></tr>
+    </table>
+  `;
+}
+
+function goToTimetable(routeId) {
+  document.querySelector('nav.menu button[data-page="timetable"]').click();
+  document.getElementById("ttRoute").value = routeId;
+  renderTimetable();
+}
+
+// ============ TIMETABLE ============
+function renderTimetableControls() {
+  const routes = data["routes.txt"] || [];
+  const sel = document.getElementById("ttRoute");
+  sel.innerHTML = routes.map(r => `<option value="${r.route_id}">${r.route_long_name}</option>`).join("");
+  sel.onchange = renderTimetable;
+  renderTimetable();
+}
+
+function renderTimetable() {
+  const routeId = document.getElementById("ttRoute").value;
+  if (!routeId) return;
+  const trips = (data["trips.txt"]||[]).filter(t => t.route_id === routeId);
+  if (!trips.length) {
+    document.getElementById("ttContainer").innerHTML = '<div class="empty-msg">この路線には便が登録されていません</div>';
+    return;
+  }
+
+  // Build service pills
+  const sids = [...new Set(trips.map(t => t.service_id))];
+  const cal = data["calendar.txt"] || [];
+  const servicePills = document.getElementById("ttServicePills");
+  const currentSid = servicePills.dataset.current && sids.includes(servicePills.dataset.current) ? servicePills.dataset.current : sids[0];
+  servicePills.innerHTML = sids.map(sid =>
+    `<button data-sid="${sid}" class="${sid===currentSid?'active':''}">${serviceLabelById(sid)}</button>`
+  ).join("");
+  servicePills.dataset.current = currentSid;
+  servicePills.querySelectorAll("button").forEach(b => b.onclick = () => {
+    servicePills.dataset.current = b.dataset.sid;
+    servicePills.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    renderTimetable();
+  });
+
+  // Direction pills
+  const dirsAvail = [...new Set(trips.filter(t => t.service_id===currentSid).map(t => t.direction_id||"0"))].sort();
+  const dirPills = document.getElementById("ttDirPills");
+  const currentDir = dirPills.dataset.current && dirsAvail.includes(dirPills.dataset.current) ? dirPills.dataset.current : dirsAvail[0];
+  const dirLabels = dirLabel(routeId, trips);
+  dirPills.innerHTML = dirsAvail.map(d =>
+    `<button data-dir="${d}" class="${d===currentDir?'active':''}">${dirLabels[d] || ('方向 '+d)}</button>`
+  ).join("");
+  dirPills.dataset.current = currentDir;
+  dirPills.querySelectorAll("button").forEach(b => b.onclick = () => {
+    dirPills.dataset.current = b.dataset.dir;
+    dirPills.querySelectorAll("button").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    drawTimetable();
+  });
+
+  drawTimetable();
+
+  function drawTimetable() {
+    const sid = servicePills.dataset.current;
+    const dir = dirPills.dataset.current;
+    const filtered = trips.filter(t => t.service_id===sid && (t.direction_id||"0")===dir);
+    document.getElementById("ttSummary").innerHTML =
+      `<strong style="color:${routeColor(routeId)}">${routeName(routeId)}</strong>　${serviceLabelById(sid)}　${dirLabels[dir]||""}　<span style="color:#777">${filtered.length}便</span>`;
+
+    if (!filtered.length) {
+      document.getElementById("ttContainer").innerHTML = '<div class="empty-msg">該当する便がありません</div>';
+      return;
+    }
+
+    // Collect stop order: union with longest as base
+    const stByTrip = {};
+    for (const st of (data["stop_times.txt"]||[])) {
+      if ((stByTrip[st.trip_id] = stByTrip[st.trip_id] || []).push(st));
+    }
+    const tripStops = filtered.map(t => ({
+      trip: t,
+      stops: (stByTrip[t.trip_id]||[]).slice().sort((a,b) => +a.stop_sequence - +b.stop_sequence)
+    }));
+    // sort by departure
+    tripStops.sort((a,b) => {
+      const ta = hmsToMin((a.stops[0]||{}).departure_time||"99:99:99");
+      const tb = hmsToMin((b.stops[0]||{}).departure_time||"99:99:99");
+      return ta - tb;
+    });
+
+    // Merge stop orders
+    const stopOrder = mergeStopOrders(tripStops.map(ts => ts.stops.map(s => s.stop_id)));
+
+    // Build table
+    let html = '<table class="tt"><thead><tr><th class="stop head">停留所</th>';
+    tripStops.forEach((ts,i) => {
+      html += `<th class="head">${i+1}便目</th>`;
+    });
+    html += "</tr></thead><tbody>";
+    stopOrder.forEach((sid, idx) => {
+      const isFirst = idx === 0;
+      const isLast = idx === stopOrder.length - 1;
+      const cls = isFirst ? "first-stop" : (isLast ? "last-stop" : "");
+      const y = stopYomi(sid);
+      const yomiHtml = y ? `<div style="font-size:10.5px;color:#888;font-weight:normal">${y}</div>` : "";
+      html += `<tr><th class="stop"><span class="${cls}">${stopName(sid)}</span>${yomiHtml}</th>`;
+      tripStops.forEach(ts => {
+        const st = ts.stops.find(x => x.stop_id === sid);
+        if (st) {
+          html += `<td class="time">${fmtTime(st.departure_time || st.arrival_time)}</td>`;
+        } else {
+          html += '<td class="empty-cell">‥</td>';
+        }
+      });
+      html += "</tr>";
+    });
+    html += "</tbody></table>";
+    document.getElementById("ttContainer").innerHTML = html;
+  }
+}
+
+function mergeStopOrders(orders) {
+  // 単純化: 最も長いリストを基準、足りない停留所を挿入位置推定
+  if (!orders.length) return [];
+  const base = orders.slice().sort((a,b) => b.length - a.length)[0].slice();
+  for (const arr of orders) {
+    for (let i = 0; i < arr.length; i++) {
+      if (!base.includes(arr[i])) {
+        // find insertion: look at the previous existing stop
+        let insertAt = base.length;
+        for (let k = i-1; k >= 0; k--) {
+          const idx = base.indexOf(arr[k]);
+          if (idx >= 0) { insertAt = idx + 1; break; }
+        }
+        base.splice(insertAt, 0, arr[i]);
+      }
+    }
+  }
+  return base;
+}
+
+function dirLabel(routeId, trips) {
+  // route特性で方向ラベルを推定。trip_headsign を使う
+  const labels = {};
+  for (const t of trips) {
+    const d = t.direction_id || "0";
+    if (!labels[d] && t.trip_headsign) labels[d] = `${t.trip_headsign} 行き`;
+  }
+  return labels;
+}
+
+// ============ FARE ============
+function renderFareControls() {
+  const sel = document.getElementById("fareRoute");
+  sel.innerHTML = (data["routes.txt"]||[]).map(r =>
+    `<option value="${r.route_id}">${r.route_long_name}</option>`
+  ).join("");
+  sel.onchange = renderFareMatrix;
+  renderFareMatrix();
+}
+
+function renderFareMatrix() {
+  const rid = document.getElementById("fareRoute").value;
+  const rules = (data["fare_rules.txt"]||[]).filter(f => f.route_id === rid || (!f.route_id && rid));
+  // 100円均一 等
+  if (rules.length === 1 && !rules[0].origin_id && !rules[0].destination_id) {
+    const fid = rules[0].fare_id;
+    const fa = (data["fare_attributes.txt"]||[]).find(f => f.fare_id === fid);
+    document.getElementById("fareSummary").innerHTML = `<strong style="color:${routeColor(rid)}">${routeName(rid)}</strong>　全区間均一料金`;
+    document.getElementById("fareMatrix").innerHTML = `<div style="font-size:48px;text-align:center;padding:40px;font-weight:700;color:#1b5e20;">¥${fa?fa.price:"?"}<div style="font-size:16px;color:#555;font-weight:normal;">全区間 均一</div></div>`;
+    return;
+  }
+
+  // Build price lookup by zone
+  const priceById = {};
+  for (const f of (data["fare_attributes.txt"]||[])) priceById[f.fare_id] = +f.price;
+
+  // route-specific fare lookup: zoneA -> zoneB -> price
+  const fareMap = {};
+  for (const fr of rules) {
+    if (!fr.origin_id || !fr.destination_id) continue;
+    (fareMap[fr.origin_id] = fareMap[fr.origin_id] || {})[fr.destination_id] = priceById[fr.fare_id];
+  }
+
+  // zones in this route, order by typical stop sequence
+  const zonesInRoute = new Set();
+  for (const fr of rules) {
+    if (fr.origin_id) zonesInRoute.add(fr.origin_id);
+    if (fr.destination_id) zonesInRoute.add(fr.destination_id);
+  }
+  // Build zone → display name (use first stop with that zone_id)
+  const zoneName = {};
+  for (const s of (data["stops.txt"]||[])) {
+    if (zonesInRoute.has(s.zone_id) && !zoneName[s.zone_id]) zoneName[s.zone_id] = s.stop_name;
+  }
+  // Order zones by appearance in a typical trip of this route
+  const trip = (data["trips.txt"]||[]).find(t => t.route_id === rid);
+  let orderedZones = [];
+  if (trip) {
+    const sts = (data["stop_times.txt"]||[]).filter(s => s.trip_id === trip.trip_id)
+                .sort((a,b) => +a.stop_sequence - +b.stop_sequence);
+    const seenZ = new Set();
+    for (const s of sts) {
+      const st = (data["stops.txt"]||[]).find(x => x.stop_id === s.stop_id);
+      if (st && zonesInRoute.has(st.zone_id) && !seenZ.has(st.zone_id)) {
+        seenZ.add(st.zone_id);
+        orderedZones.push(st.zone_id);
+      }
+    }
+    // 残りを追加
+    for (const z of zonesInRoute) if (!seenZ.has(z)) orderedZones.push(z);
+  } else {
+    orderedZones = [...zonesInRoute];
+  }
+
+  document.getElementById("fareSummary").innerHTML =
+    `<strong style="color:${routeColor(rid)}">${routeName(rid)}</strong>　${orderedZones.length}停留所間の運賃　計${rules.length}ルール`;
+
+  // Build matrix
+  let html = '<table class="fare"><thead><tr><th class="corner">↓発／着→</th>';
+  for (const z of orderedZones) html += `<th>${zoneName[z]||z}</th>`;
+  html += "</tr></thead><tbody>";
+  for (const oz of orderedZones) {
+    html += `<tr><th>${zoneName[oz]||oz}</th>`;
+    for (const dz of orderedZones) {
+      if (oz === dz) html += '<td class="self">―</td>';
+      else {
+        const p = fareMap[oz] && fareMap[oz][dz];
+        if (p) html += `<td class="fare-${p}">¥${p}</td>`;
+        else html += '<td class="empty-cell">―</td>';
+      }
+    }
+    html += "</tr>";
+  }
+  html += "</tbody></table>";
+  document.getElementById("fareMatrix").innerHTML = html;
+}
+
+// ============ CALENDAR ============
+function renderCalendarControls() {
+  const sel = document.getElementById("calRoute");
+  sel.innerHTML = '<option value="">— 全路線 —</option>' +
+    (data["routes.txt"]||[]).map(r => `<option value="${r.route_id}">${r.route_long_name}</option>`).join("");
+  sel.onchange = renderCalendar;
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const rid = document.getElementById("calRoute").value;
+  const calendar = data["calendar.txt"] || [];
+  const calDates = data["calendar_dates.txt"] || [];
+  const trips = data["trips.txt"] || [];
+
+  // 関連 service_id を抽出
+  let relevantSids;
+  if (rid) {
+    relevantSids = new Set(trips.filter(t => t.route_id === rid).map(t => t.service_id));
+  } else {
+    relevantSids = new Set(calendar.map(c => c.service_id));
+  }
+
+  // 期間を決める：feed_info から
+  const fi = (data["feed_info.txt"]||[])[0] || {};
+  let startStr = fi.feed_start_date || "20260401";
+  let endStr = fi.feed_end_date || "20270331";
+  const startDate = parseYmd(startStr);
+  const endDate = parseYmd(endStr);
+
+  // Build calendar info lookup
+  const calRows = calendar.filter(c => relevantSids.has(c.service_id));
+  const cdRows = calDates.filter(c => relevantSids.has(c.service_id));
+
+  // Legend
+  document.getElementById("calLegend").innerHTML = '<strong>運行ダイヤ：</strong>' + calRows.map((c, i) => {
+    const color = SERVICE_COLORS[i % SERVICE_COLORS.length];
+    return `<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${color};vertical-align:middle;margin:0 4px 2px 12px;border:1px solid rgba(0,0,0,0.2)"></span>${serviceLabelById(c.service_id)}`;
+  }).join("") + ' <span style="margin-left:14px"><span style="color:#c62828">●</span> 祝日　<span style="color:#c62828">×</span> 運休　<span style="color:#1b5e20">＋</span> 追加運行</span>';
+
+  // For each day, compute which services run
+  function servicesOnDate(date) {
+    const ymd = ymdStr(date);
+    const dow = date.getDay(); // 0=Sun, 6=Sat
+    const dowKey = DAY_KEYS[(dow + 6) % 7]; // monday=0...sunday=6 → calendar.txt key
+    const running = [];
+    for (const c of calRows) {
+      if (ymd < c.start_date || ymd > c.end_date) continue;
+      // exception?
+      const ex = cdRows.find(cd => cd.service_id === c.service_id && cd.date === ymd);
+      if (ex && ex.exception_type === "2") continue;  // 運休
+      if (ex && ex.exception_type === "1") { running.push(c.service_id); continue; } // 追加
+      if (c[dowKey] === "1") running.push(c.service_id);
+    }
+    return running;
+  }
+  function exceptionMarks(date) {
+    const ymd = ymdStr(date);
+    const marks = [];
+    for (const cd of cdRows) {
+      if (cd.date === ymd) marks.push(cd);
+    }
+    return marks;
+  }
+
+  // Service id → color
+  const serviceColorMap = {};
+  calRows.forEach((c, i) => serviceColorMap[c.service_id] = SERVICE_COLORS[i % SERVICE_COLORS.length]);
+
+  // Iterate months
+  const months = [];
+  let cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+  while (cur <= endDate) {
+    months.push(new Date(cur));
+    cur.setMonth(cur.getMonth() + 1);
+  }
+
+  let html = "";
+  for (const m of months) {
+    const y = m.getFullYear(), mo = m.getMonth();
+    const firstDow = new Date(y, mo, 1).getDay();
+    const daysInMonth = new Date(y, mo+1, 0).getDate();
+    html += `<div class="cal-month"><h4>${y}年 ${mo+1}月</h4><div class="cal-grid">`;
+    ["日","月","火","水","木","金","土"].forEach((d, i) =>
+      html += `<div class="cal-cell head ${i===0?'sun':(i===6?'sat':'')}">${d}</div>`);
+    for (let i = 0; i < firstDow; i++) html += '<div class="cal-cell empty"></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(y, mo, d);
+      if (date < startDate || date > endDate) {
+        html += `<div class="cal-cell empty"><div class="date">${d}</div></div>`;
+        continue;
+      }
+      const dow = date.getDay();
+      const sids = servicesOnDate(date);
+      const exMarks = exceptionMarks(date);
+      const hasAdd = exMarks.some(e => e.exception_type==="1");
+      const hasRemove = exMarks.some(e => e.exception_type==="2");
+      let cellClass = "cal-cell";
+      if (dow === 0) cellClass += " sun";
+      else if (dow === 6) cellClass += " sat";
+      const badges = sids.map(s => `<div class="bdg" style="background:${serviceColorMap[s]}" title="${serviceLabelById(s)}"></div>`).join("");
+      const mark = hasAdd ? '<span class="holiday-mark" style="color:#1b5e20">＋</span>' :
+                   hasRemove ? '<span class="holiday-mark">×</span>' : '';
+      // 祝日判定: calendar_dates type=1で平日カレンダ追加されたら祝日扱い
+      if (hasAdd || hasRemove) cellClass += " holiday";
+      html += `<div class="${cellClass}" title="${sids.map(serviceLabelById).join(', ')}">${mark}<div class="date">${d}</div><div class="badges">${badges}</div></div>`;
+    }
+    html += "</div></div>";
+  }
+  document.getElementById("calYear").innerHTML = html;
+}
+const SERVICE_COLORS = ["#1976d2","#388e3c","#f57c00","#7b1fa2","#0097a7","#c2185b","#5d4037","#455a64","#e64a19","#00796b"];
+function parseYmd(s) { return new Date(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8)); }
+function ymdStr(d) {
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const day = String(d.getDate()).padStart(2,"0");
+  return `${d.getFullYear()}${m}${day}`;
+}
+
+// ============ STOPS ============
+function renderStops() {
+  const stops = data["stops.txt"] || [];
+  const trips = data["trips.txt"] || [];
+  const stopTimes = data["stop_times.txt"] || [];
+
+  // stop -> set of route_id
+  const tripRoute = {};
+  for (const t of trips) tripRoute[t.trip_id] = t.route_id;
+  const stopRoutes = {};
+  for (const st of stopTimes) {
+    const rid = tripRoute[st.trip_id]; if (!rid) continue;
+    (stopRoutes[st.stop_id] = stopRoutes[st.stop_id] || new Set()).add(rid);
+  }
+  // translations
+  const en = {}, yomi = {};
+  for (const t of (data["translations.txt"]||[])) {
+    if (t.table_name !== "stops" || t.field_name !== "stop_name") continue;
+    if (t.language === "en") en[t.record_id] = t.translation;
+    else if (t.language === "ja-Hrkt") yomi[t.record_id] = t.translation;
+  }
+
+  // unique stop names with all routes merged
+  const byName = {};
+  for (const s of stops) {
+    if (!byName[s.stop_name]) byName[s.stop_name] = { name: s.stop_name, yomi: yomi[s.stop_id]||"", en: en[s.stop_id]||"", routes: new Set(), ids: [] };
+    byName[s.stop_name].ids.push(s.stop_id);
+    if (yomi[s.stop_id]) byName[s.stop_name].yomi = yomi[s.stop_id];
+    if (en[s.stop_id]) byName[s.stop_name].en = en[s.stop_id];
+    (stopRoutes[s.stop_id]||new Set()).forEach(r => byName[s.stop_name].routes.add(r));
+  }
+
+  const list = Object.values(byName).sort((a,b) =>
+    (a.yomi||a.name).localeCompare(b.yomi||b.name, "ja")
+  );
+  function render(filter="") {
+    const f = filter.trim().toLowerCase();
+    const filtered = list.filter(s => !f || s.name.toLowerCase().includes(f) || (s.yomi||"").includes(f) || (s.en||"").toLowerCase().includes(f));
+    document.getElementById("stopCount").textContent = `${filtered.length} / ${list.length} 件`;
+    document.getElementById("stopList").innerHTML = filtered.map(s => `
+      <div class="stop-item">
+        <div class="yomi">${s.yomi||""}</div>
+        <div class="name">${s.name}</div>
+        <div class="roman">${s.en||""}</div>
+        <div class="routes">${[...s.routes].map(rid => `<span class="pill" style="background:${routeColor(rid)}">${routeName(rid)}</span>`).join("")}</div>
+      </div>
+    `).join("");
+  }
+  document.getElementById("stopSearch").oninput = e => render(e.target.value);
+  render();
+}
+
+// ============ MAP ============
+function renderMap() {
+  const stops = data["stops.txt"] || [];
+  const shapes = data["shapes.txt"] || [];
+  const trips = data["trips.txt"] || [];
+  const routes = data["routes.txt"] || [];
+  const stopTimes = data["stop_times.txt"] || [];
+  if (!stops.length) return;
+
+  if (!map) {
+    map = L.map("map").setView([33.42, 130.66], 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>', maxZoom: 19
+    }).addTo(map);
+  }
+
+  // stop -> routes
+  const tripRoute = {}; for (const t of trips) tripRoute[t.trip_id] = t.route_id;
+  const stopRoutes = {};
+  for (const st of stopTimes) {
+    const rid = tripRoute[st.trip_id]; if (!rid) continue;
+    (stopRoutes[st.stop_id] = stopRoutes[st.stop_id] || new Set()).add(rid);
+  }
+  const shape2route = {};
+  for (const t of trips) if (t.shape_id) shape2route[t.shape_id] = t.route_id;
+
+  activeRouteIds = activeRouteIds || new Set(routes.map(r => r.route_id));
+
+  // Legend with toggles
+  document.getElementById("mapLegend").innerHTML = routes.map(r => `
+    <div class="item ${activeRouteIds.has(r.route_id)?'':'off'}" data-rid="${r.route_id}">
+      <div class="swatch" style="background:${routeColor(r.route_id)}"></div>${r.route_long_name}
+    </div>
+  `).join("");
+  document.querySelectorAll("#mapLegend .item").forEach(el => {
+    el.onclick = () => {
+      const rid = el.dataset.rid;
+      if (activeRouteIds.has(rid)) activeRouteIds.delete(rid); else activeRouteIds.add(rid);
+      el.classList.toggle("off");
+      draw();
+    };
+  });
+
+  function draw() {
+    Object.values(mapLayers).forEach(l => l && map.removeLayer(l));
+    mapLayers = {};
+
+    // Shapes
+    const shapeGroup = L.layerGroup();
+    const grp = {};
+    for (const s of shapes) (grp[s.shape_id] = grp[s.shape_id] || []).push(s);
+    for (const sid of Object.keys(grp)) {
+      const rid = shape2route[sid];
+      if (!activeRouteIds.has(rid)) continue;
+      const pts = grp[sid].slice().sort((a,b) => +a.shape_pt_sequence - +b.shape_pt_sequence)
+        .map(p => [+p.shape_pt_lat, +p.shape_pt_lon]);
+      L.polyline(pts, { color: routeColor(rid), weight: 5, opacity: 0.7 }).addTo(shapeGroup);
+    }
+    mapLayers.shapes = shapeGroup.addTo(map);
+
+    // Stops with labels by default
+    const stopGroup = L.layerGroup();
+    const seen = new Set();
+    for (const s of stops) {
+      const sRoutes = stopRoutes[s.stop_id];
+      if (!sRoutes || ![...sRoutes].some(r => activeRouteIds.has(r))) continue;
+      // 同名同位置の重複を1つに（_e/_w など）
+      const key = s.stop_name + Math.round(+s.stop_lat*1e5) + "_" + Math.round(+s.stop_lon*1e5);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const lat = +s.stop_lat, lon = +s.stop_lon;
+      if (!isFinite(lat) || !isFinite(lon)) continue;
+      const primary = [...sRoutes].find(r => activeRouteIds.has(r));
+      const color = routeColor(primary);
+      const marker = L.circleMarker([lat,lon], {
+        radius: 7, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1
+      });
+      const routesHere = [...sRoutes].filter(r => activeRouteIds.has(r));
+      const y = stopYomi(s.stop_id);
+      const sv = `https://maps.google.com/maps?q=&layer=c&cbll=${lat},${lon}`;
+      const popup = `${y?`<div style="font-size:11px;color:#777">${y}</div>`:""}<strong style="font-size:14px">${s.stop_name}</strong><br>
+        ${routesHere.map(r => `<span class="pill" style="background:${routeColor(r)}">${routeName(r)}</span>`).join("")}
+        <div style="margin-top:6px"><a href="${sv}" target="_blank" rel="noopener" style="font-size:12px;color:#1565c0;text-decoration:none">📷 ストリートビューで見る</a></div>`;
+      marker.bindPopup(popup);
+      const label = L.divIcon({
+        className: "stop-label",
+        html: `<div style="font-size:11px;background:rgba(255,255,255,0.9);padding:1px 5px;border-radius:3px;border:1px solid #999;white-space:nowrap;color:#222;font-weight:600;margin-left:10px;margin-top:-8px">${s.stop_name}</div>`,
+        iconSize: [0,0]
+      });
+      L.marker([lat,lon], { icon: label, interactive: false }).addTo(stopGroup);
+      marker.addTo(stopGroup);
+    }
+    mapLayers.stops = stopGroup.addTo(map);
+
+    // Fit
+    const bounds = stops.filter(s => {
+      const sR = stopRoutes[s.stop_id];
+      return sR && [...sR].some(r => activeRouteIds.has(r));
+    }).map(s => [+s.stop_lat, +s.stop_lon]).filter(([a,b]) => isFinite(a)&&isFinite(b));
+    if (bounds.length) map.fitBounds(bounds, { padding: [40,40] });
+  }
+  draw();
+}
+
+// ============ CHECK ============
+function renderCheck() {
+  const checks = runChecks();
+  const counts = { ok: 0, warn: 0, err: 0 };
+  checks.forEach(c => counts[c.level]++);
+
+  let overall;
+  if (counts.err > 0) {
+    overall = `<div class="check-overall err">
+      <span class="icon">⚠</span>${counts.err}件のエラーがあります
+      <div class="sub">下のリストを確認して、データを修正してください</div></div>`;
+  } else if (counts.warn > 0) {
+    overall = `<div class="check-overall warn">
+      <span class="icon">!</span>${counts.warn}件の注意事項があります
+      <div class="sub">確認をおすすめします。修正は任意です</div></div>`;
+  } else {
+    overall = `<div class="check-overall ok">
+      <span class="icon">✓</span>データに問題はありません
+      <div class="sub">${counts.ok}項目すべての点検をクリアしました</div></div>`;
+  }
+  document.getElementById("checkOverall").innerHTML = overall;
+
+  // List items: errors first, then warns, then a collapsed OK summary
+  const errItems = checks.filter(c => c.level==="err");
+  const warnItems = checks.filter(c => c.level==="warn");
+  const okItems = checks.filter(c => c.level==="ok");
+
+  let html = "";
+  for (const c of [...errItems, ...warnItems]) {
+    html += `<div class="check-item ${c.level}">
+      <div><span class="mark">${c.level==="err"?"✗":"!"}</span><span class="title">${c.title}</span></div>
+      ${c.detail?`<div class="detail">${c.detail}</div>`:""}
+      ${c.examples?`<details><summary>詳細を表示</summary><div class="detail">${c.examples.map(e=>`・${e}`).join("<br>")}</div></details>`:""}
+    </div>`;
+  }
+  // Collapse OK items
+  if (okItems.length) {
+    html += `<details style="margin-top:12px"><summary style="font-size:14px;color:var(--ok-text);cursor:pointer">✓ クリアした点検項目 (${okItems.length}件)</summary><div style="margin-top:8px">`;
+    for (const c of okItems) {
+      html += `<div class="check-item ok"><span class="mark">✓</span><span class="title">${c.title}</span>${c.detail?`<span class="detail" style="margin-left:8px">${c.detail}</span>`:""}</div>`;
+    }
+    html += "</div></details>";
+  }
+  document.getElementById("checkItems").innerHTML = html;
+}
+
+function runChecks() {
+  const out = [];
+  const add = (level, title, detail="", examples=null) => out.push({level, title, detail, examples});
+
+  const stops = data["stops.txt"]||[];
+  const routes = data["routes.txt"]||[];
+  const trips = data["trips.txt"]||[];
+  const sts = data["stop_times.txt"]||[];
+  const cal = data["calendar.txt"]||[];
+  const fareAttr = data["fare_attributes.txt"]||[];
+  const fareRules = data["fare_rules.txt"]||[];
+  const shapes = data["shapes.txt"]||[];
+  const stopIds = new Set(stops.map(s => s.stop_id));
+  const routeIds = new Set(routes.map(r => r.route_id));
+  const tripIds = new Set(trips.map(t => t.trip_id));
+  const sidsCal = new Set(cal.map(c => c.service_id));
+  const fareIds = new Set(fareAttr.map(f => f.fare_id));
+  const zoneIds = new Set(stops.map(s => s.zone_id).filter(Boolean));
+
+  // 1. 全路線に便があるか
+  const routeTrips = {};
+  for (const t of trips) (routeTrips[t.route_id] = routeTrips[t.route_id] || 0) , routeTrips[t.route_id]++;
+  const emptyRoutes = routes.filter(r => !routeTrips[r.route_id]);
+  if (emptyRoutes.length) add("err", "便が登録されていない路線があります", `${emptyRoutes.length}路線`, emptyRoutes.map(r => r.route_long_name));
+  else add("ok", "すべての路線に便が登録されています", `${routes.length}路線`);
+
+  // 2. 全便に停車駅が登録されているか
+  const stByTrip = {};
+  for (const s of sts) (stByTrip[s.trip_id] = stByTrip[s.trip_id] || 0), stByTrip[s.trip_id]++;
+  const tripsNoStop = trips.filter(t => !stByTrip[t.trip_id]);
+  if (tripsNoStop.length) add("err", "停車時刻が未登録の便があります", `${tripsNoStop.length}便`);
+  else add("ok", "すべての便に停車時刻が登録されています", `${trips.length}便`);
+
+  // 3. バス停の位置が正しいか
+  const badStops = stops.filter(s => {
+    const lat = +s.stop_lat, lon = +s.stop_lon;
+    return !isFinite(lat) || !isFinite(lon) || lat < 33 || lat > 34 || lon < 130 || lon > 131;
+  });
+  if (badStops.length) add("warn", "緯度経度が朝倉市周辺の範囲外のバス停があります", `${badStops.length}件`, badStops.map(s => s.stop_name));
+  else add("ok", "すべてのバス停が朝倉市周辺の位置にあります", `${stops.length}バス停`);
+
+  // 4. 時刻が早→遅の順か
+  const trST = {};
+  for (const s of sts) (trST[s.trip_id] = trST[s.trip_id]||[]).push(s);
+  const badTime = [];
+  for (const tid of Object.keys(trST)) {
+    const arr = trST[tid].slice().sort((a,b) => +a.stop_sequence - +b.stop_sequence);
+    let prev = -1;
+    for (const st of arr) {
+      const t = hmsToMin(st.departure_time||st.arrival_time);
+      if (t !== null && t < prev) { badTime.push(tid); break; }
+      if (t !== null) prev = t;
+    }
+  }
+  if (badTime.length) add("err", "時刻が逆行している便があります", `${badTime.length}便`, badTime.slice(0,10));
+  else add("ok", "すべての便で時刻が早い順に並んでいます");
+
+  // 5. 運賃データの整合
+  const badFareRef = fareRules.filter(f => f.fare_id && !fareIds.has(f.fare_id));
+  if (badFareRef.length) add("err", "運賃ルールで未定義の料金が使われています", `${badFareRef.length}件`);
+  else add("ok", "運賃ルールはすべて正しい料金を参照しています", `${fareRules.length}ルール`);
+
+  // 6. 運賃のバス停参照
+  const badZone = fareRules.filter(f => (f.origin_id && !zoneIds.has(f.origin_id)) || (f.destination_id && !zoneIds.has(f.destination_id)));
+  if (badZone.length) add("err", "運賃ルールに存在しないバス停が指定されています", `${badZone.length}件`);
+  else add("ok", "運賃ルールのバス停はすべて正しく登録されています");
+
+  // 7. 翻訳の整合
+  const trans = data["translations.txt"]||[];
+  const transStops = trans.filter(t => t.table_name==="stops").map(t => t.record_id);
+  const badTrans = transStops.filter(id => !stopIds.has(id));
+  if (badTrans.length) add("err", "ローマ字翻訳が、存在しないバス停を指しています", `${badTrans.length}件`);
+  else add("ok", "ローマ字翻訳はすべて正しいバス停を指しています");
+
+  // 8. 各便のヘッドサインがあるか
+  const noHeadsign = trips.filter(t => !t.trip_headsign);
+  if (noHeadsign.length) add("warn", "行き先表示が空の便があります", `${noHeadsign.length}便`);
+  else add("ok", "すべての便に行き先表示が設定されています");
+
+  // 9. 全曜日0のサービス
+  const emptyService = cal.filter(c => !DAY_KEYS.some(k => c[k]==="1"));
+  if (emptyService.length) add("warn", "運行曜日が1日もないダイヤがあります", `${emptyService.length}件`);
+  else add("ok", "すべてのダイヤに運行曜日が設定されています");
+
+  // 10. 運行日に対する例外日
+  const cdRows = data["calendar_dates.txt"]||[];
+  const badCdRef = cdRows.filter(cd => !sidsCal.has(cd.service_id));
+  if (badCdRef.length) add("err", "例外日に未定義のダイヤが使われています", `${badCdRef.length}件`);
+  else add("ok", "祝日などの例外日設定はすべて正しいダイヤを指しています", `${cdRows.length}件`);
+
+  // 11. 経路（shape）の参照
+  if (shapes.length) {
+    const shapeIds = new Set(shapes.map(s => s.shape_id));
+    const badShape = trips.filter(t => t.shape_id && !shapeIds.has(t.shape_id));
+    if (badShape.length) add("err", "便が参照する経路（地図上の線）が見つかりません", `${badShape.length}件`);
+    else add("ok", "すべての便で経路データが正しく参照されています");
+  }
+
+  // 12. 路線色のフォーマット
+  const badColor = routes.filter(r => r.route_color && !/^[0-9A-Fa-f]{6}$/.test(r.route_color));
+  if (badColor.length) add("err", "路線色の指定形式が不正です", `${badColor.length}件`);
+  else add("ok", "すべての路線色が正しい形式で設定されています");
+
+  // 13. データの有効期間
+  const fi = (data["feed_info.txt"]||[])[0];
+  if (fi && fi.feed_end_date) {
+    const today = new Date();
+    const endY = +fi.feed_end_date.slice(0,4), endM = +fi.feed_end_date.slice(4,6)-1, endD = +fi.feed_end_date.slice(6,8);
+    const end = new Date(endY, endM, endD);
+    const daysLeft = Math.floor((end - today) / 86400000);
+    if (daysLeft < 0) add("err", "このデータの有効期間が切れています", `${fi.feed_end_date}まで`);
+    else if (daysLeft < 30) add("warn", "データの有効期間がまもなく終了します", `あと${daysLeft}日（${fi.feed_end_date}まで）`);
+    else add("ok", "データは有効期間内です", `あと${daysLeft}日`);
+  }
+
+  // 14. 各路線について便数の妥当性
+  for (const r of routes) {
+    const n = routeTrips[r.route_id] || 0;
+    if (n > 0 && n < 2) add("warn", `${r.route_long_name}の便数が極端に少ない`, `${n}便のみ`);
+  }
+
+  return out;
+}
+
+// ============ Boot ============
+window.addEventListener("load", tryLoadFromServer);
+</script>
+</body>
+</html>

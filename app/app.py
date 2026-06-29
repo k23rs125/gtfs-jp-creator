@@ -416,3 +416,18 @@ if ss().get("result"):
                     rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
                 ss().result = {"rc": rc, "log": se}
                 st.success("再生成しました（確定座標を反映）。"); st.rerun()
+
+# =====================================================================
+# Step 6: GTFSビューア（作成した feed を 7タブで閲覧）
+# =====================================================================
+if ss().get("result"):
+    viewer = WORK / "out" / "gtfs_viewer.html"
+    if viewer.exists():
+        st.header("⑥ GTFSビューア（路線一覧・時刻表・運賃・路線図・運行カレンダー・バス停・点検）")
+        st.caption("作成した GTFS をブラウザで閲覧（📋路線一覧 / 🕐時刻表 / 💴運賃表 / 🗺️路線図 / "
+                   "📅運行カレンダー / 🚏バス停一覧 / ✓データチェック結果）。"
+                   "単一HTMLなのでDLしてそのままブラウザで開けます（サーバ不要）。")
+        html = viewer.read_text(encoding="utf-8")
+        components.html(html, height=820, scrolling=True)
+        st.download_button("⬇ GTFSビューア(HTML)をダウンロード", html.encode("utf-8"),
+                           "gtfs_viewer.html", mime="text/html")
