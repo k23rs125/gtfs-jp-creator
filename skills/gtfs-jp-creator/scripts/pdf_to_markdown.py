@@ -90,17 +90,22 @@ def extract_with_pymupdf4llm(pdf_path: Path) -> str:
 # Engine: mineru
 # ----------------------------------------------------------------------
 
-def extract_with_mineru(pdf_path: Path, lang: str = "japan", keep_artifacts: bool = False) -> str:
+def extract_with_mineru(pdf_path: Path, lang: str = "japan", keep_artifacts: bool = False,
+                        backend: str = "pipeline", method: str = "ocr") -> str:
     """MinerU (CJK特化のMLレイアウト解析ツール) で抽出する。
 
-    装飾的なレイアウト・並列テーブル・日本語OCRに強い。
-    CPU推論では非常に遅い (2ページPDFで~50分の実測例あり)。
-    GPU環境では数分。
+    バックエンドの選択が重要（バス時刻表＝数字の表）:
+      - pipeline (既定): PaddleOCRベース。数字の読みが正確で速い（1ページ ~3分）。
+        実測: こがバス画像PDFで時刻アノマリ 0 件（hybridは14件）。時刻表はこちらが最適。
+      - hybrid/vlm: 視覚言語モデル。一般文書の解析力は高いが、数字をもっともらしく
+        読み違えやすく(列ずれ等)・CPUで非常に遅い（1ページ ~40分）。
 
     Args:
         pdf_path: 入力PDFパス
         lang: OCR言語コード（"japan" / "ch" / "en" 等）
         keep_artifacts: True なら一時ディレクトリの全出力を残す（デバッグ用）
+        backend: mineru バックエンド（既定 pipeline）
+        method: pipeline 時の解析法（auto/txt/ocr。画像PDFは ocr 既定）
 
     Returns:
         Markdown文字列
@@ -119,14 +124,19 @@ def extract_with_mineru(pdf_path: Path, lang: str = "japan", keep_artifacts: boo
     output_dir = pdf_path.parent / f"_mineru_tmp_{pdf_path.stem}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[INFO] MinerU 実行中... (CPU推論で数十分かかる場合あり)", file=sys.stderr)
+    slow = backend != "pipeline"
+    print(f"[INFO] MinerU 実行中 (backend={backend})..."
+          + ("(CPU推論で数十分かかる場合あり)" if slow else "(pipeline: 数分)"), file=sys.stderr)
     print(f"[INFO] 出力一時ディレクトリ: {output_dir}", file=sys.stderr)
 
     cmd = [
         "mineru", "-p", str(pdf_path),
         "-o", str(output_dir),
+        "-b", backend,
         "--lang", lang,
     ]
+    if backend == "pipeline":
+        cmd += ["-m", method]   # method は pipeline/hybrid 系でのみ有効
 
     # stdout/stderr はキャプチャせず、進捗をユーザーに見せる
     result = subprocess.run(cmd)
@@ -190,6 +200,16 @@ def main():
         "--keep-artifacts", action="store_true",
         help="(mineru時のみ) 一時ディレクトリ・中間ファイルを保持",
     )
+    parser.add_argument(
+        "--backend", choices=["pipeline", "vlm-auto-engine", "hybrid-auto-engine"],
+        default="pipeline",
+        help="(mineru時) バックエンド。既定 pipeline=数字に正確で速い（時刻表向き）。"
+             "vlm/hybrid は一般文書向きだが数字を読み違えやすく遅い。",
+    )
+    parser.add_argument(
+        "--method", choices=["auto", "txt", "ocr"], default="ocr",
+        help="(mineru pipeline時) 解析法。画像PDFは ocr（既定）。",
+    )
     args = parser.parse_args()
 
     input_path = Path(args.input)
@@ -198,10 +218,11 @@ def main():
         sys.exit(1)
 
     if args.engine == "mineru":
-        print(f"[INFO] エンジン: MinerU (lang={args.lang})", file=sys.stderr)
+        print(f"[INFO] エンジン: MinerU (backend={args.backend}, lang={args.lang})", file=sys.stderr)
         try:
             markdown = extract_with_mineru(
                 input_path, lang=args.lang, keep_artifacts=args.keep_artifacts,
+                backend=args.backend, method=args.method,
             )
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)

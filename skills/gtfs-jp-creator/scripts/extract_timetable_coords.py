@@ -265,10 +265,11 @@ def main():
         # する前提（"正しく失敗"の精神は強い警告と要確認フラグで担保する）。
         ocr_msg = (f"ページ{page_no}の文字オブジェクトが{n_chars}個しかなく、時刻表が画像化"
                    "(テキストレイヤなし)と判定しました。座標方式はこのページには使えません。"
-                   "代わりに OCR 経路(MinerU)で抽出を試してください: "
+                   "代わりに OCR 経路で抽出してください（既定の pipeline バックエンドが数字に正確で速い）: "
                    "`python scripts/pdf_to_markdown.py <PDF> --engine mineru --lang japan -o out.md` "
-                   "→ 得られた Markdown を Step2(構造化)へ。"
-                   "ただし OCR は誤読が起きるため精度が下がります。抽出後は必ず原典と目視照合してください。"
+                   "→ Markdown を extract_timetable_markdown.py で extract.json 化し Step2(構造化)へ。"
+                   "OCRは読み違いが残るため、生成後は detect_time_anomalies.py / 時刻アノマリ で確認し"
+                   "必ず原典と目視照合してください。"
                    "元データ(Excel)があれば extract_timetable_excel.py で直接読むのが最も確実です。")
         result = {"source": str(args.input), "page": page_no, "blocks": [],
                   "warnings": [
