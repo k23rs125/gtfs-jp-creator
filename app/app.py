@@ -173,24 +173,39 @@ if ss().get("decision_spec"):
 if ss().get("decision_spec"):
     st.header("③ PDF/Excel に無い項目を入力（不足分の質問）")
     st.caption("上の②でシステムが確認した結果、時刻表に書かれていない項目です。"
-               "推測せず入力してください（不明は空欄でOK＝暫定/要確認として入る。ただし路線名は必須）。")
-    c1, c2, c3 = st.columns(3)
-    route_name = c1.text_input("路線名", value=ss()["decision_spec"]["routes"][0].get("route_long_name", ""))
-    muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県", help="P11の都道府県/市域制約に使用")
-    fare = c1.number_input("運賃（円・0なら無料/未設定）", min_value=0, value=0, step=10)
-    ag_name = c2.text_input("事業者名", value="")
-    ag_id = c2.text_input("法人番号（不明なら空）", value="")
-    ag_url = c2.text_input("URL", value="")
-    ag_phone = c2.text_input("電話", value="")
-    st.write("運行する曜日")
-    d = st.columns(7)
-    days = [d[i].checkbox(x, value=(i < 5)) for i, x in enumerate(["月", "火", "水", "木", "金", "土", "日"])]
-    c4, c5 = st.columns(2)
-    start = c4.text_input("有効期間 開始 (YYYYMMDD)", value="")
-    end = c5.text_input("有効期間 終了 (YYYYMMDD)", value="")
-    use_nom = st.checkbox("Nominatim 補完を使う（POI多い路線向け・遅い）", value=False)
+               "推測せず入力してください（不明は空欄でOK＝暫定/要確認として入る。ただし路線名は必須）。"
+               "下の『生成する』を押すと入力が一括で反映されます。")
+    # 循環の自動検出（既定値の提案に使う。始点=終点なら循環とみられる）
+    _loop = False
+    for b in ss().extract.get("blocks", []):
+        _n = [s.get("name") for s in b.get("stops", [])]
+        if _n and _n[0] == _n[-1]:
+            _loop = True
+            break
+    with st.form("conditions"):
+        c1, c2, c3 = st.columns(3)
+        route_name = c1.text_input("路線名", value=ss()["decision_spec"]["routes"][0].get("route_long_name", ""))
+        muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県", help="P11の都道府県/市域制約に使用")
+        fare = c1.number_input("運賃（円・0なら無料/未設定）", min_value=0, value=0, step=10)
+        ag_name = c2.text_input("事業者名", value="")
+        ag_id = c2.text_input("法人番号（不明なら空）", value="")
+        ag_url = c2.text_input("URL", value="")
+        ag_phone = c2.text_input("電話", value="")
+        is_circular = c3.checkbox("循環路線（始点に戻る）", value=_loop,
+                                  help="始点=終点を検出すると自動でチェック。違えば外してください。")
+        headsign = c3.text_input("行き先表示（方向名）", value="",
+                                 help="空なら自動（方向見出し→無ければ終点名）。"
+                                      "方向見出しが無い路線（循環など）に適用。例『循環』")
+        st.write("運行する曜日")
+        d = st.columns(7)
+        days = [d[i].checkbox(x, value=(i < 5)) for i, x in enumerate(["月", "火", "水", "木", "金", "土", "日"])]
+        c4, c5 = st.columns(2)
+        start = c4.text_input("有効期間 開始 (YYYYMMDD)", value="")
+        end = c5.text_input("有効期間 終了 (YYYYMMDD)", value="")
+        use_nom = st.checkbox("Nominatim 補完を使う（POI多い路線向け・遅い）", value=False)
+        submitted = st.form_submit_button("GTFS-JP を生成する", type="primary")
 
-    if st.button("GTFS-JP を生成する", type="primary"):
+    if submitted:
         # 必須チェック: 官公庁提出物が黙って Validator ERROR にならないよう、
         # 路線名が空なら生成しない（GTFS仕様: route_short_name か route_long_name のどちらか必須）。
         eff_route = (route_name or ss()["decision_spec"]["routes"][0].get("route_long_name") or "").strip()
@@ -206,6 +221,15 @@ if ss().get("decision_spec"):
         spec = dict(ss()["decision_spec"])
         if route_name:
             spec["routes"][0]["route_long_name"] = route_name
+        # 循環フラグ（意図の記録）と、行き先表示の上書き（方向見出しが無いブロックに適用）
+        for r in spec.get("routes", []):
+            r["circular"] = bool(is_circular)
+        if headsign.strip():
+            bh = dict(spec.get("block_headsign", {}))
+            for b in ss().extract.get("blocks", []):
+                if not b.get("direction_hint"):
+                    bh[str(b.get("block_index"))] = headsign.strip()
+            spec["block_headsign"] = bh
         spec["service"] = {"service_id": "SVC",
                            "mon": int(days[0]), "tue": int(days[1]), "wed": int(days[2]),
                            "thu": int(days[3]), "fri": int(days[4]), "sat": int(days[5]), "sun": int(days[6]),
