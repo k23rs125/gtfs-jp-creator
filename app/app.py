@@ -559,11 +559,26 @@ if ss().get("result"):
         fmap = folium.Map(location=center, zoom_start=14)
         col = {"確定": "green", "要確認": "orange", "未補完": "red"}
         for nm, la, lo, conf, reason in pts:
-            folium.CircleMarker([la, lo], radius=6, color=col.get(conf, "gray"),
-                                fill=True, fill_opacity=0.9,
-                                popup=f"{nm}（{conf}）{reason}").add_to(fmap)
-        state = st_folium(fmap, width=900, height=460, key="confmap")
+            # ピンはドラッグで移動できる。移動後にクリックすると現在位置を取得して確定できる。
+            folium.Marker([la, lo], tooltip=nm, draggable=True,
+                          icon=folium.Icon(color=col.get(conf, "gray")),
+                          popup=f"{nm}（{conf}）{reason}").add_to(fmap)
+        st.caption("📍 ピンを**ドラッグ**して正しい位置へ動かし、そのピンを**クリック**すると、"
+                   "下に『この位置で確定』ボタンが出ます（地図の空き場所クリックで座標を拾うこともできます）。")
+        state = st_folium(fmap, width=900, height=460, key="confmap",
+                          returned_objects=["last_clicked", "last_object_clicked",
+                                            "last_object_clicked_tooltip"])
         clicked = state.get("last_clicked") if state else None
+        obj = state.get("last_object_clicked") if state else None
+        obj_name = state.get("last_object_clicked_tooltip") if state else None
+        # ドラッグ→ピンをクリック で、その移動後の位置を確定できる
+        if obj and obj_name:
+            la2, lo2 = round(obj["lat"], 6), round(obj["lng"], 6)
+            already = confirmed.get(obj_name)
+            moved = (not already) or abs(already[0] - la2) > 1e-6 or abs(already[1] - lo2) > 1e-6
+            st.success(f"選択中のピン『{obj_name}』: {la2:.6f}, {lo2:.6f}")
+            if st.button(f"『{obj_name}』をこのピン位置で確定する", disabled=not moved):
+                confirmed[obj_name] = (la2, lo2); st.rerun()
         if clicked:
             st.info(f"地図クリック位置: {clicked['lat']:.6f}, {clicked['lng']:.6f}"
                     "（下で停留所を選び『地図クリック位置を使う』）")
