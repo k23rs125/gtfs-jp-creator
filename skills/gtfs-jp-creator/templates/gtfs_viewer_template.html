@@ -372,7 +372,8 @@ document.querySelectorAll("nav.menu button").forEach(b => {
     document.querySelectorAll(".page").forEach(x => x.classList.remove("active"));
     b.classList.add("active");
     document.getElementById("page-" + b.dataset.page).classList.add("active");
-    if (b.dataset.page === "map") setTimeout(() => map && map.invalidateSize(), 50);
+    // 地図タブは表示されてから描画する（隠れたdivで初期化するとピン/線が0,0に出る不具合の回避）
+    if (b.dataset.page === "map") setTimeout(() => { renderMap(); if (map) map.invalidateSize(); }, 60);
   });
 });
 
@@ -497,7 +498,8 @@ function renderAll() {
   renderCalendarControls();
   renderStops();
   renderCheck();
-  renderMap();
+  // renderMap は地図タブを開いたとき(表示後)に呼ぶ。隠れたdivで初期化すると
+  // ピン/経路が0,0に描かれる不具合になるため、ここでは呼ばない。
 }
 
 // ============ HOME ============
