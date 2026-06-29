@@ -54,20 +54,30 @@ st.caption("バス時刻表(PDF/Excel) → GTFS-JP。正確さの源は決定的
 # =====================================================================
 st.header("① 時刻表をアップロード")
 up = st.file_uploader("バス時刻表（.xlsx / .pdf）", type=["xlsx", "pdf"])
-if up and st.button("抽出する", type="primary"):
-    src = WORK / up.name
-    src.write_bytes(up.getbuffer())
+
+
+def do_extract(src):
     ext_out = WORK / "extract.json"
-    if up.name.lower().endswith(".xlsx"):
+    if str(src).lower().endswith(".xlsx"):
         rc, so, se = run([SCRIPTS / "extract_timetable_excel.py", src, "-o", ext_out])
     else:
         rc, so, se = run([SCRIPTS / "extract_timetable_coords.py", src, "-o", ext_out])
     if rc == 0 and ext_out.exists():
         ss().extract = json.loads(ext_out.read_text(encoding="utf-8"))
-        ss().pop("decision_spec", None); ss().pop("result", None)
+        for k in ("decision_spec", "result", "confirmed"):
+            ss().pop(k, None)
         st.success("抽出しました。")
     else:
         st.error("抽出に失敗しました。\n" + se[-800:])
+
+
+c_a, c_b = st.columns([1, 1])
+if c_a.button("抽出する", type="primary", disabled=(up is None)) and up:
+    src = WORK / up.name
+    src.write_bytes(up.getbuffer())
+    do_extract(src)
+if c_b.button("サンプルで試す（太宰府まほろば号）"):
+    do_extract(Path(__file__).resolve().parent / "samples" / "sample_dazaifu_mahoroba.xlsx")
 
 if "extract" in ss():
     ex = ss().extract
@@ -137,6 +147,18 @@ if ss().get("decision_spec"):
     use_nom = st.checkbox("Nominatim 補完を使う（POI多い路線向け・遅い）", value=False)
 
     if st.button("GTFS-JP を生成する", type="primary"):
+        # 必須チェック: 官公庁提出物が黙って Validator ERROR にならないよう、
+        # 路線名が空なら生成しない（GTFS仕様: route_short_name か route_long_name のどちらか必須）。
+        eff_route = (route_name or ss()["decision_spec"]["routes"][0].get("route_long_name") or "").strip()
+        if not eff_route:
+            st.error("路線名が空です。GTFS仕様では route_short_name / route_long_name の"
+                     "いずれかが必須で、空のまま生成すると Validator ERROR "
+                     "（route_both_short_and_long_name_missing）になります。③で路線名を入力してください。")
+            st.stop()
+        # 事業者名は暫定運用を許容（＝止めない）が、空なら明示警告。
+        if not ag_name.strip():
+            st.warning("事業者名が空です。agency は暫定値（agency_id=AGENCY_TBD／『未定（自治体が記入）』）"
+                       "で出力されます。正式提出前に事業者名・法人番号を記入してください。")
         spec = dict(ss()["decision_spec"])
         if route_name:
             spec["routes"][0]["route_long_name"] = route_name
