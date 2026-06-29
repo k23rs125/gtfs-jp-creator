@@ -1,0 +1,91 @@
+![](images/fa441359a2ff186db3a1093df90ea98108d5955fcd83922afcef3c99a7bc569a.jpg)
+
+<details>
+<summary>text_image</summary>
+
+コガバス
+古賀市公共施設等連絡バス
+SHISHIBU KOGA CHIDORI
+</details>
+
+運行経路(JR古賀線)
+
+<table><tr><td>コスモス館</td><td>唐津街道青柳宿</td><td>青柳四ツ角</td><td>新原公民館</td><td>隣保館「ひだまり館」</td><td>庄綿津見神社前</td><td>サンコスモ古賀</td><td>庄公民館前</td><td>古賀市役所</td><td>リーパスプラザこが</td><td>JR古賀駅東口</td></tr></table>
+
+運賃
+
+<table><tr><td>中学生以上:150円</td></tr><tr><td>小学生など:100円</td></tr></table>
+
+支払方法
+
+<table><tr><td>現金・PayPay(ペイベイ)</td></tr></table>
+
+<table><tr><td rowspan="2">JR古賀駅(着)</td><td>博多·久留米方面</td><td>8:04南福岡</td><td>8:50南福岡</td><td>9:44南福岡</td><td>10:59鳥栖</td><td>13:09二日市</td><td>14:08二日市</td><td>15:09鳥栖</td><td>16:08二日市</td></tr><tr><td>折尾·小倉方面</td><td>8:05小倉</td><td>8:47福間</td><td>9:48門司港</td><td>11:04福間</td><td>13:08福間</td><td>14:07福間</td><td>15:07福間</td><td>16:04福間</td></tr></table>
+
+最短で接続する列車を記載しています(接続時間5分以上)
+
+黒=普通列車赤=区間快速列車青=快速列車
+
+■JR古賀駅東ロ⇒コスモス館
+
+<table><tr><td></td><td>1便</td><td>3便</td><td>5便</td><td>7便</td><td>9便</td><td>11便</td><td>13便</td><td>15便</td></tr><tr><td>JR古賀駅東口</td><td>8:10</td><td>8:55</td><td>10:00</td><td>11:10</td><td>13:20</td><td>14:20</td><td>15:25</td><td>16:25</td></tr><tr><td>リーパスプラザこが</td><td>8:11</td><td>8:56</td><td>10:01</td><td>11:11</td><td>13:21</td><td>14:21</td><td>15:26</td><td>16:26</td></tr><tr><td>古賀市役所</td><td>8:12</td><td>8:57</td><td>10:02</td><td>11:12</td><td>13:22</td><td>14:22</td><td>15:27</td><td>16:27</td></tr><tr><td>庄公民館前</td><td>8:13</td><td>8:58</td><td>10:03</td><td>11:13</td><td>13:23</td><td>14:23</td><td>15:28</td><td>16:28</td></tr><tr><td>サンコスモ古賀</td><td>8:15</td><td>9:00</td><td>10:05</td><td>11:15</td><td>13:25</td><td>14:25</td><td>15:30</td><td>16:30</td></tr><tr><td>庄綿津見神社前</td><td>8:16</td><td>9:01</td><td>10:06</td><td>11:16</td><td>13:26</td><td>14:26</td><td>15:31</td><td>16:31</td></tr><tr><td>隣保館「ひだまり館」</td><td>8:18</td><td>9:03</td><td>10:08</td><td>11:18</td><td>13:28</td><td>14:28</td><td>15:33</td><td>16:33</td></tr><tr><td>新原公民館</td><td>8:20</td><td>9:05</td><td>10:10</td><td>11:20</td><td>13:30</td><td>14:30</td><td>15:35</td><td>16:35</td></tr><tr><td>青柳四ツ角</td><td>8:24</td><td>9:07</td><td>10:12</td><td>11:22</td><td>13:32</td><td>14:32</td><td>15:37</td><td>16:37</td></tr><tr><td>唐津街道青柳宿</td><td rowspan="2">青柳四ツ角止</td><td>9:07</td><td>10:12</td><td>11:22</td><td>13:32</td><td>14:32</td><td>15:37</td><td>16:37</td></tr><tr><td>コスモス館</td><td>9:15</td><td>10:20</td><td>11:30</td><td>13:40</td><td>14:40</td><td>15:45</td><td>16:45</td></tr></table>
+
+Iコスモス館⇒JR古賀駅東ロ
+
+<table><tr><td></td><td>2便</td><td>4便</td><td>6便</td><td>8便</td><td>10便</td><td>12便</td><td>14便</td><td>16便</td></tr><tr><td>コスモス館</td><td rowspan="2">青柳四ツ角発</td><td>9:30</td><td>10:40</td><td>11:50</td><td>13:50</td><td>14:55</td><td>16:00</td><td>17:00</td></tr><tr><td>唐津街道青柳宿</td><td>9:33</td><td>10:43</td><td>11:53</td><td>13:53</td><td>14:58</td><td>16:03</td><td>17:03</td></tr><tr><td>青柳四ツ角</td><td>8:30</td><td>9:33</td><td>10:43</td><td>11:53</td><td>13:53</td><td>14:58</td><td>16:03</td><td>17:03</td></tr><tr><td>新原公民館</td><td>8:32</td><td>9:35</td><td>10:45</td><td>11:55</td><td>13:55</td><td>15:00</td><td>16:05</td><td>17:05</td></tr><tr><td>隣保館「ひだまり館」</td><td>8:34</td><td>9:37</td><td>10:47</td><td>11:57</td><td>13:57</td><td>15:02</td><td>16:07</td><td>17:07</td></tr><tr><td>庄綿津見神社前</td><td>8:36</td><td>9:39</td><td>10:49</td><td>11:59</td><td>13:59</td><td>15:04</td><td>16:09</td><td>17:09</td></tr><tr><td>サンコスモ古賀</td><td>8:37</td><td>9:40</td><td>10:50</td><td>12:00</td><td>14:00</td><td>15:05</td><td>16:10</td><td>17:10</td></tr><tr><td>庄公民館前</td><td>8:39</td><td>9:42</td><td>10:52</td><td>12:02</td><td>14:02</td><td>15:07</td><td>16:12</td><td>17:12</td></tr><tr><td>古賀市役所</td><td>8:40</td><td>9:43</td><td>10:53</td><td>12:03</td><td>14:03</td><td>15:08</td><td>16:13</td><td>17:13</td></tr><tr><td>リーバスプラザこが</td><td>8:41</td><td>9:44</td><td>10:54</td><td>12:04</td><td>14:04</td><td>15:09</td><td>16:14</td><td>17:14</td></tr><tr><td>JR古賀駅東口</td><td>8:47</td><td>9:50</td><td>11:00</td><td>12:10</td><td>14:10</td><td>15:15</td><td>16:20</td><td>17:20</td></tr></table>
+
+![](images/f0bba57d5ba4bade58d735854e05ea20307b97a0a284082ebbf5a10f2d218b98.jpg)
+
+<table><tr><td rowspan="2">JR古賀駅(発)</td><td>博多・久留米方面</td><td>9:01鳥栖</td><td>10:03羽犬塚</td><td>11:21久留米</td><td>12:27久留米</td><td>14:27久留米</td><td>15:30鳥栖</td><td>16:40羽犬塚</td><td>17:39久留米</td></tr><tr><td>折尾・小倉方面</td><td>8:55門司港</td><td>10:06小倉</td><td>11:05福間</td><td>12:27福間</td><td>14:27福間</td><td>15:27福間</td><td>16:28福間</td><td>17:36門司港</td></tr></table>
+
+# 運行日
+
+# 月曜日～金曜日
+
+運休日：土・日・祝日
+
+・12月29日～1月3日
+
+# 乗車定員
+
+# 9人
+
+運行経路(小竹線)
+
+<table><tr><td>コスモス館</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>-深町</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>$ \underline{\underline{\text{J R 新宮中央駅}}}$</td></tr><tr><td>ナショナル住宅</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>\( \underline{\underline{\text{J R 新宮中央駅}}}$</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>ヘアーショップ京子</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>ステンドギャラリーツツイ</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>小竹</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>小竹口</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>新宮東中学校前</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td>=</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>=</td><td>=</td><td>$ \underline{\underline{\text{J R 新宮中央駅}}}$</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>
+
+# 100円で乗車できる方
+
+●小学生および未就学児 未就学児は保護者同伴で2名まで無料  
+●身体障がい者手帳、精神障がい者保健福祉手帳、療育手帳をお持ちの方
+
+(手帳を支払い時に要提示)障がいがある方の同乗の介助者は1名まで無料
+
+●70歳おでかけバス登録証をお持ちの方(登録証を支払い時に要提示)  
+●学生割引I(学割)小竹線のみ(学生証又は生徒手帳等を支払い時に要提示)
+
+# 運賃
+
+中学生以上：200円
+
+小学生など：100円
+
+# 支払方法
+
+現金・PayPay(ペイペイ)
+
+<table><tr><td rowspan="2">JR新宮中央駅(着)</td><td>博多·久留米方面</td><td>8:33鳥栖</td><td>9:49南福岡</td><td>10:43二日市</td><td>12:01二日市</td><td>13:47二日市</td><td>14:47二日市</td><td>16:27鳥栖</td><td>17:21大牟田</td><td>18:07鳥栖</td></tr><tr><td>折尾·小倉方面</td><td>8:39福間</td><td>9:41福間</td><td>10:43折尾</td><td>12:02福間</td><td>13:43折尾</td><td>14:44折尾</td><td>16:23福間</td><td>17:16福間</td><td>18:12福間</td></tr></table>
+
+![](images/2d066f63a5ed86684aacd196098a9e902b57968b03f54878063ebe69b82ca6fe.jpg)
+
+■JR新宮中央駅⇒小竹ロ⇒コスモス館
+
+<table><tr><td></td><td>4便(快速)</td><td>6便</td><td>8便</td><td>10便</td><td>12便</td><td>14便</td><td>16便(快速)</td><td>17便(快速)</td><td>18便(快速)</td></tr><tr><td>JR新宮中央駅</td><td>8:45</td><td>9:55</td><td>11:00</td><td>12:10</td><td>14:00</td><td>15:00</td><td>16:40</td><td>17:30</td><td>18:20</td></tr><tr><td>下深町</td><td>||</td><td>9:57</td><td>11:02</td><td>12:12</td><td>14:02</td><td>15:02</td><td>||</td><td>||</td><td>||</td></tr><tr><td>新宮東中学校前</td><td>||</td><td>10:01</td><td>11:06</td><td>12:16</td><td>14:06</td><td>15:06</td><td>||</td><td>||</td><td>||</td></tr><tr><td>新宮偕同園前</td><td>||</td><td>10:03</td><td>11:08</td><td>12:18</td><td>14:08</td><td>15:08</td><td>||</td><td>||</td><td>||</td></tr><tr><td>小竹口</td><td>8:53</td><td>10:05</td><td>11:10</td><td>12:20</td><td>14:10</td><td>15:10</td><td>16:48</td><td>17:38</td><td>18:28</td></tr><tr><td>小竹</td><td>8:54</td><td>10:06</td><td>11:11</td><td>12:21</td><td>14:11</td><td>15:11</td><td>16:49</td><td>17:39</td><td>18:29</td></tr><tr><td>ステンドギャラリーツツイ</td><td>8:55</td><td>10:07</td><td>11:12</td><td>12:22</td><td>14:12</td><td>15:12</td><td>16:50</td><td>17:40</td><td>18:30</td></tr><tr><td>ヘアーショップ京子</td><td>8:56</td><td>10:08</td><td>11:13</td><td>12:23</td><td>14:13</td><td>15:13</td><td>16:51</td><td>17:41</td><td>18:31</td></tr><tr><td>ナショナル住宅</td><td>8:56</td><td>10:08</td><td>11:13</td><td>12:23</td><td>14:13</td><td>15:13</td><td>16:51</td><td>17:41</td><td>18:31</td></tr><tr><td>コスモス館</td><td>9:00</td><td>10:12</td><td>11:17</td><td>12:27</td><td>14:17</td><td>15:17</td><td>16:55</td><td>17:45</td><td>18:35</td></tr></table>
+
+■コスモス館⇒小竹ロ→JR新宮中央駅
+
+<table><tr><td></td><td>1便(快速)</td><td>2便(快速)</td><td>3便(快速)</td><td>5便</td><td>7便</td><td>9便</td><td>11便</td><td>13便</td><td>15便</td></tr><tr><td>コスモス館</td><td>7:10</td><td>7:45</td><td>8:20</td><td>9:25</td><td>10:30</td><td>11:40</td><td>13:30</td><td>14:30</td><td>16:00</td></tr><tr><td>ナショナル住宅</td><td>7:14</td><td>7:49</td><td>8:24</td><td>9:29</td><td>10:34</td><td>11:44</td><td>13:34</td><td>14:34</td><td>16:04</td></tr><tr><td>ヘアーショップ京子</td><td>7:14</td><td>7:49</td><td>8:24</td><td>9:29</td><td>10:34</td><td>11:44</td><td>13:34</td><td>14:34</td><td>16:04</td></tr><tr><td>ステンドギャラリーツツイ</td><td>7:15</td><td>7:50</td><td>8:25</td><td>9:30</td><td>10:35</td><td>11:45</td><td>13:35</td><td>14:35</td><td>16:05</td></tr><tr><td>小竹</td><td>7:16</td><td>7:51</td><td>8:26</td><td>9:31</td><td>10:36</td><td>11:46</td><td>13:36</td><td>14:36</td><td>16:06</td></tr><tr><td>小竹口</td><td>7:17</td><td>7:52</td><td>8:27</td><td>9:32</td><td>10:37</td><td>11:47</td><td>13:37</td><td>14:37</td><td>16:07</td></tr><tr><td>新宮東中学校前</td><td>||</td><td>||</td><td>||</td><td>9:37</td><td>10:42</td><td>11:52</td><td>13:42</td><td>14:42</td><td>16:12</td></tr><tr><td>新宮偕同園前</td><td>||</td><td>||</td><td>||</td><td>9:39</td><td>10:44</td><td>11:54</td><td>13:44</td><td>14:44</td><td>16:14</td></tr><tr><td>下深町</td><td>||</td><td>||</td><td>||</td><td>9:43</td><td>10:48</td><td>11:58</td><td>13:48</td><td>14:48</td><td>16:18</td></tr><tr><td>JR新宮中央駅</td><td>7:26</td><td>8:01</td><td>8:36</td><td>9:48</td><td>10:53</td><td>12:03</td><td>13:53</td><td>14:53</td><td>16:23</td></tr></table>
+
+![](images/37a4ab2da05c87e0a9a417e7165a8b07dfb79c2ec178b698412029b8514ab22e.jpg)
+
+<table><tr><td rowspan="2">JR新宮中央駅(発)</td><td>博多・久留米方面</td><td>7:34南福岡</td><td>8:10南福岡</td><td>8:45二日市</td><td>10:12荒木</td><td>11:00二日市</td><td>12:32久留米</td><td>14:13二日市</td><td>15:14鳥栖</td><td>16:48荒木</td></tr><tr><td>折尾・小倉方面</td><td>7:35門司港</td><td>8:06小倉</td><td>8:43福間</td><td>9:58折尾</td><td>11:00福間</td><td>12:22福間</td><td>14:02福間</td><td>15:03福間</td><td>16:51海老津</td></tr></table>

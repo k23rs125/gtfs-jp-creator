@@ -53,17 +53,38 @@ st.caption("バス時刻表(PDF/Excel) → GTFS-JP。正確さの源は決定的
 # Step 1: アップロード → 抽出
 # =====================================================================
 st.header("① 時刻表をアップロード")
-up = st.file_uploader("バス時刻表（.xlsx / .pdf）", type=["xlsx", "pdf"])
+up = st.file_uploader("バス時刻表（.xlsx / テキストPDF / OCR後の .md）", type=["xlsx", "pdf", "md"])
+st.caption("📄 文字が選べるPDF・Excelはそのまま。**画像化PDF（スキャン）は文字が無いので抽出できません** → "
+           "下のコマンドでOCRし、できた .md をアップロードしてください。")
+
+
+def _ocr_hint(src):
+    cmd = (f'python skills/gtfs-jp-creator/scripts/pdf_to_markdown.py "{src}" '
+           f'--engine mineru --lang japan -o out.md')
+    st.warning("この時刻表は**画像化PDF（文字情報なし）**でした。テキスト方式では抽出できません。\n\n"
+               "**OCRで文字起こし**してから、できた `out.md` を①に再アップロードしてください"
+               "（OCRはCPUだと数分〜数十分かかるため、アプリ外で実行します）:")
+    st.code(cmd, language="bash")
+    st.caption("OCRは誤読が起きます。取り込み後は必ず原典と目視照合してください。")
 
 
 def do_extract(src):
     ext_out = WORK / "extract.json"
-    if str(src).lower().endswith(".xlsx"):
+    low = str(src).lower()
+    if low.endswith(".xlsx"):
         rc, so, se = run([SCRIPTS / "extract_timetable_excel.py", src, "-o", ext_out])
+    elif low.endswith(".md"):
+        rc, so, se = run([SCRIPTS / "extract_timetable_markdown.py", src, "-o", ext_out])
     else:
         rc, so, se = run([SCRIPTS / "extract_timetable_coords.py", src, "-o", ext_out])
     if rc == 0 and ext_out.exists():
-        ss().extract = json.loads(ext_out.read_text(encoding="utf-8"))
+        ex = json.loads(ext_out.read_text(encoding="utf-8"))
+        # 画像化PDFで0停留所 → OCR経路へ誘導（空のまま進めない）
+        if not ex.get("blocks") and any(n.get("type") == "image_pdf_use_ocr"
+                                        for n in ex.get("needs_confirmation", [])):
+            _ocr_hint(src)
+            return
+        ss().extract = ex
         for k in ("decision_spec", "result", "confirmed"):
             ss().pop(k, None)
         st.success("抽出しました。")
@@ -72,15 +93,18 @@ def do_extract(src):
 
 
 SAMPLES = Path(__file__).resolve().parent / "samples"
-c_a, c_b, c_c = st.columns([1, 1, 1])
-if c_a.button("抽出する", type="primary", disabled=(up is None)) and up:
+if st.button("抽出する", type="primary", disabled=(up is None)) and up:
     src = WORK / up.name
     src.write_bytes(up.getbuffer())
     do_extract(src)
-if c_b.button("サンプル：太宰府まほろば号（往復）"):
+st.caption("サンプルで試す:")
+c_b, c_c, c_d = st.columns([1, 1, 1])
+if c_b.button("太宰府まほろば号（往復）"):
     do_extract(SAMPLES / "sample_dazaifu_mahoroba.xlsx")
-if c_c.button("サンプル：築城巡回線（循環・変則便）"):
+if c_c.button("築城巡回線（循環・変則便）"):
     do_extract(SAMPLES / "sample_tsuiki_junkai.xlsx")
+if c_d.button("こがバス（画像PDF→OCR）"):
+    do_extract(SAMPLES / "sample_koga_ocr.md")
 
 if "extract" in ss():
     ex = ss().extract
