@@ -18,6 +18,7 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 import folium
+import pandas as pd
 from streamlit_folium import st_folium
 
 REPO = Path(__file__).resolve().parent.parent
@@ -85,6 +86,7 @@ def do_extract(src):
             _ocr_hint(src)
             return
         ss().extract = ex
+        ss().extract_token = str(src)
         for k in ("decision_spec", "result", "confirmed"):
             ss().pop(k, None)
         st.success("抽出しました。")
@@ -124,41 +126,85 @@ if "extract" in ss():
         st.caption("　順: " + " → ".join(full))
 
 # =====================================================================
-# Step 2: Claude で構造化（decision-spec）
+# Step 2: 路線の割り当て（多路線対応の構造化）
 # =====================================================================
+def _auto_route_rows(bs):
+    """停留所集合が近いブロック＝同一路線(往復)とみなし、路線名・方向を自動割当（要確認・編集可）。
+
+    OCR由来の表記ゆれ（濁点誤読など）で完全一致しないことがあるため、Jaccard類似度で判定する。
+    """
+    def _names(b):
+        return set(s.get("name") for s in b.get("stops", []))
+    grouped = []  # [[代表stop集合, [block index...]], ...]
+    for i, b in enumerate(bs):
+        ns = _names(b)
+        placed = False
+        for g in grouped:
+            inter = len(ns & g[0]); uni = len(ns | g[0]) or 1
+            if inter / uni >= 0.6:  # 6割以上の停留所を共有 → 同一路線の別方向
+                g[1].append(i); placed = True
+                break
+        if not placed:
+            grouped.append([ns, [i]])
+    rows = []
+    for gi, (_rep, members) in enumerate(grouped):
+        # 路線名はグループで1つ（往復は同じ路線名・方向0/1）。代表ブロックの端点から作る。
+        nm0 = [s.get("name") for s in bs[members[0]].get("stops", [])]
+        rname = f"{nm0[0]}～{nm0[-1]}" if nm0 else f"路線{gi + 1}"
+        for d, bi in enumerate(members):
+            nm = [s.get("name") for s in bs[bi].get("stops", [])]
+            rows.append({"ブロック": bi, "見出し": bs[bi].get("direction_hint") or "",
+                         "停留所数": len(nm), "路線名": rname, "方向(0/1)": d % 2})
+    return rows
+
+
 if "extract" in ss():
-    st.header("② 自動構造化（路線・方向・循環の判断）")
-    st.caption("抽出結果から路線・方向・循環をシステムが自動で割り当てます。"
-               "見出しが曖昧な時刻表だけ、下の詳細で Claude 構造化や手動調整ができます。")
-    # 既定: 抽出の direction_hint から自動構造化（APIキー無しでも成立）
-    default_spec = json.dumps(ss().get("decision_spec", {
-        "routes": [{"route_id": "R01", "route_long_name": "", "blocks": list(range(len(ex.get("blocks", [])))), "circular": False}],
-        "block_direction": {str(i): i for i in range(len(ex.get("blocks", [])))},
-        "block_headsign": {str(i): (ex["blocks"][i].get("direction_hint") or "") for i in range(len(ex.get("blocks", [])))},
-        "exclude_reserve": True, "exclude_unnumbered": False, "stop_key": "name"
-    }), ensure_ascii=False, indent=2)
-    with st.expander("詳細を調整（任意：Claude構造化 / decision-spec の手動編集）"):
+    st.header("② 路線の割り当て（どのブロックがどの路線・方向か）")
+    st.caption("停留所の並びが同じブロックを自動で**同じ路線**にまとめ、方向(0/1)を割り振りました（要確認）。"
+               "複数路線・往復の対応づけが違うときは表を編集してください。路線名も変更できます。")
+    blocks_e = ex.get("blocks", [])
+    base_df = pd.DataFrame(_auto_route_rows(blocks_e))
+    edited = st.data_editor(
+        base_df, hide_index=True, use_container_width=True,
+        key=f"route_editor_{ss().get('extract_token', '')}",
+        column_config={
+            "ブロック": st.column_config.NumberColumn("ブロック", disabled=True),
+            "見出し": st.column_config.TextColumn("見出し(参考)", disabled=True),
+            "停留所数": st.column_config.NumberColumn("停留所数", disabled=True),
+            "路線名": st.column_config.TextColumn("路線名", help="同じ路線名のブロックが1つの路線にまとまる"),
+            "方向(0/1)": st.column_config.SelectboxColumn("方向(0/1)", options=[0, 1], required=True),
+        },
+    )
+    # 割り当て表から decision_spec を構築（同じ路線名のブロックを1路線にまとめる）
+    name_blocks, block_dir, headsign = {}, {}, {}
+    for _, r in edited.iterrows():
+        bi = int(r["ブロック"]); nm = str(r["路線名"]).strip() or f"路線{bi}"
+        name_blocks.setdefault(nm, []).append(bi)
+        block_dir[str(bi)] = int(r["方向(0/1)"])
+        dh = blocks_e[bi].get("direction_hint")
+        if dh:
+            headsign[str(bi)] = dh
+    routes = [{"route_id": f"R{i + 1:02d}", "route_long_name": nm, "blocks": bidx, "circular": False}
+              for i, (nm, bidx) in enumerate(name_blocks.items())]
+    ss().decision_spec = {"routes": routes, "block_direction": block_dir, "block_headsign": headsign,
+                          "exclude_reserve": True, "exclude_unnumbered": False, "stop_key": "name"}
+    if len(routes) > 1:
+        st.info(f"{len(routes)} 路線として構成します: " + " / ".join(r["route_long_name"] for r in routes))
+    with st.expander("詳細（任意：Claude構造化 / decision-spec の確認・上書き）"):
         key = st.text_input("ANTHROPIC_API_KEY（環境変数があれば空でOK）", type="password", value="")
         api_key = key or os.environ.get("ANTHROPIC_API_KEY", "")
-        if st.button("Claudeで構造化"):
+        if st.button("Claudeで構造化（上書き）"):
             if not api_key:
-                st.warning("APIキーが未設定です。下の欄に decision-spec を貼り付けても進められます。")
+                st.warning("APIキーが未設定です。上の表での割り当てをそのまま使えます。")
             else:
                 try:
                     with st.spinner("Claude が構造を判断中..."):
                         ss().decision_spec = claude_structure.structure(ss().extract, api_key)
-                    st.success("構造化しました。")
+                    st.success("構造化しました（上の表より優先）。")
                 except Exception as e:
                     st.error(f"Claude 呼び出し失敗: {e}")
-        spec_text = st.text_area("decision-spec（自動生成・編集可）", value=default_spec, height=260)
-        try:
-            ss().decision_spec = json.loads(spec_text)
-            st.caption("✓ JSONとして妥当")
-        except Exception:
-            st.caption("⚠ JSONが不正です")
-    # expander を開かなくても decision_spec を確定（既定 or 既存）させる
-    if not ss().get("decision_spec"):
-        ss().decision_spec = json.loads(default_spec)
+        st.caption("現在の decision-spec:")
+        st.code(json.dumps(ss().get("decision_spec", {}), ensure_ascii=False, indent=2), language="json")
 
 # =====================================================================
 # 自動確認: システム側でまず時刻表から読み取れた内容を提示する。
@@ -206,9 +252,14 @@ if ss().get("decision_spec"):
         if _n and _n[0] == _n[-1]:
             _loop = True
             break
+    _routes_now = ss()["decision_spec"]["routes"]
     with st.form("conditions"):
         c1, c2, c3 = st.columns(3)
-        route_name = c1.text_input("路線名", value=ss()["decision_spec"]["routes"][0].get("route_long_name", ""))
+        if len(_routes_now) == 1:
+            route_name = c1.text_input("路線名", value=_routes_now[0].get("route_long_name", ""))
+        else:
+            route_name = ""  # 多路線は②の割り当てで路線名を設定
+            c1.caption("路線名は②で設定済み: " + " / ".join(r["route_long_name"] for r in _routes_now))
         muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県", help="P11の都道府県/市域制約に使用")
         fare = c1.number_input("運賃（円・0なら無料/未設定）", min_value=0, value=0, step=10)
         ag_name = c2.text_input("事業者名", value="")
@@ -246,12 +297,18 @@ if ss().get("decision_spec"):
                          "別の時刻表で試すか、抽出結果（①の表示）をご確認ください。空のGTFSは生成しません。")
             st.stop()
         # 必須チェック: 官公庁提出物が黙って Validator ERROR にならないよう、
-        # 路線名が空なら生成しない（GTFS仕様: route_short_name か route_long_name のどちらか必須）。
-        eff_route = (route_name or ss()["decision_spec"]["routes"][0].get("route_long_name") or "").strip()
-        if not eff_route:
-            st.error("路線名が空です。GTFS仕様では route_short_name / route_long_name の"
-                     "いずれかが必須で、空のまま生成すると Validator ERROR "
-                     "（route_both_short_and_long_name_missing）になります。③で路線名を入力してください。")
+        # 全路線に名前があるか確認（GTFS仕様: route_short_name か route_long_name のどちらか必須）。
+        _rts = ss()["decision_spec"]["routes"]
+        _eff = [(route_name if (len(_rts) == 1 and route_name) else (r.get("route_long_name") or "")).strip()
+                for r in _rts]
+        if any(not e for e in _eff):
+            if len(_rts) == 1:
+                st.error("路線名が空です。GTFS仕様では route_short_name / route_long_name の"
+                         "いずれかが必須で、空のまま生成すると Validator ERROR "
+                         "（route_both_short_and_long_name_missing）になります。③で路線名を入力してください。")
+            else:
+                st.error("路線名が空の路線があります。②の割り当て表で各路線に名前を付けてください。"
+                         "空のまま生成すると Validator ERROR になります。")
             st.stop()
         # 事業者名は暫定運用を許容（＝止めない）が、空なら明示警告。
         if not ag_name.strip():
