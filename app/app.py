@@ -238,6 +238,76 @@ if ss().get("decision_spec"):
             "運賃 / 運行する曜日 / 有効期間 / 対象自治体（座標補完用）")
 
 # =====================================================================
+# 時刻チェック: OCR誤読が疑われる時刻を検出し、修正候補を出す（人が確認・確定）。
+# 主に画像PDF→OCR(MinerU)で起きる数字の読み違いを拾う。自動では書き換えない。
+# =====================================================================
+if "extract" in ss():
+    tok = ss().get("extract_token", "")
+    if ss().get("anomalies_token") != tok:
+        (WORK / "_ext_check.json").write_text(json.dumps(ss().extract, ensure_ascii=False), encoding="utf-8")
+        rc, so, se = run([SCRIPTS / "detect_time_anomalies.py", WORK / "_ext_check.json",
+                          "-o", WORK / "anomalies.json"])
+        ap = WORK / "anomalies.json"
+        ss().anomalies = json.loads(ap.read_text(encoding="utf-8")) if ap.exists() else []
+        ss().anomalies_token = tok
+    anomalies = ss().get("anomalies", [])
+    if anomalies:
+        st.subheader(f"⏰ 時刻チェック（OCR誤読の疑い {len(anomalies)} 件）")
+        st.caption("時刻の逆行や便間パターンからの外れを検出しました（主にOCRの数字読み違い）。"
+                   "**原典と照合**し、必要なら『採用時刻』を直して『時刻を修正して反映』を押してください。"
+                   "空欄/現在値のままなら変更しません（自動では書き換えません）。")
+        adf = pd.DataFrame([{
+            "block": a["block"], "便": a.get("trip_label") or a.get("trip_col"),
+            "停留所": a["stop_name"], "現在": a["current"],
+            "候補": a.get("suggested") or "", "確度": a.get("confidence"),
+            "理由": a["reason"], "採用時刻": a.get("suggested") or a["current"],
+            "_col": a.get("trip_col"), "_seq": a.get("seq"),
+        } for a in anomalies])
+        ed = st.data_editor(
+            adf, hide_index=True, use_container_width=True, key=f"anom_{tok}",
+            column_config={
+                "block": st.column_config.NumberColumn(disabled=True),
+                "便": st.column_config.TextColumn(disabled=True),
+                "停留所": st.column_config.TextColumn(disabled=True),
+                "現在": st.column_config.TextColumn(disabled=True),
+                "候補": st.column_config.TextColumn(disabled=True),
+                "確度": st.column_config.TextColumn(disabled=True),
+                "理由": st.column_config.TextColumn(disabled=True),
+                "採用時刻": st.column_config.TextColumn("採用時刻(HH:MM)", help="ここを原典どおりに直す"),
+                "_col": None, "_seq": None,
+            },
+        )
+        if st.button("時刻を修正して反映"):
+            import re as _re
+            n_fix = 0
+            for _, r in ed.iterrows():
+                val = str(r["採用時刻"]).strip()
+                cur = str(r["現在"]).strip()
+                if not val or val == cur:
+                    continue
+                m = _re.match(r"^(\d{1,2}):(\d{2})", val)
+                if not m:
+                    continue
+                hhmmss = f"{int(m.group(1)):02d}:{m.group(2)}:00"
+                for b in ss().extract.get("blocks", []):
+                    if b.get("block_index") != int(r["block"]):
+                        continue
+                    for t in b.get("trips", []):
+                        if t.get("col") != r["_col"]:
+                            continue
+                        idx = int(r["_seq"]) - 1
+                        if 0 <= idx < len(t.get("cells", [])):
+                            t["cells"][idx]["time"] = hhmmss
+                            n_fix += 1
+            if n_fix:
+                for k in ("decision_spec", "result", "confirmed", "anomalies_token"):
+                    ss().pop(k, None)
+                st.success(f"{n_fix} 件の時刻を修正しました。③で条件を入れて再生成してください。")
+                st.rerun()
+            else:
+                st.info("変更がありませんでした。")
+
+# =====================================================================
 # Step 3: PDF/Excelに無い項目だけを後から質問（自動確認の後）
 # =====================================================================
 if ss().get("decision_spec"):
