@@ -1,4 +1,4 @@
-# GTFS-JP Creator — Python 依存ライブラリ
+﻿# GTFS-JP Creator — Python 依存ライブラリ
 # インストール:  pip install -r requirements.txt
 #
 # Python 3.10 以上を推奨。

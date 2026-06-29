@@ -1,4 +1,4 @@
-# GTFS-JP 半自動生成アプリ（Streamlit）の追加依存
+﻿# GTFS-JP 半自動生成アプリ（Streamlit）の追加依存
 # スキル本体の requirements.txt を入れた上で:  pip install -r app/requirements.txt
 streamlit          # UI
 anthropic          # Step2(構造化)を Claude API で自動化
