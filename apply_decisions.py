@@ -82,6 +82,28 @@ def main():
     # （平日/土日 で時刻が違う＝別ブロックのときに別カレンダーへ）。無指定は既定 sid。
     block_service = {int(k): v for k, v in dec.get("block_service", {}).items()}
     used_services = set()
+
+    # 乗降制約（降車専用/乗車専用）。範囲は推測せず spec で明示する（route_id/direction_id/
+    # block で限定可）。降車専用=乗車不可(pickup_type=1)、乗車専用=降車不可(drop_off_type=1)。
+    boarding = dec.get("boarding") or []   # [{type, route_id?, direction_id?, block?, stops:[name]}]
+
+    def _board_codes(rid_, did_, bi_, name_):
+        pu = do = 0
+        for rule in boarding:
+            if rule.get("route_id") and rule["route_id"] != rid_:
+                continue
+            if rule.get("direction_id") is not None and int(rule["direction_id"]) != int(did_):
+                continue
+            if rule.get("block") is not None and int(rule["block"]) != int(bi_):
+                continue
+            if name_ in (rule.get("stops") or []):
+                tp = rule.get("type")
+                if tp == "drop_off_only":
+                    pu = 1
+                elif tp == "pickup_only":
+                    do = 1
+        return pu, do
+
     for r in dec["routes"]:
         rid = r["route_id"]
         routes.append({"route_id": rid, "route_short_name": "",
@@ -106,8 +128,14 @@ def main():
                 for seq, c in enumerate(cells, 1):
                     hhmmss = c["time"] if c["time"].count(":") == 2 else c["time"] + ":00"
                     p = hhmmss.split(":"); p[0] = p[0].zfill(2); hhmmss = ":".join(p)
-                    stop_times.append({"trip_id": trip_id, "stop_id": sid_of[key_of(c)],
-                                       "stop_sequence": seq, "arrival_time": hhmmss, "departure_time": hhmmss})
+                    strec = {"trip_id": trip_id, "stop_id": sid_of[key_of(c)],
+                             "stop_sequence": seq, "arrival_time": hhmmss, "departure_time": hhmmss}
+                    pu, do = _board_codes(rid, did, bi, (c.get("name") or "").strip())
+                    if pu:   # 降車専用（乗車不可）。0は付けず generate の要予約=2既定を壊さない
+                        strec["pickup_type"] = pu
+                    if do:   # 乗車専用（降車不可）
+                        strec["drop_off_type"] = do
+                    stop_times.append(strec)
 
     # カレンダー: services(複数ダイヤ) があれば各々を、無ければ単一 service を出す。
     # 既定の開始/終了は単一 service の値を流用。実際に便が参照する service だけを残す。

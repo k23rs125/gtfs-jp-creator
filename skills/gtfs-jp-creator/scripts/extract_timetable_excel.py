@@ -251,6 +251,12 @@ def main() -> int:
         # この名前列の停留所行（JR連絡行は除外）
         row_name = {r: normalize_name(v) for (r, c), v in cells.items()
                     if c == nc and is_name_cell(v) and not _is_jr(normalize_name(v))}
+        # 乗降制約マーカー（領域内のセルに「降車専用/乗車専用」）が付く行。範囲は推測せず、
+        # マーカー行の停留所にヒントを付けて提示する（確定は人＝正しく失敗）。
+        drop_rows = {r for (r, c), v in cells.items()
+                     if nc <= c < col_hi and isinstance(v, str) and "降車専用" in v}
+        pick_rows = {r for (r, c), v in cells.items()
+                     if nc <= c < col_hi and isinstance(v, str) and "乗車専用" in v}
         for hdr, r_lo, r_hi in sections:
             sec_rows = sorted(r for r in row_name
                               if r_lo <= r < r_hi and (hdr is None or r > hdr))
@@ -278,12 +284,27 @@ def main() -> int:
             all_served |= set(served)
             if not trips:
                 continue
-            stops = [{"num": None, "name": row_name[r], "row": r,
-                      "reserve": "要予約" in row_name[r]} for r in served]
+            stops = []
+            for r in served:
+                s = {"num": None, "name": row_name[r], "row": r,
+                     "reserve": "要予約" in row_name[r]}
+                if r in drop_rows:
+                    s["boarding_hint"] = "drop_off_only"   # 降車専用（乗車不可）の疑い
+                elif r in pick_rows:
+                    s["boarding_hint"] = "pickup_only"      # 乗車専用（降車不可）の疑い
+                stops.append(s)
             bi = len(blocks)
             blocks.append({"block_index": bi, "name_col": nc, "section_row": hdr,
                            "direction_hint": _direction_hint(hdr, band_lo, col_hi),
                            "stops": stops, "trips": trips, "warnings": []})
+            flagged = [s["name"] for s in stops if s.get("boarding_hint")]
+            if flagged:
+                needs.append({"type": "boarding_restriction", "block": bi,
+                              "stops": flagged,
+                              "message": f"ブロック{bi}に乗降制約マーカー（降車専用/乗車専用）が"
+                                         f"見つかりました: {' / '.join(flagged)}。対象範囲は推測して"
+                                         "いません。原典で『どの停留所が乗車不可/降車不可か』を確認し、"
+                                         "③で指定してください。"})
             for t in trips:
                 if not t["monotonic"]:
                     needs.append({"type": "time_nonmonotonic", "block": bi, "col": t["col"],

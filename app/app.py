@@ -469,6 +469,24 @@ if ss().get("decision_spec"):
                                    help="12/29〜1/3 を運休に展開")
         hol_obon = h3.checkbox("お盆運休", value=bool(det.get("holiday_obon")), key=f"ho_{tk}",
                                help="8/13〜8/15 を運休に展開")
+        # 乗降制約（降車専用＝乗車不可）。抽出でマーカーを検出したブロックのみ提示。
+        # 範囲は自動で決めず、検出した停留所を初期選択にして人が確定する（正しく失敗）。
+        board_sel = {}
+        _bhints = []
+        for _b in ss().get("extract", {}).get("blocks", []):
+            _names = [s["name"] for s in _b.get("stops", [])]
+            _hint = [s["name"] for s in _b.get("stops", []) if s.get("boarding_hint") == "drop_off_only"]
+            if _hint:
+                _bhints.append((_b["block_index"], _b.get("direction_hint"), _names, _hint))
+        if _bhints:
+            st.markdown("**降車専用（乗車不可）にする停留所**　"
+                        "※原典に「降車専用区間」等の記載あり。**範囲は自動判定していません**——"
+                        "どの停留所が乗車不可かを確認して選んでください。")
+            for bi, dirh, names, hint in _bhints:
+                sel = st.multiselect(f"block{bi}（{dirh or '方向なし'}）の降車専用停留所",
+                                     options=names, default=hint, key=f"board_{bi}_{tk}")
+                if sel:
+                    board_sel[bi] = sel
         use_nom = st.checkbox("Nominatim 補完を使う（POI多い路線向け・遅い）", value=False)
         submitted = st.form_submit_button("GTFS-JP を生成する", type="primary")
 
@@ -559,6 +577,11 @@ if ss().get("decision_spec"):
                      (("大人", fare_adult), ("小児", fare_child), ("障がい者", fare_disabled)) if p > 0]
             if fares:
                 spec["fares"] = fares
+        # 乗降制約（降車専用＝乗車不可）。ブロック単位で限定（往路は影響しない）。
+        boarding = [{"type": "drop_off_only", "block": bi, "stops": sel}
+                    for bi, sel in board_sel.items()]
+        if boarding:
+            spec["boarding"] = boarding
         aid = ag_id or "AGENCY_TBD"
         spec["agency"] = {"agency_id": aid, "agency_name": ag_name or "未定（自治体が記入）",
                           "agency_url": ag_url or None, "agency_phone": ag_phone or None}
