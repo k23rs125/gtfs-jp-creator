@@ -78,6 +78,10 @@ def main():
     routes, trips, stop_times = [], [], []
     svc = dec.get("service", {})
     sid = svc.get("service_id", "SVC")
+    # 複数ダイヤ対応: block_service でブロックごとに service_id を割り当てられる
+    # （平日/土日 で時刻が違う＝別ブロックのときに別カレンダーへ）。無指定は既定 sid。
+    block_service = {int(k): v for k, v in dec.get("block_service", {}).items()}
+    used_services = set()
     for r in dec["routes"]:
         rid = r["route_id"]
         routes.append({"route_id": rid, "route_short_name": "",
@@ -95,7 +99,9 @@ def main():
                 # 行先: 決定スペックの block_headsign（循環は「左回り/右回り」等）優先、
                 # 無ければ最終停留所名。
                 head = bhead.get(str(bi)) or bhead.get(int(bi)) or (cells[-1].get("name") or "").strip()
-                trips.append({"trip_id": trip_id, "route_id": rid, "service_id": sid,
+                svc_id = block_service.get(int(bi), sid)
+                used_services.add(svc_id)
+                trips.append({"trip_id": trip_id, "route_id": rid, "service_id": svc_id,
                               "direction_id": did, "trip_headsign": head, "shape_id": None})
                 for seq, c in enumerate(cells, 1):
                     hhmmss = c["time"] if c["time"].count(":") == 2 else c["time"] + ":00"
@@ -103,10 +109,20 @@ def main():
                     stop_times.append({"trip_id": trip_id, "stop_id": sid_of[key_of(c)],
                                        "stop_sequence": seq, "arrival_time": hhmmss, "departure_time": hhmmss})
 
-    calendar = [{"service_id": sid, "monday": svc.get("mon", 0), "tuesday": svc.get("tue", 0),
-                 "wednesday": svc.get("wed", 0), "thursday": svc.get("thu", 0),
-                 "friday": svc.get("fri", 0), "saturday": svc.get("sat", 0), "sunday": svc.get("sun", 0),
-                 "start_date": svc.get("start_date", "20240101"), "end_date": svc.get("end_date", "20271231")}]
+    # カレンダー: services(複数ダイヤ) があれば各々を、無ければ単一 service を出す。
+    # 既定の開始/終了は単一 service の値を流用。実際に便が参照する service だけを残す。
+    s0, e0 = svc.get("start_date", "20240101"), svc.get("end_date", "20271231")
+
+    def _cal(d):
+        return {"service_id": d.get("service_id", sid),
+                "monday": d.get("mon", 0), "tuesday": d.get("tue", 0), "wednesday": d.get("wed", 0),
+                "thursday": d.get("thu", 0), "friday": d.get("fri", 0),
+                "saturday": d.get("sat", 0), "sunday": d.get("sun", 0),
+                "start_date": d.get("start_date", s0), "end_date": d.get("end_date", e0)}
+
+    src_services = dec.get("services") or [svc if svc else {"service_id": sid}]
+    calendar = [_cal(s) for s in src_services
+                if (not used_services) or s.get("service_id", sid) in used_services]
     # 事業者: decision-spec に agency / agency_jp があれば採用（無ければ従来の未定プレースホルダ）。
     # これにより事業者情報を spec に載せられ、手書き構造化スクリプトが不要になる。
     agency = dec.get("agency") or {"agency_id": "AGENCY_TBD", "agency_name": "未定（自治体が記入）",

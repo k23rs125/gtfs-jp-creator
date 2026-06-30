@@ -155,8 +155,18 @@ def _auto_route_rows(bs):
         for d, bi in enumerate(members):
             nm = [s.get("name") for s in bs[bi].get("stops", [])]
             rows.append({"ブロック": bi, "見出し": bs[bi].get("direction_hint") or "",
-                         "停留所数": len(nm), "路線名": rname, "方向(0/1)": d % 2})
+                         "停留所数": len(nm), "路線名": rname, "方向(0/1)": d % 2,
+                         "運行日": "③の曜日"})
     return rows
+
+
+# 運行日パターン → 曜日フラグ（平日/土日で時刻が違う時刻表は、ブロックごとに変える）
+DAY_PATTERNS = {
+    "平日(月〜金)": dict(mon=1, tue=1, wed=1, thu=1, fri=1, sat=0, sun=0),
+    "土日祝": dict(mon=0, tue=0, wed=0, thu=0, fri=0, sat=1, sun=1),
+    "毎日": dict(mon=1, tue=1, wed=1, thu=1, fri=1, sat=1, sun=1),
+}
+PATTERN_SID = {"平日(月〜金)": "WD", "土日祝": "WE", "毎日": "ALL"}
 
 
 if "extract" in ss():
@@ -174,20 +184,27 @@ if "extract" in ss():
             "停留所数": st.column_config.NumberColumn("停留所数", disabled=True),
             "路線名": st.column_config.TextColumn("路線名", help="同じ路線名のブロックが1つの路線にまとまる"),
             "方向(0/1)": st.column_config.SelectboxColumn("方向(0/1)", options=[0, 1], required=True),
+            "運行日": st.column_config.SelectboxColumn(
+                "運行日", options=["③の曜日"] + list(DAY_PATTERNS), required=True,
+                help="平日/土日で時刻が違う時刻表は、便のブロックごとに運行日を変える（別ダイヤとして出力）"),
         },
     )
+    st.caption("⚠ **平日と土日で時刻が違う**時刻表は、該当ブロックの『運行日』を変えてください"
+               "（別カレンダーで出力されます）。同じなら『③の曜日』のままでOK。")
     # 割り当て表から decision_spec を構築（同じ路線名のブロックを1路線にまとめる）
-    name_blocks, block_dir, headsign = {}, {}, {}
+    name_blocks, block_dir, headsign, block_pattern = {}, {}, {}, {}
     for _, r in edited.iterrows():
         bi = int(r["ブロック"]); nm = str(r["路線名"]).strip() or f"路線{bi}"
         name_blocks.setdefault(nm, []).append(bi)
         block_dir[str(bi)] = int(r["方向(0/1)"])
+        block_pattern[str(bi)] = str(r.get("運行日") or "③の曜日")
         dh = blocks_e[bi].get("direction_hint")
         if dh:
             headsign[str(bi)] = dh
     routes = [{"route_id": f"R{i + 1:02d}", "route_long_name": nm, "blocks": bidx, "circular": False}
               for i, (nm, bidx) in enumerate(name_blocks.items())]
     ss().decision_spec = {"routes": routes, "block_direction": block_dir, "block_headsign": headsign,
+                          "block_pattern": block_pattern,
                           "exclude_reserve": True, "exclude_unnumbered": False, "stop_key": "name"}
     if len(routes) > 1:
         st.info(f"{len(routes)} 路線として構成します: " + " / ".join(r["route_long_name"] for r in routes))
@@ -410,10 +427,23 @@ if ss().get("decision_spec"):
                 if not b.get("direction_hint"):
                     bh[str(b.get("block_index"))] = headsign.strip()
             spec["block_headsign"] = bh
-        spec["service"] = {"service_id": "SVC",
-                           "mon": int(days[0]), "tue": int(days[1]), "wed": int(days[2]),
-                           "thu": int(days[3]), "fri": int(days[4]), "sat": int(days[5]), "sun": int(days[6]),
-                           "start_date": start or "20250401", "end_date": end or "20271231"}
+        period = {"start_date": start or "20250401", "end_date": end or "20271231"}
+        form_days = {"mon": int(days[0]), "tue": int(days[1]), "wed": int(days[2]),
+                     "thu": int(days[3]), "fri": int(days[4]), "sat": int(days[5]), "sun": int(days[6])}
+        spec["service"] = {"service_id": "SVC", **form_days, **period}
+        # 複数ダイヤ: ②の運行日割当(block_pattern)から services と block_service を構築。
+        bpat = ss()["decision_spec"].get("block_pattern", {})
+        services = {"SVC": {"service_id": "SVC", **form_days, **period}}
+        block_service = {}
+        for bi, pat in bpat.items():
+            if pat in DAY_PATTERNS:
+                sidp = PATTERN_SID[pat]
+                services[sidp] = {"service_id": sidp, **DAY_PATTERNS[pat], **period}
+                block_service[bi] = sidp
+            else:
+                block_service[bi] = "SVC"
+        spec["services"] = list(services.values())
+        spec["block_service"] = block_service
         fares = [{"category": c, "price": int(p)} for c, p in
                  (("大人", fare_adult), ("小児", fare_child), ("障がい者", fare_disabled)) if p > 0]
         if fares:
