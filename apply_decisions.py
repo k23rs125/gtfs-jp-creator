@@ -155,8 +155,19 @@ def main():
             fr = [{"fare_id": "F", "route_id": r["route_id"], "origin_id": None,
                    "destination_id": None, "contains_id": None} for r in routes]
 
+    # feed_info: 有効期間(service期間)と事業者を反映する（利用者入力が calendar 止まりで
+    # feed_info に載らない問題の解消）。明示指定があればそれを優先。
+    feed_info = dict(dec.get("feed_info") or {})
+    feed_info.setdefault("feed_start_date", s0)
+    feed_info.setdefault("feed_end_date", e0)
+    if agency.get("agency_name"):
+        feed_info.setdefault("feed_publisher_name", agency["agency_name"])
+    if agency.get("agency_url"):
+        feed_info.setdefault("feed_publisher_url", agency["agency_url"])
+        feed_info.setdefault("feed_contact_url", agency["agency_url"])
+
     out = {"agency": agency,
-           "agency_jp": agency_jp,
+           "agency_jp": agency_jp, "feed_info": feed_info,
            "office_jp": dec.get("office_jp", []), "routes": routes, "stops": stops,
            "trips": trips, "stop_times": stop_times,
            "calendar": calendar, "calendar_dates": dec.get("calendar_dates", []),
