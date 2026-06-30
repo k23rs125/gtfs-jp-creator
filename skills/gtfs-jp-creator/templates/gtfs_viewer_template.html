@@ -1200,13 +1200,28 @@ function runChecks() {
   if (tripsNoStop.length) add("err", "停車時刻が未登録の便があります", `${tripsNoStop.length}便`);
   else add("ok", "すべての便に停車時刻が登録されています", `${trips.length}便`);
 
-  // 3. バス停の位置が正しいか
+  // 3. バス停の位置（地域非依存）：無効値・日本国外・他のバス停から大きく離れた外れ値を検出。
+  //    特定地域のbboxを固定しない（自治体ごとに変わるため）。中央値を中心に判定。
+  const _median = arr => {
+    const a = arr.slice().sort((x, y) => x - y), m = a.length >> 1;
+    return a.length ? (a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2) : 0;
+  };
+  const _hav = (a, b) => {
+    const R = 6371, r = Math.PI / 180;
+    const d1 = (b[0] - a[0]) * r, d2 = (b[1] - a[1]) * r;
+    const x = Math.sin(d1 / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(d2 / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(x));
+  };
+  const validLL = stops.map(s => [+s.stop_lat, +s.stop_lon]).filter(([a, b]) => isFinite(a) && isFinite(b));
+  const cLat = _median(validLL.map(p => p[0])), cLon = _median(validLL.map(p => p[1]));
   const badStops = stops.filter(s => {
     const lat = +s.stop_lat, lon = +s.stop_lon;
-    return !isFinite(lat) || !isFinite(lon) || lat < 33 || lat > 34 || lon < 130 || lon > 131;
+    if (!isFinite(lat) || !isFinite(lon)) return true;        // 座標なし/異常
+    if (lat < 20 || lat > 46 || lon < 122 || lon > 154) return true;  // 日本国外
+    return _hav([lat, lon], [cLat, cLon]) > 100;              // 他のバス停から100km超＝外れ値
   });
-  if (badStops.length) add("warn", "緯度経度が朝倉市周辺の範囲外のバス停があります", `${badStops.length}件`, badStops.map(s => s.stop_name));
-  else add("ok", "すべてのバス停が朝倉市周辺の位置にあります", `${stops.length}バス停`);
+  if (badStops.length) add("warn", "位置が他のバス停から大きく離れた（または異常な）バス停があります", `${badStops.length}件`, badStops.map(s => s.stop_name));
+  else add("ok", "すべてのバス停が妥当な位置にあります", `${stops.length}バス停`);
 
   // 4. 時刻が早→遅の順か
   const trST = {};
