@@ -1234,10 +1234,15 @@ function runChecks() {
   if (badZone.length) add("err", "運賃ルールに存在しないバス停が指定されています", `${badZone.length}件`);
   else add("ok", "運賃ルールのバス停はすべて正しく登録されています");
 
-  // 7. 翻訳の整合
+  // 7. 翻訳の整合（GTFSの翻訳は record_id方式 と field_value方式 の両方が正当。どちらにも対応）
   const trans = data["translations.txt"]||[];
-  const transStops = trans.filter(t => t.table_name==="stops").map(t => t.record_id);
-  const badTrans = transStops.filter(id => !stopIds.has(id));
+  const stopNames = new Set(stops.map(s => s.stop_name));
+  const transStops = trans.filter(t => t.table_name==="stops");
+  const badTrans = transStops.filter(t => {
+    if (t.record_id) return !stopIds.has(t.record_id);       // record_id(=stop_id)方式
+    if (t.field_value) return !stopNames.has(t.field_value); // field_value(=値で対応)方式
+    return false;
+  });
   if (badTrans.length) add("err", "ローマ字翻訳が、存在しないバス停を指しています", `${badTrans.length}件`);
   else add("ok", "ローマ字翻訳はすべて正しいバス停を指しています");
 
