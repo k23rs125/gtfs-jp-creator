@@ -99,6 +99,35 @@ def do_extract(src):
         st.error("抽出に失敗しました。\n" + se[-800:])
 
 
+def run_generation(spec, muni, use_nom, hol):
+    """spec から GTFS-JP を生成（apply_decisions→run_pipeline）。ss().result に結果を入れる。"""
+    (WORK / "spec.json").write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
+    (WORK / "extract.json").write_text(json.dumps(ss().extract, ensure_ascii=False), encoding="utf-8")
+    with st.spinner("構造化 → 生成 → 座標補完 → 検証 を実行中..."):
+        rc, so, se = run([APPLY_DECISIONS, "--extract", WORK / "extract.json",
+                          "--decisions", WORK / "spec.json", "--out", WORK / "structured.json"])
+        if rc != 0:
+            st.error("構造化(apply_decisions)に失敗:\n" + se[-800:]); return
+        pref = muni
+        for k in ("県", "都", "府", "道"):
+            if k in muni:
+                pref = muni[:muni.index(k) + 1]; break
+        cfg = {"feed_name": "app_feed", "input_json": str(WORK / "structured.json"),
+               "extract_json": str(WORK / "extract.json"), "output_dir": str(WORK / "out"),
+               "context": muni, "p11_prefecture": pref, "use_nominatim": bool(use_nom),
+               "interpolate_coords": True, "validate": True}
+        if hol.get("syuku"):
+            cfg["holiday_syukujitsu"] = str(SCRIPTS.parent / "references" / "data" / "syukujitsu.csv")
+        if hol.get("nenmatsu"):
+            cfg["holiday_nenmatsu"] = "12-29:01-03"
+        if hol.get("obon"):
+            cfg["holiday_obon"] = "08-13:08-15"
+        (WORK / "config.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+        rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
+    ss().result = {"rc": rc, "log": se}
+    st.success("完了しました。" if rc == 0 else "完了（警告/エラーあり）。")
+
+
 SAMPLES = Path(__file__).resolve().parent / "samples"
 if st.button("抽出する", type="primary", disabled=(up is None)) and up:
     src = WORK / up.name
@@ -490,33 +519,41 @@ if ss().get("decision_spec"):
                           "agency_url": ag_url or None, "agency_phone": ag_phone or None}
         spec["agency_jp"] = {"agency_official_name": ag_name or None, "agency_zip_number": None,
                              "agency_address": None, "agency_president_pos": None, "agency_president_name": None}
-        (WORK / "spec.json").write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
-        (WORK / "extract.json").write_text(json.dumps(ss().extract, ensure_ascii=False), encoding="utf-8")
+        hol = {"syuku": hol_syuku, "nenmatsu": hol_nenmatsu, "obon": hol_obon}
+        # 路線名以外がほぼ未入力なら、暫定の既定値（捏造なし）で生成してよいか確認してから生成。
+        minimal = (not ag_name.strip() and not ag_id.strip() and not ag_url.strip()
+                   and not ag_phone.strip() and fare_adult == 0 and fare_child == 0
+                   and fare_disabled == 0 and not (zone_fare and zone_csv.strip())
+                   and not start.strip() and not end.strip()
+                   and not (hol_syuku or hol_nenmatsu or hol_obon))
+        if minimal:
+            ss().pending_gen = {"spec": spec, "muni": muni, "use_nom": bool(use_nom), "hol": hol}
+            ss().awaiting_confirm = True
+            st.rerun()
+        else:
+            run_generation(spec, muni, bool(use_nom), hol)
 
-        with st.spinner("構造化 → 生成 → 座標補完 → 検証 を実行中..."):
-            rc, so, se = run([APPLY_DECISIONS, "--extract", WORK / "extract.json",
-                              "--decisions", WORK / "spec.json", "--out", WORK / "structured.json"])
-            if rc != 0:
-                st.error("構造化(apply_decisions)に失敗:\n" + se[-800:]); st.stop()
-            pref = muni
-            for k in ("県", "都", "府", "道"):
-                if k in muni:
-                    pref = muni[:muni.index(k) + 1]; break
-            cfg = {"feed_name": "app_feed", "input_json": str(WORK / "structured.json"),
-                   "extract_json": str(WORK / "extract.json"), "output_dir": str(WORK / "out"),
-                   "context": muni, "p11_prefecture": pref, "use_nominatim": bool(use_nom),
-                   "interpolate_coords": True, "validate": True}
-            # 運休日（祝日・年末年始・お盆）を calendar_dates に展開（Step3.6）
-            if hol_syuku:
-                cfg["holiday_syukujitsu"] = str(SCRIPTS.parent / "references" / "data" / "syukujitsu.csv")
-            if hol_nenmatsu:
-                cfg["holiday_nenmatsu"] = "12-29:01-03"
-            if hol_obon:
-                cfg["holiday_obon"] = "08-13:08-15"
-            (WORK / "config.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
-            rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
-        ss().result = {"rc": rc, "log": se}
-        st.success("完了しました。" if rc == 0 else "完了（警告/エラーあり）。")
+    # 路線名のみ入力 → 暫定既定値での生成確認（捏造せず、要確認として入れる）
+    if ss().get("awaiting_confirm"):
+        pg = ss().get("pending_gen", {})
+        sp = pg.get("spec", {})
+        names = " / ".join(r.get("route_long_name", "") for r in sp.get("routes", []))
+        sv = sp.get("service", {})
+        st.warning("路線名以外がほぼ未入力です。下の**暫定の既定値**で生成します"
+                   "（事実は捏造しません。各項目は『要確認』として入ります）。よろしいですか？")
+        st.markdown(
+            f"- 路線名: **{names}**\n"
+            f"- 運行曜日: 平日（月〜金）　／　有効期間: {sv.get('start_date')}〜{sv.get('end_date')}\n"
+            f"- 運賃: 未設定（0）　／　事業者: 未定（自治体が記入）・法人番号 空\n"
+            f"- 対象自治体: {pg.get('muni')}（座標補完に使用）\n"
+            "- 公式GTFS(BODIK等)があれば、対象自治体名で照合して座標を再利用できます（URLが分かれば②で指定）。")
+        cc1, cc2 = st.columns(2)
+        if cc1.button("この暫定内容で生成する", type="primary"):
+            ss().pop("awaiting_confirm", None)
+            run_generation(sp, pg.get("muni", "福岡県"), pg.get("use_nom", False), pg.get("hol", {}))
+            st.rerun()
+        if cc2.button("入力に戻る"):
+            ss().pop("awaiting_confirm", None); ss().pop("pending_gen", None); st.rerun()
 
 # =====================================================================
 # Step 4: 結果（検証・地図・ダウンロード）
