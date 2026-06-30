@@ -378,6 +378,11 @@ if ss().get("decision_spec"):
         c4, c5 = st.columns(2)
         start = c4.text_input("有効期間 開始 (YYYYMMDD)", value="")
         end = c5.text_input("有効期間 終了 (YYYYMMDD)", value="")
+        st.write("運休日（祝日・年末年始・お盆。該当する場合のみチェック）")
+        h1, h2, h3 = st.columns(3)
+        hol_syuku = h1.checkbox("祝日は運休", help="内閣府の祝日データ（同梱・〜2027年）で祝日を運休に展開")
+        hol_nenmatsu = h2.checkbox("年末年始運休", help="12/29〜1/3 を運休に展開")
+        hol_obon = h3.checkbox("お盆運休", help="8/13〜8/15 を運休に展開")
         use_nom = st.checkbox("Nominatim 補完を使う（POI多い路線向け・遅い）", value=False)
         submitted = st.form_submit_button("GTFS-JP を生成する", type="primary")
 
@@ -469,6 +474,13 @@ if ss().get("decision_spec"):
                    "extract_json": str(WORK / "extract.json"), "output_dir": str(WORK / "out"),
                    "context": muni, "p11_prefecture": pref, "use_nominatim": bool(use_nom),
                    "interpolate_coords": True, "validate": True}
+            # 運休日（祝日・年末年始・お盆）を calendar_dates に展開（Step3.6）
+            if hol_syuku:
+                cfg["holiday_syukujitsu"] = str(SCRIPTS.parent / "references" / "data" / "syukujitsu.csv")
+            if hol_nenmatsu:
+                cfg["holiday_nenmatsu"] = "12-29:01-03"
+            if hol_obon:
+                cfg["holiday_obon"] = "08-13:08-15"
             (WORK / "config.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
             rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
         ss().result = {"rc": rc, "log": se}
