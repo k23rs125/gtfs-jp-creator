@@ -144,24 +144,37 @@ def main() -> int:
     if not trip_cols:
         trip_cols = sorted(col_sched_count)  # 各列1便しか無い場合も拾う
 
-    # --- 停留所名の列（自動検出 or 指定） ---
+    # --- 停留所名の列（横並びの複数表に対応） ---
+    # 1シートに複数の独立した時刻表が横並びの場合（例: 往路/復路/行き/帰りがそれぞれ別の
+    # 停留所名列を持つ）に対応。停留所名列を複数検出し、各名前列に「その右隣〜次の名前列
+    # より左」の便列だけを対応付ける。単一表なら従来どおり1列になる。
+    name_count = Counter(c for (r, c), v in cells.items() if is_name_cell(v))
     if args.name_col:
-        name_col = col_letter_to_idx(args.name_col)
+        name_cols = [col_letter_to_idx(args.name_col)]
+    elif name_count:
+        top = max(name_count.values())
+        thr = max(4, int(top * 0.5))   # 表らしい名前列（散発的な少数セルは除外）
+        name_cols = sorted(c for c, n in name_count.items() if n >= thr)
+        if not name_cols:
+            name_cols = [name_count.most_common(1)[0][0]]
     else:
-        # 便列より左で、停留所名セルが最も多い列
-        left_name_counts = Counter(c for (r, c), v in cells.items()
-                                   if is_name_cell(v) and c < min(trip_cols))
-        if not left_name_counts:
-            # 便列の左に名前列が無い → 全体で最多の名前列
-            left_name_counts = Counter(c for (r, c), v in cells.items() if is_name_cell(v))
-        name_col = left_name_counts.most_common(1)[0][0]
+        name_cols = []
 
-    # --- 停留所行（name_col に名前があり、時刻行と対応する行） ---
-    row_name = {}
-    for (r, c), v in cells.items():
-        if c == name_col and is_name_cell(v):
-            row_name[r] = normalize_name(v)
-    stop_rows = sorted(row_name)
+    # 各名前列に便列を割り当て（その列より右、次の名前列より左）。便列が無い名前列
+    # （例: 休憩時間表は実時刻が無い）は領域にしない＝自然に除外される。
+    # band_lo は方向見出しの探索左端＝直前に採用した領域の右端（最初は1列目）。
+    # これで方向ラベルが名前列の左にある場合（太宰府: ラベル列+停留所列）も拾え、
+    # かつ横並び表で他領域の見出しに侵食しない。
+    regions = []   # [(name_col, [trip_cols], band_lo, col_hi), ...]
+    prev_hi = 1
+    for i, nc in enumerate(name_cols):
+        col_hi = name_cols[i + 1] if i + 1 < len(name_cols) else (ws.max_column + 1)
+        rcols = [tc for tc in trip_cols if nc < tc < col_hi]
+        if rcols:
+            regions.append((nc, rcols, prev_hi, col_hi))
+            prev_hi = col_hi
+    if not regions and name_cols:   # フォールバック: 単一表として全便列を当てる
+        regions = [(name_cols[0], trip_cols, 1, ws.max_column + 1)]
 
     warnings_list = []
 
@@ -180,21 +193,31 @@ def main() -> int:
             s = v.strip()
             if s.isdigit():
                 return 0 < int(s) < 1000
-            if re.match(r'^\d+\s*便$', s):        # 「1便」「10 便」
+            if re.match(r'^第?\s*\d+\s*便$', s):        # 「1便」「第1便」「10 便」
                 return True
-            if s in ("上り", "下り", "往", "復", "往路", "復路"):
+            if re.match(r'^[A-Za-zＡ-Ｚａ-ｚ]+\s*\d+\s*便$', s):   # 「B1便」「A3便」
+                return True
+            if s in ("上り", "下り", "往", "復", "往路", "復路", "行き", "帰り"):
                 return True
         return False
 
     # 方向見出し（「市役所行き」「○○方面」「左回り/右回り」等）。便ヘッダの1つ上の行に
     # あることが多い。Step2 の方向/行先の手がかりとしてブロックに保持する。
-    DIR_LABEL_RE = re.compile(r'(?:行き|方面|循環|回り)\s*$')
+    DIR_LABEL_RE = re.compile(r'(?:行き|帰り|方面|循環|回り|往路|復路)\s*$')
 
-    def _direction_hint(hdr_row):
+    # JR連絡（鉄道の発着）行はバス停ではないので停留所に含めない。
+    def _is_jr(nm):
+        return "JR" in nm.upper() or "ＪＲ" in nm
+
+    def _direction_hint(hdr_row, col_lo, col_hi):
+        # 見出しは領域内(col_lo〜col_hi)に限定して探す（横並び表で他領域の見出しを
+        # 拾わないため）。便ヘッダの1〜2行上に「往路/復路/○○行き」等があることが多い。
         if hdr_row is None:
             return None
-        for rr in (hdr_row - 1, hdr_row - 2):
-            for cc in range(1, ws.max_column + 1):
+        # 見出しはヘッダの上(往路/復路等)にあることが多いが、ヘッダ行内(行き/帰り等)の
+        # こともあるので上→ヘッダ行の順に探す。
+        for rr in (hdr_row - 1, hdr_row - 2, hdr_row):
+            for cc in range(col_lo, col_hi):
                 v = cells.get((rr, cc))
                 if isinstance(v, str) and DIR_LABEL_RE.search(v.strip()):
                     return v.strip()
@@ -224,44 +247,48 @@ def main() -> int:
     blocks = []
     needs = []
     all_served = set()
-    for hdr, r_lo, r_hi in sections:
-        sec_rows = sorted(r for r in row_name
-                          if r_lo <= r < r_hi and (hdr is None or r > hdr))
-        trips = []
-        for tc in trip_cols:
-            cell_list = []
-            seq = 0
-            for r in sec_rows:
-                if (r, tc) in sched_cells:
-                    seq += 1
-                    nm = row_name[r]
-                    cell_list.append({"seq": seq, "num": None, "name": nm,
-                                      "time": sched_cells[(r, tc)],
-                                      "reserve": "要予約" in nm})
-            if cell_list:
-                mins = [_m(c["time"]) for c in cell_list]
-                mono = all(mins[i] <= mins[i + 1] for i in range(len(mins) - 1))
-                tnum = cells.get((hdr, tc)) if hdr is not None else None
-                trips.append({"col": tc,
-                              "trip_number": str(tnum) if tnum is not None else None,
-                              "n_stops": len(cell_list), "monotonic": mono,
-                              "cells": cell_list})
-        served = sorted({r for r in sec_rows
-                         if any((r, tc) in sched_cells for tc in trip_cols)})
-        all_served |= set(served)
-        if not trips:
-            continue
-        stops = [{"num": None, "name": row_name[r], "row": r,
-                  "reserve": "要予約" in row_name[r]} for r in served]
-        bi = len(blocks)
-        blocks.append({"block_index": bi, "name_col": name_col, "section_row": hdr,
-                       "direction_hint": _direction_hint(hdr),
-                       "stops": stops, "trips": trips, "warnings": []})
-        for t in trips:
-            if not t["monotonic"]:
-                needs.append({"type": "time_nonmonotonic", "block": bi, "col": t["col"],
-                              "message": f"ブロック{bi} 便(列{t['col']})で時刻が逆行しています。"
-                                         "要予約への寄り道や折り返しの可能性。原典で確認してください。"})
+    for nc, rcols, band_lo, col_hi in regions:
+        # この名前列の停留所行（JR連絡行は除外）
+        row_name = {r: normalize_name(v) for (r, c), v in cells.items()
+                    if c == nc and is_name_cell(v) and not _is_jr(normalize_name(v))}
+        for hdr, r_lo, r_hi in sections:
+            sec_rows = sorted(r for r in row_name
+                              if r_lo <= r < r_hi and (hdr is None or r > hdr))
+            trips = []
+            for tc in rcols:
+                cell_list = []
+                seq = 0
+                for r in sec_rows:
+                    if (r, tc) in sched_cells:
+                        seq += 1
+                        nm = row_name[r]
+                        cell_list.append({"seq": seq, "num": None, "name": nm,
+                                          "time": sched_cells[(r, tc)],
+                                          "reserve": "要予約" in nm})
+                if cell_list:
+                    mins = [_m(c["time"]) for c in cell_list]
+                    mono = all(mins[i] <= mins[i + 1] for i in range(len(mins) - 1))
+                    tnum = cells.get((hdr, tc)) if hdr is not None else None
+                    trips.append({"col": tc,
+                                  "trip_number": str(tnum) if tnum is not None else None,
+                                  "n_stops": len(cell_list), "monotonic": mono,
+                                  "cells": cell_list})
+            served = sorted({r for r in sec_rows
+                             if any((r, tc) in sched_cells for tc in rcols)})
+            all_served |= set(served)
+            if not trips:
+                continue
+            stops = [{"num": None, "name": row_name[r], "row": r,
+                      "reserve": "要予約" in row_name[r]} for r in served]
+            bi = len(blocks)
+            blocks.append({"block_index": bi, "name_col": nc, "section_row": hdr,
+                           "direction_hint": _direction_hint(hdr, band_lo, col_hi),
+                           "stops": stops, "trips": trips, "warnings": []})
+            for t in trips:
+                if not t["monotonic"]:
+                    needs.append({"type": "time_nonmonotonic", "block": bi, "col": t["col"],
+                                  "message": f"ブロック{bi} 便(列{t['col']})で時刻が逆行しています。"
+                                             "要予約への寄り道や折り返しの可能性。原典で確認してください。"})
     needs.append({"type": "assign_required",
                   "message": "便名・方向(direction_id)・循環の展開は表構造から確定できません。原典と照合して割り当ててください(Step2)。"})
 
@@ -274,8 +301,8 @@ def main() -> int:
     # サマリ（cp932安全・絵文字なし）
     total_trips = sum(len(b["trips"]) for b in blocks)
     print(f"[INFO] シート: {ws.title}", file=sys.stderr)
-    print(f"[INFO] 停留所名の列: {name_col}列  便(時刻列): {len(trip_cols)}列  "
-          f"セクション(表): {len(blocks)}", file=sys.stderr)
+    print(f"[INFO] 停留所名の列: {len(name_cols)}列  便(時刻列): {len(trip_cols)}列  "
+          f"表(領域×セクション): {len(blocks)}", file=sys.stderr)
     print(f"[INFO] 停留所 {len(all_served)} / 便 {total_trips} を抽出", file=sys.stderr)
     if needs:
         print(f"[INFO] 要確認: {len(needs)}件", file=sys.stderr)
