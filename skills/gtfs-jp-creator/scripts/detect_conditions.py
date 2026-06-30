@@ -11,6 +11,7 @@
 使い方: python detect_conditions.py <file> -o conditions.json
 """
 import argparse
+import datetime
 import json
 import re
 import sys
@@ -50,9 +51,11 @@ def _to_ymd(g):
     return f"{int(y):04d}{int(m):02d}{int(d):02d}"
 
 
-def detect(text: str) -> dict:
+def detect(text: str, today: str = None) -> dict:
     res, ev = {}, {}
     t = text.replace("　", " ")
+    if today is None:
+        today = datetime.date.today().strftime("%Y%m%d")
 
     # --- 運賃（円が明示されているものだけ。路線で運賃が違う場合に備え「全候補」を集める） ---
     def yen_all(keys):
@@ -108,11 +111,30 @@ def detect(text: str) -> dict:
         for m in re.finditer(r"(20\d{2})[\.\-年/]\s*(\d{1,2})[\.\-月/]\s*(\d{1,2})", t):
             out.append(f"{int(m.group(1)):04d}{int(m.group(2)):02d}{int(m.group(3)):02d}")
         return out
-    dates = find_dates()
+    # 古い資料の改正日をそのまま有効期間に入れない（正しく失敗）。
+    # 範囲: 終了日が今日以降なら採用（開始が過去でも有効期間として正当）。終了済みは採用せず警告。
+    # 単一日付(改正日等): 今日から約2年(730日)以内なら採用。大きく過去なら採用せず警告。
+    dates = sorted(set(find_dates()))
     if dates:
-        res["start_date"] = dates[0]; ev["start_date"] = dates[0]
-        if len(dates) >= 2 and dates[-1] != dates[0]:
-            res["end_date"] = dates[-1]; ev["end_date"] = dates[-1]
+        start, end = dates[0], dates[-1]
+        try:
+            td = datetime.datetime.strptime(today, "%Y%m%d").date()
+            cutoff = (td - datetime.timedelta(days=730)).strftime("%Y%m%d")
+        except Exception:
+            cutoff = today
+        if end != start:   # 有効期間の範囲
+            if end >= today:
+                res["start_date"] = start; ev["start_date"] = start
+                res["end_date"] = end; ev["end_date"] = end
+            else:
+                res["date_stale"] = f"{start}〜{end}"
+                ev["date_stale"] = f"検出した有効期間 {start}〜{end} は終了済み（自動入力せず・利用者が確認）"
+        else:              # 単一日付（改正日など）
+            if start >= cutoff:
+                res["start_date"] = start; ev["start_date"] = start
+            else:
+                res["date_stale"] = start
+                ev["date_stale"] = f"検出した日付 {start} は古い（2年以上前）ため自動入力せず・利用者が確認"
 
     # --- 電話 / URL ---
     mp = re.search(r"0\d{1,4}[-(\s]\d{1,4}[-)\s]\d{3,4}", t)

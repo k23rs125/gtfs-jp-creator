@@ -391,8 +391,13 @@ if ss().get("decision_spec"):
                   "days": "運行曜日", "holiday_syukujitsu": "祝日運休", "holiday_nenmatsu": "年末年始運休",
                   "holiday_obon": "お盆運休", "start_date": "有効期間開始", "end_date": "有効期間終了",
                   "phone": "電話", "url": "URL"}
-        st.info("🔎 PDF/Excel から検出した項目を下に**初期入力（要確認）**しました。原典と照合してください: "
-                + " ／ ".join(f"{labels.get(k, k)}「{_ev[k]}」" for k in _ev))
+        _fill_ev = {k: v for k, v in _ev.items() if k != "date_stale"}
+        if _fill_ev:
+            st.info("🔎 PDF/Excel から検出した項目を下に**初期入力（要確認）**しました。原典と照合してください: "
+                    + " ／ ".join(f"{labels.get(k, k)}「{_fill_ev[k]}」" for k in _fill_ev))
+    if det.get("date_stale"):
+        st.warning("📅 古い日付（" + str(det["date_stale"]) + "）を検出しました。古い資料の改正日の可能性が高いため、"
+                   "**有効期間には自動入力していません**。正しい有効期間を下の欄に入力してください。")
     # 複数の異なる運賃を検出（路線で違う可能性）→ 単一自動入力せず、候補を提示して路線ごとに割り当てさせる
     _multi_fare = det.get("fare_multiple") and len(_routes_now) > 1
     if det.get("fare_candidates"):
