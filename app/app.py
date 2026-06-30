@@ -101,6 +101,11 @@ def do_extract(src):
 
 def run_generation(spec, muni, use_nom, hol):
     """spec から GTFS-JP を生成（apply_decisions→run_pipeline）。ss().result に結果を入れる。"""
+    # 都道府県だけだと P11 の市域bboxが効かず、同名バス停を県内別所に誤マッチしやすい。
+    if muni and not any(k in muni for k in ("市", "町", "村", "区")):
+        st.warning(f"⚠ 対象自治体が「{muni}」（都道府県のみ）です。**市区町村まで**入れると"
+                   "同名停留所の座標精度が大きく上がります（例: 福岡県築上町）。"
+                   "このまま生成すると同名バス停の誤マッチが増える可能性があります。")
     (WORK / "spec.json").write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
     (WORK / "extract.json").write_text(json.dumps(ss().extract, ensure_ascii=False), encoding="utf-8")
     with st.spinner("構造化 → 生成 → 座標補完 → 検証 を実行中..."):
@@ -412,7 +417,10 @@ if ss().get("decision_spec"):
         else:
             route_name = ""  # 多路線は②の割り当てで路線名を設定
             c1.caption("路線名は②で設定済み: " + " / ".join(r["route_long_name"] for r in _routes_now))
-        muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県", help="P11の都道府県/市域制約に使用")
+        muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県",
+                             help="P11の都道府県/市域制約に使用。市区町村まで入れると同名停留所の精度が大きく上がります")
+        c1.caption("⚠ **市区町村まで**入れてください（例: 福岡県築上町）。"
+                   "都道府県だけだと同名のバス停を県内の別の場所に誤って合わせる恐れがあります。")
         if len(_routes_now) == 1:
             c1.write("運賃（区分別・円。0は未設定。PDF記載は検出して初期入力）")
             fc1, fc2, fc3 = c1.columns(3)
