@@ -275,14 +275,20 @@ def generate_stops(data: dict, output_dir: Path) -> None:
     GTFS-JP では位置情報が無い場合に空欄を許容するケースがある。
     """
     rows = []
+    has_zone = any(s.get("zone_id") for s in data["stops"])
     for s in data["stops"]:
-        rows.append({
+        row = {
             "stop_id": s["stop_id"],
             "stop_name": s["stop_name"],
             "stop_lat": s.get("stop_lat"),
             "stop_lon": s.get("stop_lon"),
-        })
+        }
+        if has_zone:
+            row["zone_id"] = s.get("zone_id") or ""
+        rows.append(row)
     fieldnames = ["stop_id", "stop_name", "stop_lat", "stop_lon"]
+    if has_zone:
+        fieldnames.append("zone_id")   # 区間運賃(zone制)のとき出力
     write_csv(output_dir / "stops.txt", rows, fieldnames)
 
 

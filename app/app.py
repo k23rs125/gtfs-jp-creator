@@ -363,6 +363,9 @@ if ss().get("decision_spec"):
         fare_adult = fc1.number_input("大人", min_value=0, value=0, step=10, key="fare_adult")
         fare_child = fc2.number_input("小児", min_value=0, value=0, step=10, key="fare_child")
         fare_disabled = fc3.number_input("障がい者", min_value=0, value=0, step=10, key="fare_disabled")
+        zone_fare = c1.checkbox("区間運賃にする（距離制。下のCSVを優先）")
+        zone_csv = c1.text_area("区間運賃 CSV（出発,到着,運賃）", value="", height=80,
+                                help="区間運賃のときだけ記入。1行=1区間、停留所名で。例: 直方駅,市役所前,200")
         ag_name = c2.text_input("事業者名", value="")
         ag_id = c2.text_input("法人番号（不明なら空）", value="")
         ag_url = c2.text_input("URL", value="")
@@ -449,10 +452,20 @@ if ss().get("decision_spec"):
                 block_service[bi] = "SVC"
         spec["services"] = list(services.values())
         spec["block_service"] = block_service
-        fares = [{"category": c, "price": int(p)} for c, p in
-                 (("大人", fare_adult), ("小児", fare_child), ("障がい者", fare_disabled)) if p > 0]
-        if fares:
-            spec["fares"] = fares
+        fare_matrix = []
+        if zone_fare and zone_csv.strip():
+            for line in zone_csv.splitlines():
+                parts = [p.strip() for p in line.replace("、", ",").split(",")]
+                pr = parts[2].lstrip("¥￥円 ") if len(parts) >= 3 else ""
+                if len(parts) >= 3 and parts[0] and parts[1] and pr.isdigit():
+                    fare_matrix.append({"from": parts[0], "to": parts[1], "price": int(pr)})
+        if fare_matrix:
+            spec["fare_matrix"] = fare_matrix   # 区間運賃（均一より優先）
+        else:
+            fares = [{"category": c, "price": int(p)} for c, p in
+                     (("大人", fare_adult), ("小児", fare_child), ("障がい者", fare_disabled)) if p > 0]
+            if fares:
+                spec["fares"] = fares
         aid = ag_id or "AGENCY_TBD"
         spec["agency"] = {"agency_id": aid, "agency_name": ag_name or "未定（自治体が記入）",
                           "agency_url": ag_url or None, "agency_phone": ag_phone or None}
