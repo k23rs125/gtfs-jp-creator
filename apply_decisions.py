@@ -132,10 +132,11 @@ def main():
                                          "agency_address": None, "agency_president_pos": None,
                                          "agency_president_name": None}
 
-    # 運賃: fare_matrix(区間制) > fares(区分別) > fare_price(単一)。
+    # 運賃: fare_matrix(区間制) > route_fares(路線別) > fares(全路線区分別) > fare_price(単一)。
     # fare の agency_id は本体 agency と一致させる（AGENCY_TBD固定をやめ desync を防ぐ）。
     fares = dec.get("fares")
     fare_matrix = dec.get("fare_matrix")   # [{from, to, price}] 停留所名で指定（区間運賃）
+    route_fares = dec.get("route_fares")   # {route_id: [{category, price}]} 路線別運賃
     fa, fr = [], []
     if fare_matrix:
         # 区間運賃: 各停留所をゾーン(=stop_id)にし、出発→到着ごとに運賃を fare_rules で持つ。
@@ -160,6 +161,24 @@ def main():
         for s in stops:   # zone_id = stop_id（区間運賃で使う停留所のみ）
             if s["stop_id"] in zoned:
                 s["zone_id"] = s["stop_id"]
+    elif route_fares:
+        # 路線別運賃: 路線ごとに運賃を持つ（古賀バスのように路線で値段が違う場合）。
+        # fare_id は 区分+金額 で一意化（同額同区分は共有）。fare_rules は route_id 付き。
+        seen = set()
+        for rid, lst in route_fares.items():
+            for f in (lst or []):
+                cat = str(f.get("category") or "").strip()
+                pr = f.get("price")
+                if not cat or pr in (None, ""):
+                    continue
+                pr = int(pr)
+                fid = f"{cat}_{pr}"
+                if fid not in seen:
+                    seen.add(fid)
+                    fa.append({"fare_id": fid, "price": pr, "currency_type": "JPY",
+                               "payment_method": 0, "transfers": 0, "agency_id": agency_id})
+                fr.append({"fare_id": fid, "route_id": rid, "origin_id": None,
+                           "destination_id": None, "contains_id": None})
     elif fares:
         for f in fares:
             cat = str(f.get("category") or "").strip()

@@ -742,7 +742,7 @@ function renderFareMatrix() {
     const fattr = data["fare_attributes.txt"] || [];
     const items = flat.map(r => {
       const fa = fattr.find(f => f.fare_id === r.fare_id);
-      return { cat: r.fare_id, price: fa ? fa.price : "?" };
+      return { cat: String(r.fare_id).replace(/[_-]?\d+$/, ""), price: fa ? fa.price : "?" };
     });
     document.getElementById("fareSummary").innerHTML = `<strong style="color:${routeColor(rid)}">${routeName(rid)}</strong>　全区間均一料金`;
     if (items.length === 1) {

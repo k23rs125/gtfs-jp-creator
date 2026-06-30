@@ -393,6 +393,12 @@ if ss().get("decision_spec"):
                   "phone": "電話", "url": "URL"}
         st.info("🔎 PDF/Excel から検出した項目を下に**初期入力（要確認）**しました。原典と照合してください: "
                 + " ／ ".join(f"{labels.get(k, k)}「{_ev[k]}」" for k in _ev))
+    # 複数の異なる運賃を検出（路線で違う可能性）→ 単一自動入力せず、候補を提示して路線ごとに割り当てさせる
+    _multi_fare = det.get("fare_multiple") and len(_routes_now) > 1
+    if det.get("fare_candidates"):
+        st.warning("💴 PDF に複数の運賃候補がありました（路線で異なる可能性）。"
+                   + "／".join(f"{c['category']}{c['price']}円" for c in det["fare_candidates"])
+                   + " — 下の**路線ごとの運賃**で割り当ててください（勝手に1つを全路線に適用しません）。")
     _days_def = det.get("days") or [1, 1, 1, 1, 1, 0, 0]
     with st.form("conditions"):
         c1, c2, c3 = st.columns(3)
@@ -402,14 +408,30 @@ if ss().get("decision_spec"):
             route_name = ""  # 多路線は②の割り当てで路線名を設定
             c1.caption("路線名は②で設定済み: " + " / ".join(r["route_long_name"] for r in _routes_now))
         muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県", help="P11の都道府県/市域制約に使用")
-        c1.write("運賃（区分別・円。0は未設定。PDF記載は検出して初期入力）")
-        fc1, fc2, fc3 = c1.columns(3)
-        fare_adult = fc1.number_input("大人", min_value=0, value=int(det.get("fare_adult", 0)), step=10, key=f"fa_{tk}")
-        fare_child = fc2.number_input("小児", min_value=0, value=int(det.get("fare_child", 0)), step=10, key=f"fc_{tk}")
-        fare_disabled = fc3.number_input("障がい者", min_value=0, value=int(det.get("fare_disabled", 0)), step=10, key=f"fd_{tk}")
+        if len(_routes_now) == 1:
+            c1.write("運賃（区分別・円。0は未設定。PDF記載は検出して初期入力）")
+            fc1, fc2, fc3 = c1.columns(3)
+            fare_adult = fc1.number_input("大人", min_value=0, value=int(det.get("fare_adult") or 0), step=10, key=f"fa_{tk}")
+            fare_child = fc2.number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"fc_{tk}")
+            fare_disabled = fc3.number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"fd_{tk}")
+        else:
+            fare_adult = fare_child = fare_disabled = 0
+            c1.caption("運賃は下の『路線ごとの運賃』で入力（路線で違う場合に対応）")
         zone_fare = c1.checkbox("区間運賃にする（距離制。下のCSVを優先）")
         zone_csv = c1.text_area("区間運賃 CSV（出発,到着,運賃）", value="", height=80,
                                 help="区間運賃のときだけ記入。1行=1区間、停留所名で。例: 直方駅,市役所前,200")
+        # 路線別運賃（多路線で運賃が違う場合）。検出が単一区分はその値を各路線の既定に。
+        rfares_in = {}
+        if len(_routes_now) > 1:
+            st.markdown("**路線ごとの運賃（円・0は未設定）**")
+            for r in _routes_now:
+                rid = r["route_id"]; rnm = r.get("route_long_name", rid)
+                pcols = st.columns([3, 1, 1, 1])
+                pcols[0].markdown(f"<div style='padding-top:8px'>{rnm}</div>", unsafe_allow_html=True)
+                ra = pcols[1].number_input("大人", min_value=0, value=int(det.get("fare_adult") or 0), step=10, key=f"rfa_{rid}_{tk}")
+                rch = pcols[2].number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"rfc_{rid}_{tk}")
+                rdi = pcols[3].number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"rfd_{rid}_{tk}")
+                rfares_in[rid] = (ra, rch, rdi)
         ag_name = c2.text_input("事業者名", value="")
         ag_id = c2.text_input("法人番号（不明なら空）", value="")
         ag_url = c2.text_input("URL", value=det.get("url", ""), key=f"url_{tk}")
@@ -507,8 +529,18 @@ if ss().get("decision_spec"):
                 pr = parts[2].lstrip("¥￥円 ") if len(parts) >= 3 else ""
                 if len(parts) >= 3 and parts[0] and parts[1] and pr.isdigit():
                     fare_matrix.append({"from": parts[0], "to": parts[1], "price": int(pr)})
+        # 路線別運賃（多路線で各路線に1つでも運賃が入っていれば採用）
+        route_fares = {}
+        for rid, (ra, rch, rdi) in rfares_in.items():
+            lst = [{"category": c, "price": int(p)} for c, p in
+                   (("大人", ra), ("小児", rch), ("障がい者", rdi)) if p > 0]
+            if lst:
+                route_fares[rid] = lst
+        # 優先順位: 区間運賃 > 路線別運賃 > 全路線一律(区分別)
         if fare_matrix:
-            spec["fare_matrix"] = fare_matrix   # 区間運賃（均一より優先）
+            spec["fare_matrix"] = fare_matrix
+        elif route_fares:
+            spec["route_fares"] = route_fares
         else:
             fares = [{"category": c, "price": int(p)} for c, p in
                      (("大人", fare_adult), ("小児", fare_child), ("障がい者", fare_disabled)) if p > 0]
@@ -523,7 +555,8 @@ if ss().get("decision_spec"):
         # 路線名以外がほぼ未入力なら、暫定の既定値（捏造なし）で生成してよいか確認してから生成。
         minimal = (not ag_name.strip() and not ag_id.strip() and not ag_url.strip()
                    and not ag_phone.strip() and fare_adult == 0 and fare_child == 0
-                   and fare_disabled == 0 and not (zone_fare and zone_csv.strip())
+                   and fare_disabled == 0 and not route_fares
+                   and not (zone_fare and zone_csv.strip())
                    and not start.strip() and not end.strip()
                    and not (hol_syuku or hol_nenmatsu or hol_obon))
         if minimal:

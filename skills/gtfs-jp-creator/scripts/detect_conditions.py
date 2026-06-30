@@ -54,27 +54,31 @@ def detect(text: str) -> dict:
     res, ev = {}, {}
     t = text.replace("　", " ")
 
-    # --- 運賃（円が明示されているものだけ） ---
-    def yen_near(keys):
+    # --- 運賃（円が明示されているものだけ。路線で運賃が違う場合に備え「全候補」を集める） ---
+    def yen_all(keys):
+        vals = {}   # price -> evidence（重複値はまとめる）
         for k in keys:
-            m = re.search(k + r"[^\d¥￥]{0,8}[¥￥]?\s*(\d{2,4})\s*円", t)
-            if m:
-                return int(m.group(1)), m.group(0).strip()
-        return None, None
-    a, ea = yen_near([r"大人", r"おとな", r"一般", r"中学生以上", r"中学生", r"高校生以上"])
-    c, ec = yen_near([r"小児", r"こども", r"子供", r"小学生", r"小人"])
-    dis, ed = yen_near([r"障害者", r"障がい者", r"障碍者"])
-    # 区分が無く「均一/一律 ○○円」だけのときは大人として拾う
-    if a is None:
-        m = re.search(r"(均一|一律)[^\d¥￥]{0,8}[¥￥]?\s*(\d{2,4})\s*円", t)
-        if m:
-            a, ea = int(m.group(2)), m.group(0).strip()
-    if a is not None:
-        res["fare_adult"] = a; ev["fare_adult"] = ea
-    if c is not None:
-        res["fare_child"] = c; ev["fare_child"] = ec
-    if dis is not None:
-        res["fare_disabled"] = dis; ev["fare_disabled"] = ed
+            for m in re.finditer(k + r"[^\d¥￥]{0,8}[¥￥]?\s*(\d{2,4})\s*円", t):
+                vals.setdefault(int(m.group(1)), m.group(0).strip())
+        return vals
+    adult = yen_all([r"大人", r"おとな", r"一般", r"中学生以上", r"中学生", r"高校生以上"])
+    child = yen_all([r"小児", r"こども", r"子供", r"小学生", r"小人"])
+    dis = yen_all([r"障害者", r"障がい者", r"障碍者"])
+    if not adult:   # 区分が無く「均一/一律 ○○円」だけのとき大人として拾う
+        for m in re.finditer(r"(均一|一律)[^\d¥￥]{0,8}[¥￥]?\s*(\d{2,4})\s*円", t):
+            adult.setdefault(int(m.group(2)), m.group(0).strip())
+    # 区分ごとに「1種類だけ」なら採用、複数あれば採用せず候補に回す（＝勝手に1つに決めない）
+    for key, d in (("fare_adult", adult), ("fare_child", child), ("fare_disabled", dis)):
+        if len(d) == 1:
+            p = next(iter(d)); res[key] = p; ev[key] = d[p]
+    cands = []
+    for cat, d in (("大人", adult), ("小児", child), ("障がい者", dis)):
+        for p, e in sorted(d.items()):
+            cands.append({"category": cat, "price": p, "evidence": e})
+    if cands:
+        res["fare_candidates"] = cands
+    # いずれかの区分で複数の異なる運賃 → 路線で異なる可能性（単一自動入力しない目印）
+    res["fare_multiple"] = any(len(d) > 1 for d in (adult, child, dis))
 
     # --- 運行曜日 ---
     days = None
