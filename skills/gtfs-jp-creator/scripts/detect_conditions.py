@@ -1,0 +1,141 @@
+# -*- coding: utf-8 -*-
+"""時刻表ファイルの原文から、PDF/Excelに「書かれている」条件を保守的に検出する。
+
+目的: ③条件確認で，書かれている項目は候補として自動入力し（要確認）, 無い項目だけ人が入れる。
+誤検出を避けるため**確信度の高いパターンのみ**拾う。事業者名・法人番号・路線名は取り違えリスクが
+高いので**検出しない**（人が入力）。確定は必ず人（正しく失敗の原則）。
+
+入力: .pdf(テキスト) / .xlsx / .md / .txt
+出力: {fare_adult, fare_child, fare_disabled, days[7], holiday_syukujitsu, holiday_nenmatsu,
+       holiday_obon, start_date, end_date, phone, url, _evidence{...}}
+使い方: python detect_conditions.py <file> -o conditions.json
+"""
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+
+def _read_text(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext in (".md", ".txt"):
+        return path.read_text(encoding="utf-8", errors="replace")
+    if ext == ".xlsx":
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+            out = []
+            for ws in wb.worksheets:
+                for row in ws.iter_rows(values_only=True):
+                    for c in row:
+                        if c is not None:
+                            out.append(str(c))
+            return "\n".join(out)
+        except Exception:
+            return ""
+    if ext == ".pdf":
+        try:
+            import pdfplumber
+            with pdfplumber.open(path) as pdf:
+                return "\n".join((p.extract_text() or "") for p in pdf.pages)
+        except Exception:
+            return ""
+    return ""
+
+
+def _to_ymd(g):
+    """(era/year, month, day) tuple → YYYYMMDD。令和=R/令和 のみ対応（保守的）。"""
+    y, m, d = g
+    return f"{int(y):04d}{int(m):02d}{int(d):02d}"
+
+
+def detect(text: str) -> dict:
+    res, ev = {}, {}
+    t = text.replace("　", " ")
+
+    # --- 運賃（円が明示されているものだけ） ---
+    def yen_near(keys):
+        for k in keys:
+            m = re.search(k + r"[^\d¥￥]{0,8}[¥￥]?\s*(\d{2,4})\s*円", t)
+            if m:
+                return int(m.group(1)), m.group(0).strip()
+        return None, None
+    a, ea = yen_near([r"大人", r"おとな", r"一般", r"中学生以上", r"中学生", r"高校生以上"])
+    c, ec = yen_near([r"小児", r"こども", r"子供", r"小学生", r"小人"])
+    dis, ed = yen_near([r"障害者", r"障がい者", r"障碍者"])
+    # 区分が無く「均一/一律 ○○円」だけのときは大人として拾う
+    if a is None:
+        m = re.search(r"(均一|一律)[^\d¥￥]{0,8}[¥￥]?\s*(\d{2,4})\s*円", t)
+        if m:
+            a, ea = int(m.group(2)), m.group(0).strip()
+    if a is not None:
+        res["fare_adult"] = a; ev["fare_adult"] = ea
+    if c is not None:
+        res["fare_child"] = c; ev["fare_child"] = ec
+    if dis is not None:
+        res["fare_disabled"] = dis; ev["fare_disabled"] = ed
+
+    # --- 運行曜日 ---
+    days = None
+    if re.search(r"毎日\s*運行|年中無休", t):
+        days = [1, 1, 1, 1, 1, 1, 1]; ev["days"] = "毎日運行"
+    elif re.search(r"(土曜?・?日曜?・?祝|土日祝|土・日|土日).{0,6}(運休|を?除く|運行なし)", t):
+        days = [1, 1, 1, 1, 1, 0, 0]; ev["days"] = "土日祝運休"
+    elif re.search(r"平日.{0,4}(のみ|だけ|運行)", t):
+        days = [1, 1, 1, 1, 1, 0, 0]; ev["days"] = "平日のみ"
+    if days:
+        res["days"] = days
+
+    # --- 運休日（祝日/年末年始/お盆） ---
+    if re.search(r"祝(日|祭日)?.{0,6}運休|祝日.{0,4}(を?除く|お休み)", t):
+        res["holiday_syukujitsu"] = True; ev["holiday_syukujitsu"] = "祝日運休"
+    if re.search(r"年末年始.{0,6}運休|年末年始.{0,4}(を?除く|休)", t):
+        res["holiday_nenmatsu"] = True; ev["holiday_nenmatsu"] = "年末年始運休"
+    if re.search(r"(お盆|盆).{0,6}運休|(お盆|盆).{0,4}(を?除く|休)", t):
+        res["holiday_obon"] = True; ev["holiday_obon"] = "お盆運休"
+
+    # --- 有効期間（令和/西暦の日付。範囲があれば start/end） ---
+    def find_dates():
+        out = []
+        for m in re.finditer(r"(?:令和|R)\s*(\d{1,2})[\.\-年/]\s*(\d{1,2})[\.\-月/]\s*(\d{1,2})", t):
+            y = 2018 + int(m.group(1))  # 令和元年=2019 → R1=2019, 2018+1
+            out.append(f"{y:04d}{int(m.group(2)):02d}{int(m.group(3)):02d}")
+        for m in re.finditer(r"(20\d{2})[\.\-年/]\s*(\d{1,2})[\.\-月/]\s*(\d{1,2})", t):
+            out.append(f"{int(m.group(1)):04d}{int(m.group(2)):02d}{int(m.group(3)):02d}")
+        return out
+    dates = find_dates()
+    if dates:
+        res["start_date"] = dates[0]; ev["start_date"] = dates[0]
+        if len(dates) >= 2 and dates[-1] != dates[0]:
+            res["end_date"] = dates[-1]; ev["end_date"] = dates[-1]
+
+    # --- 電話 / URL ---
+    mp = re.search(r"0\d{1,4}[-(\s]\d{1,4}[-)\s]\d{3,4}", t)
+    if mp:
+        res["phone"] = re.sub(r"[()\s]", "-", mp.group(0)).strip("-"); ev["phone"] = mp.group(0)
+    mu = re.search(r"https?://[^\s　」）)]+", t)
+    if mu:
+        res["url"] = mu.group(0); ev["url"] = mu.group(0)
+
+    res["_evidence"] = ev
+    return res
+
+
+def main():
+    ap = argparse.ArgumentParser(description="原文からPDF記載条件を保守的に検出")
+    ap.add_argument("input")
+    ap.add_argument("-o", "--output", default=None)
+    a = ap.parse_args()
+    text = _read_text(Path(a.input))
+    res = detect(text)
+    if a.output:
+        Path(a.output).write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+    ev = res.get("_evidence", {})
+    print(f"[OK] 検出 {len(ev)} 項目")
+    for k, v in ev.items():
+        print(f"  {k}: {res.get(k)}  ← '{v}'")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

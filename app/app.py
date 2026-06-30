@@ -90,6 +90,10 @@ def do_extract(src):
         ss().extract_token = str(src)
         for k in ("decision_spec", "result", "confirmed"):
             ss().pop(k, None)
+        # PDF/Excelに「書かれている」条件を検出し、③に候補として初期入力する（要確認）。
+        cond_out = WORK / "conditions.json"
+        run([SCRIPTS / "detect_conditions.py", src, "-o", cond_out])
+        ss().detected = json.loads(cond_out.read_text(encoding="utf-8")) if cond_out.exists() else {}
         st.success("抽出しました。")
     else:
         st.error("抽出に失敗しました。\n" + se[-800:])
@@ -350,6 +354,17 @@ if ss().get("decision_spec"):
             _loop = True
             break
     _routes_now = ss()["decision_spec"]["routes"]
+    det = ss().get("detected", {}) or {}
+    tk = ss().get("extract_token", "")
+    _ev = det.get("_evidence", {})
+    if _ev:
+        labels = {"fare_adult": "大人運賃", "fare_child": "小児運賃", "fare_disabled": "障がい者運賃",
+                  "days": "運行曜日", "holiday_syukujitsu": "祝日運休", "holiday_nenmatsu": "年末年始運休",
+                  "holiday_obon": "お盆運休", "start_date": "有効期間開始", "end_date": "有効期間終了",
+                  "phone": "電話", "url": "URL"}
+        st.info("🔎 PDF/Excel から検出した項目を下に**初期入力（要確認）**しました。原典と照合してください: "
+                + " ／ ".join(f"{labels.get(k, k)}「{_ev[k]}」" for k in _ev))
+    _days_def = det.get("days") or [1, 1, 1, 1, 1, 0, 0]
     with st.form("conditions"):
         c1, c2, c3 = st.columns(3)
         if len(_routes_now) == 1:
@@ -358,18 +373,18 @@ if ss().get("decision_spec"):
             route_name = ""  # 多路線は②の割り当てで路線名を設定
             c1.caption("路線名は②で設定済み: " + " / ".join(r["route_long_name"] for r in _routes_now))
         muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県", help="P11の都道府県/市域制約に使用")
-        c1.write("運賃（区分別・円。0は未設定）")
+        c1.write("運賃（区分別・円。0は未設定。PDF記載は検出して初期入力）")
         fc1, fc2, fc3 = c1.columns(3)
-        fare_adult = fc1.number_input("大人", min_value=0, value=0, step=10, key="fare_adult")
-        fare_child = fc2.number_input("小児", min_value=0, value=0, step=10, key="fare_child")
-        fare_disabled = fc3.number_input("障がい者", min_value=0, value=0, step=10, key="fare_disabled")
+        fare_adult = fc1.number_input("大人", min_value=0, value=int(det.get("fare_adult", 0)), step=10, key=f"fa_{tk}")
+        fare_child = fc2.number_input("小児", min_value=0, value=int(det.get("fare_child", 0)), step=10, key=f"fc_{tk}")
+        fare_disabled = fc3.number_input("障がい者", min_value=0, value=int(det.get("fare_disabled", 0)), step=10, key=f"fd_{tk}")
         zone_fare = c1.checkbox("区間運賃にする（距離制。下のCSVを優先）")
         zone_csv = c1.text_area("区間運賃 CSV（出発,到着,運賃）", value="", height=80,
                                 help="区間運賃のときだけ記入。1行=1区間、停留所名で。例: 直方駅,市役所前,200")
         ag_name = c2.text_input("事業者名", value="")
         ag_id = c2.text_input("法人番号（不明なら空）", value="")
-        ag_url = c2.text_input("URL", value="")
-        ag_phone = c2.text_input("電話", value="")
+        ag_url = c2.text_input("URL", value=det.get("url", ""), key=f"url_{tk}")
+        ag_phone = c2.text_input("電話", value=det.get("phone", ""), key=f"tel_{tk}")
         is_circular = c3.checkbox("循環路線（始点に戻る）", value=_loop,
                                   help="始点=終点を検出すると自動でチェック。違えば外してください。")
         headsign = c3.text_input("行き先表示（方向名）", value="",
@@ -377,15 +392,19 @@ if ss().get("decision_spec"):
                                       "方向見出しが無い路線（循環など）に適用。例『循環』")
         st.write("運行する曜日")
         d = st.columns(7)
-        days = [d[i].checkbox(x, value=(i < 5)) for i, x in enumerate(["月", "火", "水", "木", "金", "土", "日"])]
+        days = [d[i].checkbox(x, value=bool(_days_def[i]), key=f"day{i}_{tk}")
+                for i, x in enumerate(["月", "火", "水", "木", "金", "土", "日"])]
         c4, c5 = st.columns(2)
-        start = c4.text_input("有効期間 開始 (YYYYMMDD)", value="")
-        end = c5.text_input("有効期間 終了 (YYYYMMDD)", value="")
+        start = c4.text_input("有効期間 開始 (YYYYMMDD)", value=det.get("start_date", ""), key=f"st_{tk}")
+        end = c5.text_input("有効期間 終了 (YYYYMMDD)", value=det.get("end_date", ""), key=f"en_{tk}")
         st.write("運休日（祝日・年末年始・お盆。該当する場合のみチェック）")
         h1, h2, h3 = st.columns(3)
-        hol_syuku = h1.checkbox("祝日は運休", help="内閣府の祝日データ（同梱・〜2027年）で祝日を運休に展開")
-        hol_nenmatsu = h2.checkbox("年末年始運休", help="12/29〜1/3 を運休に展開")
-        hol_obon = h3.checkbox("お盆運休", help="8/13〜8/15 を運休に展開")
+        hol_syuku = h1.checkbox("祝日は運休", value=bool(det.get("holiday_syukujitsu")), key=f"hs_{tk}",
+                                help="内閣府の祝日データ（同梱・〜2027年）で祝日を運休に展開")
+        hol_nenmatsu = h2.checkbox("年末年始運休", value=bool(det.get("holiday_nenmatsu")), key=f"hn_{tk}",
+                                   help="12/29〜1/3 を運休に展開")
+        hol_obon = h3.checkbox("お盆運休", value=bool(det.get("holiday_obon")), key=f"ho_{tk}",
+                               help="8/13〜8/15 を運休に展開")
         use_nom = st.checkbox("Nominatim 補完を使う（POI多い路線向け・遅い）", value=False)
         submitted = st.form_submit_button("GTFS-JP を生成する", type="primary")
 
