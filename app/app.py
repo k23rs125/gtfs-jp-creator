@@ -540,6 +540,16 @@ if ss().get("decision_spec"):
                    + "／".join(f"{c['category']}{c['price']}円" for c in det["fare_candidates"])
                    + " — 下の**路線ごとの運賃**で割り当ててください（勝手に1つを全路線に適用しません）。")
     _days_def = det.get("days") or [1, 1, 1, 1, 1, 0, 0]
+    # 区間運賃（停留所ごと・区間ごとに運賃が違う）。st.form内ではトグルで表示を
+    # 切り替えられないため、トグルはフォーム外に置き、ON時だけフォーム内に表を出す。
+    _stops_all = []
+    for _b in ss().extract.get("blocks", []):
+        for _s in _b.get("stops", []):
+            _nm = _s.get("name")
+            if _nm and _nm not in _stops_all:
+                _stops_all.append(_nm)
+    zone_fare = st.checkbox("区間運賃にする（停留所ごと・区間ごとに運賃が違う）", key=f"zonechk_{tk}",
+                            help="チェックすると③の中に『区間運賃の表（発×着）』が出ます。区間ごとに金額を入れます。")
     with st.form("conditions"):
         c1, c2, c3 = st.columns(3)
         if len(_routes_now) == 1:
@@ -560,9 +570,21 @@ if ss().get("decision_spec"):
         else:
             fare_adult = fare_child = fare_disabled = 0
             c1.caption("運賃は下の『路線ごとの運賃』で入力（路線で違う場合に対応）")
-        zone_fare = c1.checkbox("区間運賃にする（距離制。下のCSVを優先）")
-        zone_csv = c1.text_area("区間運賃 CSV（出発,到着,運賃）", value="", height=80,
-                                help="区間運賃のときだけ記入。1行=1区間、停留所名で。例: 直方駅,市役所前,200")
+        zone_df = None
+        zone_symmetric = False
+        if zone_fare and _stops_all:
+            st.markdown("**区間運賃の表（行＝発／列＝着。金額を入力、空欄＝設定なし）**")
+            zone_symmetric = st.checkbox("往復同額（A→BとB→Aを同額にする）", value=True, key=f"zsym_{tk}")
+            _zbase = pd.DataFrame([[None] * len(_stops_all) for _ in _stops_all],
+                                  index=_stops_all, columns=_stops_all)
+            _zbase.insert(0, "発／着", _stops_all)
+            _zcfg = {"発／着": st.column_config.TextColumn("発／着", disabled=True)}
+            for _c in _stops_all:
+                _zcfg[_c] = st.column_config.NumberColumn(_c, min_value=0, step=10, format="%d")
+            zone_df = st.data_editor(_zbase, hide_index=True, key=f"zonedf_{tk}",
+                                     column_config=_zcfg, use_container_width=False)
+            st.caption(f"{len(_stops_all)}停留所。対角（同一停留所）は空欄でOK。"
+                       "Excelの表をコピーしてセルに貼り付けもできます。乗れる区間だけの入力でも構いません。")
         # 路線別運賃（多路線で運賃が違う場合）。検出が単一区分はその値を各路線の既定に。
         rfares_in = {}
         if len(_routes_now) > 1:
@@ -694,12 +716,26 @@ if ss().get("decision_spec"):
         spec["services"] = list(services.values())
         spec["block_service"] = block_service
         fare_matrix = []
-        if zone_fare and zone_csv.strip():
-            for line in zone_csv.splitlines():
-                parts = [p.strip() for p in line.replace("、", ",").split(",")]
-                pr = parts[2].lstrip("¥￥円 ") if len(parts) >= 3 else ""
-                if len(parts) >= 3 and parts[0] and parts[1] and pr.isdigit():
-                    fare_matrix.append({"from": parts[0], "to": parts[1], "price": int(pr)})
+        if zone_fare and zone_df is not None:
+            for i, orig in enumerate(_stops_all):
+                for dest in _stops_all:
+                    if dest == orig:
+                        continue
+                    v = zone_df.iloc[i][dest]
+                    sv = str(v).strip()
+                    if sv in ("", "nan", "None", "<NA>"):
+                        continue
+                    try:
+                        pr = int(float(sv))
+                    except ValueError:
+                        continue
+                    if pr > 0:
+                        fare_matrix.append({"from": orig, "to": dest, "price": pr})
+            if zone_symmetric:   # 対称補完: 片方向だけ入っていれば逆向きも同額で足す
+                have = {(m["from"], m["to"]): m["price"] for m in fare_matrix}
+                for (a, b), pr in list(have.items()):
+                    if (b, a) not in have:
+                        fare_matrix.append({"from": b, "to": a, "price": pr})
         # 路線別運賃（多路線で各路線に1つでも運賃が入っていれば採用）
         route_fares = {}
         for rid, (ra, rch, rdi) in rfares_in.items():
@@ -738,7 +774,7 @@ if ss().get("decision_spec"):
                    and not ag_addr.strip() and not ag_pres_pos.strip() and not ag_pres_name.strip()
                    and fare_adult == 0 and fare_child == 0
                    and fare_disabled == 0 and not route_fares
-                   and not (zone_fare and zone_csv.strip())
+                   and not (zone_fare and fare_matrix)
                    and not start.strip() and not end.strip()
                    and not (hol_syuku or hol_nenmatsu or hol_obon))
         if minimal:
