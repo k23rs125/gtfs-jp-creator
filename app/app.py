@@ -28,6 +28,11 @@ APPLY_DECISIONS = REPO / "apply_decisions.py"
 PY = sys.executable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_structure  # noqa: E402
+sys.path.insert(0, str(SCRIPTS))
+try:
+    from detect_time_anomalies import detect_anomalies  # 編集後の疑いをライブ再計算
+except Exception:
+    detect_anomalies = None
 
 st.set_page_config(page_title="GTFS-JP 半自動生成", page_icon="🚌", layout="wide")
 ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
@@ -315,13 +320,21 @@ if "extract" in ss():
                    + (f"OCR誤読の疑い **{n_an}件** は各表の下に列挙しています。" if n_an else "")
                    + "直したら『この時刻表で確定して反映』を押してください（自動では書き換えません）。")
         edited_blocks = {}
+        issue_tot = {"rev": 0, "inval": 0, "an": 0}
         for b in blocks_t:
             bi = b.get("block_index")
             stops = [s.get("name") for s in b.get("stops", [])]
             trips = b.get("trips", [])
             labels = []
             for j, t in enumerate(trips):
-                lab = t.get("label") or (f"{t.get('trip_number')}便" if t.get("trip_number") else f"便{j + 1}")
+                _tn = t.get("trip_number")
+                if t.get("label"):
+                    lab = str(t["label"])
+                elif _tn:
+                    _tn = str(_tn).strip()
+                    lab = _tn if "便" in _tn else f"{_tn}便"   # 「第1便」は二重付与しない
+                else:
+                    lab = f"便{j + 1}"
                 labels.append(f"{lab}#{j}")   # 重複ラベル対策に内部で一意化
             # 各便の時刻を master停留所(行)に揃える（便は master の部分列）
             per_trip = []
@@ -329,7 +342,10 @@ if "extract" in ss():
                 cells = t.get("cells", []); k = 0; mp = {}
                 for i, sn in enumerate(stops):
                     if k < len(cells) and cells[k].get("name") == sn:
-                        mp[i] = (cells[k].get("time") or "")[:5]; k += 1
+                        _tt = cells[k].get("time") or ""
+                        _mt = re.match(r"(\d{1,2}):(\d{2})", _tt)
+                        mp[i] = f"{int(_mt.group(1)):02d}:{_mt.group(2)}" if _mt else _tt[:5]
+                        k += 1
                 per_trip.append(mp)
             rows = []
             for i, sn in enumerate(stops):
@@ -346,11 +362,69 @@ if "extract" in ss():
             ed = st.data_editor(df, hide_index=True, use_container_width=True,
                                 key=f"tt_{tok}_{bi}", column_config=colcfg)
             edited_blocks[bi] = (ed, labels, stops)
-            bl_an = [a for a in anomalies if a.get("block") == bi]
-            if bl_an:
-                st.caption("⚠ OCR疑い: " + " ／ ".join(
-                    f"{a.get('trip_label')} {a['stop_name']} {a['current'][:5]}→"
-                    f"{(a['suggested'][:5] if a.get('suggested') else '要確認')}" for a in bl_an[:10]))
+            # ---- 編集内容をその場で再チェック（逆行・不正値・OCR疑い）----
+            edited_cells = []   # 便ごとの [{i,name,min,time}]
+            inval = []          # 非時刻の入力（誤入力の疑い）
+            for j, lab in enumerate(labels):
+                cs = []
+                for i in range(len(ed)):
+                    v = str(ed.iloc[i][lab]).strip()
+                    if not v or v.lower() == "nan":
+                        continue
+                    m = re.match(r"^(\d{1,2}):(\d{2})(?::\d{2})?$", v)
+                    if not m:
+                        inval.append((lab.split("#")[0], stops[i], v)); continue
+                    cs.append({"i": i, "name": stops[i],
+                               "min": int(m.group(1)) * 60 + int(m.group(2)),
+                               "time": f"{int(m.group(1)):02d}:{m.group(2)}:00"})
+                edited_cells.append(cs)
+            css = pd.DataFrame("", index=ed.index, columns=ed.columns)
+            rev = []            # 逆行セル
+            for j, cs in enumerate(edited_cells):
+                prev = None
+                for c in cs:
+                    if prev is not None and c["min"] < prev:
+                        rev.append((labels[j].split("#")[0], c["name"], c["time"][:5]))
+                        css.iloc[c["i"], ed.columns.get_loc(labels[j])] = "background-color:#ffd0d0"
+                    prev = c["min"]
+            live_an = []        # OCR誤読の疑い（編集後の値で再計算）
+            if detect_anomalies:
+                tmpb = {"block_index": bi, "trips": [
+                    {"cells": [{"name": c["name"], "time": c["time"]} for c in cs]} for cs in edited_cells]}
+                try:
+                    live_an = detect_anomalies({"blocks": [tmpb]})
+                except Exception:
+                    live_an = []
+            issue_tot["rev"] += len(rev)
+            issue_tot["inval"] += len(inval)
+            issue_tot["an"] += len(live_an)
+            msgs = []
+            if rev: msgs.append(f"🔴 時刻の逆行 {len(rev)}件")
+            if inval: msgs.append(f"⚠ 時刻でない値 {len(inval)}件")
+            if live_an: msgs.append(f"🟠 OCR誤読の疑い {len(live_an)}件")
+            if msgs:
+                st.warning("　／　".join(msgs) + "　— 原典と照合して直すと自動で再チェックします。")
+                if rev:
+                    st.caption("逆行: " + " ／ ".join(f"{l} {s} {t}" for l, s, t in rev[:8])
+                               + (" ほか" if len(rev) > 8 else ""))
+                if inval:
+                    st.caption("非時刻: " + " ／ ".join(f"{l} {s}「{v}」" for l, s, v in inval[:8]))
+                if live_an:
+                    st.caption("疑い: " + " ／ ".join(
+                        f"{a['stop_name']} {a['current'][:5]}→"
+                        f"{(a['suggested'][:5] if a.get('suggested') else '要確認')}" for a in live_an[:8]))
+                if rev:
+                    with st.expander("🔴 逆行しているセルを色で表示"):
+                        st.dataframe(ed.style.apply(lambda _x: css, axis=None),
+                                     hide_index=True, use_container_width=True)
+            else:
+                st.caption("✅ 逆行なし・全セルが妥当な時刻です。")
+        if issue_tot["rev"] or issue_tot["inval"] or issue_tot["an"]:
+            st.info("反映前チェック: " + "　".join(filter(None, [
+                f"🔴 逆行 {issue_tot['rev']}件" if issue_tot["rev"] else "",
+                f"⚠ 非時刻 {issue_tot['inval']}件" if issue_tot["inval"] else "",
+                f"🟠 OCR疑い {issue_tot['an']}件" if issue_tot["an"] else ""]))
+                + " が残っています。直してから反映するのがおすすめです（このまま反映も可）。")
         if st.button("この時刻表で確定して反映", type="primary"):
             for b in blocks_t:
                 bi = b.get("block_index")
