@@ -60,19 +60,38 @@ st.caption("バス時刻表(PDF/Excel) → GTFS-JP。正確さの源は決定的
 # Step 1: アップロード → 抽出
 # =====================================================================
 st.header("① 時刻表をアップロード")
-up = st.file_uploader("バス時刻表（.xlsx / テキストPDF / OCR後の .md）", type=["xlsx", "pdf", "md"])
-st.caption("📄 文字が選べるPDF・Excelはそのまま。**画像化PDF（スキャン）は文字が無いので抽出できません** → "
-           "下のコマンドでOCRし、できた .md をアップロードしてください。")
+up = st.file_uploader("バス時刻表（.xlsx / PDF / OCR後の .md）", type=["xlsx", "pdf", "md"])
+st.caption("📄 文字が選べるPDF・Excelはそのまま抽出。**画像化PDF（スキャン）**は、"
+           "抽出するとアプリ内で**OCRして続行するボタン**が出ます（ターミナル不要）。")
 
 
-def _ocr_hint(src):
-    cmd = (f'python skills/gtfs-jp-creator/scripts/pdf_to_markdown.py "{src}" '
-           f'--engine mineru --lang japan -o out.md')
-    st.warning("この時刻表は**画像化PDF（文字情報なし）**でした。テキスト方式では抽出できません。\n\n"
-               "**OCRで文字起こし**してから、できた `out.md` を①に再アップロードしてください"
-               "（OCRはCPUだと数分〜数十分かかるため、アプリ外で実行します）:")
-    st.code(cmd, language="bash")
-    st.caption("OCRは誤読が起きます。取り込み後は必ず原典と目視照合してください。")
+def render_ocr_panel():
+    """画像化PDFが検出されたとき、アプリ内でOCR(MinerU)を実行して続行できるパネル。
+    ターミナル作業なしで『画像PDF→OCR→抽出』を一気通貫にする。"""
+    src = ss().get("ocr_pending")
+    if not src:
+        return
+    st.warning("この時刻表は**画像化PDF（文字情報なし）**でした。"
+               "下のボタンで**アプリ内でOCR（文字起こし）して続行**できます。")
+    st.caption("⏳ OCRはCPUだと数分〜数十分かかります（GPUなら数分）。"
+               "MinerU pipeline（数字に強い）で実行します。OCRは誤読が起きるので、"
+               "取り込み後に**時刻表の確認・修正**で原典と照合してください。")
+    if st.button("🔎 アプリ内でOCRして続行する", type="primary"):
+        md_out = WORK / "ocr.md"
+        with st.spinner("OCR実行中…（画像PDFの文字起こし。時間がかかります）"):
+            rc, so, se = run([SCRIPTS / "pdf_to_markdown.py", src,
+                              "--engine", "mineru", "--lang", "japan", "-o", md_out])
+        if rc == 0 and md_out.exists():
+            ss().pop("ocr_pending", None)
+            do_extract(md_out)              # OCR結果の .md から抽出して続行
+            st.rerun()
+        else:
+            st.error("OCRに失敗しました。MinerU未導入の可能性があります"
+                     "（`pip install -U \"mineru[core]\"`）。\n" + (se or "")[-800:])
+            with st.expander("手動でOCRする場合のコマンド"):
+                st.code(f'python skills/gtfs-jp-creator/scripts/pdf_to_markdown.py "{src}" '
+                        f'--engine mineru --lang japan -o out.md', language="bash")
+                st.caption("できた out.md を①に再アップロードしてください。")
 
 
 def do_extract(src):
@@ -84,12 +103,13 @@ def do_extract(src):
         rc, so, se = run([SCRIPTS / "extract_timetable_markdown.py", src, "-o", ext_out])
     else:
         rc, so, se = run([SCRIPTS / "extract_timetable_coords.py", src, "-o", ext_out])
+    ss().pop("ocr_pending", None)   # 新しい抽出のたびに前回のOCR待ちを消す
     if rc == 0 and ext_out.exists():
         ex = json.loads(ext_out.read_text(encoding="utf-8"))
-        # 画像化PDFで0停留所 → OCR経路へ誘導（空のまま進めない）
+        # 画像化PDFで0停留所 → アプリ内OCRへ誘導（空のまま進めない）
         if not ex.get("blocks") and any(n.get("type") == "image_pdf_use_ocr"
                                         for n in ex.get("needs_confirmation", [])):
-            _ocr_hint(src)
+            ss()["ocr_pending"] = str(src)   # 下のOCRパネルで実行する
             return
         ss().extract = ex
         ss().extract_token = str(src)
@@ -151,6 +171,9 @@ if c_c.button("築城巡回線（循環・変則便）"):
     do_extract(SAMPLES / "sample_tsuiki_junkai.xlsx")
 if c_d.button("こがバス（画像PDF→OCR）"):
     do_extract(SAMPLES / "sample_koga_ocr.md")
+
+# 画像化PDFが検出されたら、アプリ内でOCRして続行できるパネルを出す
+render_ocr_panel()
 
 if "extract" in ss():
     ex = ss().extract
