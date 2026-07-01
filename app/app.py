@@ -57,9 +57,60 @@ if "work" not in ss():
     ss().work = tempfile.mkdtemp(prefix="gtfsapp_")
 WORK = Path(ss().work)
 
+# 一時保存（自動）＋復元。保存先はこのPCの安定フォルダ（セッション用tempとは別）。
+# 復元は「開いたとき1クリック」にして、勝手に古い状態が出る事故を防ぐ（折衷案）。
+AUTOSAVE_DIR = Path.home() / ".gtfs_jp_app"
+AUTOSAVE_FILE = AUTOSAVE_DIR / "autosave.json"
+# 保存する作業一式（費用の高い手作業＝抽出・時刻修正・路線割当・確定座標・検出・原本）。
+# ③の入力欄(事業者/運賃/曜日)はウィジェット値なので復元対象外＝再入力（軽い）。
+SAVE_KEYS = ["extract", "extract_token", "decision_spec", "detected", "confirmed", "source_display"]
+
+
+def autosave():
+    if not ss().get("extract"):
+        return
+    try:
+        payload = {k: ss().get(k) for k in SAVE_KEYS if ss().get(k) is not None}
+        AUTOSAVE_DIR.mkdir(parents=True, exist_ok=True)
+        AUTOSAVE_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def restore_prompt():
+    """起動時、前回の自動保存があれば『続きから復元/新規』を出す（extract未読込のときのみ）。"""
+    if ss().get("extract") or ss().get("_restore_dismissed"):
+        return
+    if not AUTOSAVE_FILE.exists():
+        return
+    try:
+        mt = datetime.datetime.fromtimestamp(AUTOSAVE_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        mt = ""
+    st.info(f"💾 前回の作業（{mt}）が自動保存されています。続きから再開できます"
+            "（③の運賃・曜日・事業者などの入力欄は再入力になります）。")
+    c1, c2, _ = st.columns([1, 1, 3])
+    if c1.button("前回の続きから復元する", type="primary"):
+        try:
+            data = json.loads(AUTOSAVE_FILE.read_text(encoding="utf-8"))
+            for k, v in data.items():
+                ss()[k] = v
+            ss()["_restore_dismissed"] = True
+            st.rerun()
+        except Exception as e:
+            st.error("復元に失敗しました: " + str(e))
+    if c2.button("新規で始める"):
+        ss()["_restore_dismissed"] = True
+        st.rerun()
+
+
 st.title("🚌 GTFS-JP 半自動生成アプリ")
 st.caption("バス時刻表(PDF/Excel) → GTFS-JP。正確さの源は決定的スクリプト、"
            "LLMは構造化の判断のみ、無い情報は推測せず確認フォームで入力（正しく失敗）。")
+
+restore_prompt()   # 前回の自動保存があれば「続きから復元/新規」を提示
+if ss().get("extract"):
+    st.caption("💾 作業は自動保存されています（タブを閉じても、次に開くと『続きから復元』できます）。")
 
 # =====================================================================
 # Step 1: アップロード → 抽出
@@ -1087,3 +1138,6 @@ if ss().get("result"):
         components.html(html, height=820, scrolling=True)
         st.download_button("⬇ GTFSビューア(HTML)をダウンロード", html.encode("utf-8"),
                            "gtfs_viewer.html", mime="text/html")
+
+# 画面描画の最後に、現在の作業状態を自動保存（節目ごと＝実質ほぼ毎回の確定状態）。
+autosave()
