@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
   :root {
     --bg: #f8f6f0;
@@ -217,6 +218,7 @@
   <div class="load-status">
     <span id="loadStatus">読み込み中…</span>
     <input type="file" id="filePicker" multiple accept=".txt" style="display:none">
+    <button onclick="downloadFeedZip()" title="この確認シートに表示中のGTFS-JP一式をzipで保存">⬇ GTFS一式(zip)</button>
     <button onclick="document.getElementById('filePicker').click()">ファイルを開く</button>
   </div>
   <h1>🚌 __VIEWER_TITLE__</h1>
@@ -358,6 +360,26 @@ const GTFS_FILES = [
 ];
 const DEFAULT_FOLDER = "__FEED_FOLDER__";
 const data = {};
+
+// この確認シートに埋め込まれた GTFS-JP 一式を、ブラウザ内で zip にして保存（成果物の配布用）。
+function downloadFeedZip() {
+  const src = window.__GTFS_DATA__ || {};
+  const files = Object.keys(src).filter(f => src[f] != null && String(src[f]).length);
+  if (!files.length) { alert("埋め込みGTFSデータが見つかりません。"); return; }
+  if (typeof JSZip === "undefined") {
+    alert("zip生成ライブラリを読み込めませんでした（オフライン等）。個別ファイルを保存する場合は各タブから確認してください。");
+    return;
+  }
+  const zip = new JSZip();
+  for (const f of files) zip.file(f, String(src[f]));
+  zip.generateAsync({ type: "blob" }).then(blob => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "gtfs-jp.zip";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  });
+}
 
 let map = null;
 let mapLayers = {};
