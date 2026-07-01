@@ -385,7 +385,8 @@ if "extract" in ss():
                 for c in cs:
                     if prev is not None and c["min"] < prev:
                         rev.append((labels[j].split("#")[0], c["name"], c["time"][:5]))
-                        css.iloc[c["i"], ed.columns.get_loc(labels[j])] = "background-color:#ffd0d0"
+                        css.iloc[c["i"], ed.columns.get_loc(labels[j])] = \
+                            "background-color:#c62828;color:#ffffff;font-weight:700"
                     prev = c["min"]
             live_an = []        # OCR誤読の疑い（編集後の値で再計算）
             if detect_anomalies:
