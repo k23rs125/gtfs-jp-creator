@@ -52,11 +52,17 @@ config フォーマット（JSON）:
       "translations_en_json": "test_demo/kogashi_en.json",
       "holiday_nenmatsu": "12-29:01-03",
       "holiday_syukujitsu": "syukujitsu.csv",
+      "timetable_review_dir": "review/",
+      "decision_json": "test_demo/kogashi_decision.json",
       "validate": true
     }
 
     必須: feed_name, input_json, output_dir
     任意: それ以外（無ければ該当 Step をスキップ）
+
+    時刻修正: timetable_review_dir に export_timetable_review.py が出した修正済みCSVの
+    フォルダを指定すると、構造化前に extract の時刻へ反映する。stop_times に効かせるには
+    decision_json（decision-spec）も指定して修正後の抽出から再構造化する（無指定時は警告）。
 
 License: Apache 2.0
 """
@@ -176,6 +182,43 @@ def main() -> int:
     if not args.dry_run:
         output_dir.mkdir(parents=True, exist_ok=True)
         work_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---- 時刻修正CSV(export_timetable_review)があれば構造化前に反映 ----
+    # 修正は extract 段階で反映しないと stop_times に届かない。decision_json が
+    # あれば修正後の抽出から再構造化して input_json(stop_times) にも反映する。
+    timetable_review_dir = cfg.get("timetable_review_dir")
+    decision_json = cfg.get("decision_json")
+    if timetable_review_dir and not args.dry_run:
+        rv = Path(timetable_review_dir)
+        if not rv.exists():
+            log(f"timetable_review_dir が見つかりません: {rv}", "WARN")
+        elif not extract_json:
+            log("extract_json 未指定のため時刻修正を適用できません", "WARN")
+        else:
+            from apply_timetable_review import apply_reviews
+            ex = json.loads(Path(extract_json).read_text(encoding="utf-8"))
+            ch, warn = apply_reviews(ex, str(rv))
+            fixed = work_dir / "extract_fixed.json"
+            fixed.write_text(json.dumps(ex, ensure_ascii=False, indent=2), encoding="utf-8")
+            extract_json = str(fixed)   # 7c/7d 照合も修正後で行う
+            log(f"時刻修正を反映: {len(ch)} セル → {fixed}")
+            for w in warn:
+                log(f"  [時刻修正・警告] {w}", "WARN")
+            if decision_json:
+                new_in = work_dir / "structured_fixed.json"
+                rc = subprocess.run(
+                    [PYTHON, str(SCRIPT_DIR.parents[2] / "apply_decisions.py"),
+                     "--extract", str(fixed), "--decisions", str(decision_json),
+                     "--out", str(new_in)], check=False)
+                if rc.returncode == 0:
+                    input_json = new_in
+                    log(f"修正後の抽出から再構造化 → {new_in}")
+                else:
+                    log("再構造化に失敗。input_json は元のまま", "WARN")
+            else:
+                log("decision_json 未指定のため stop_times は input_json のまま。"
+                    "時刻を stop_times に反映するには decision_json を指定するか "
+                    "apply_decisions --timetable-review で構造化してください。", "WARN")
 
     results: list[tuple[str, str]] = []  # (step, status)
 

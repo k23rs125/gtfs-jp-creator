@@ -26,17 +26,28 @@ decision spec（LLM出力）の例:
 agency を spec に載せると agency.txt/agency_jp.txt に反映され、fare_attributes.agency_id も
 本体 agency に一致させる（AGENCY_TBD 固定をやめ desync を防ぐ）。手書き構造化スクリプト不要。
 """
-import argparse, json
+import argparse, json, os, sys
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--extract", required=True)
     ap.add_argument("--decisions", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--timetable-review", default=None,
+                    help="修正済み時刻CSVのフォルダ。指定時は構造化の前に extract の時刻を反映")
     a = ap.parse_args()
 
     ex = json.load(open(a.extract, encoding="utf-8"))
     dec = json.load(open(a.decisions, encoding="utf-8"))
+    # 時刻修正CSV(export_timetable_review)があれば、stop_times を作る前に反映する。
+    if a.timetable_review:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "skills", "gtfs-jp-creator", "scripts"))
+        from apply_timetable_review import apply_reviews
+        ch, warn = apply_reviews(ex, a.timetable_review)
+        print(f"[時刻修正] 反映 {len(ch)} セル" + (f" / 警告 {len(warn)}件" if warn else ""))
+        for w in warn:
+            print("  [警告]", w)
     blocks = ex["blocks"]
 
     exclude_reserve = dec.get("exclude_reserve", True)
