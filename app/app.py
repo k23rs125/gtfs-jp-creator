@@ -573,8 +573,12 @@ if ss().get("decision_spec"):
         zone_df = None
         zone_symmetric = False
         if zone_fare and _stops_all:
-            st.markdown("**区間運賃の表（行＝発／列＝着。金額を入力、空欄＝設定なし）**")
-            zone_symmetric = st.checkbox("往復同額（A→BとB→Aを同額にする）", value=True, key=f"zsym_{tk}")
+            st.markdown("**区間運賃の表（行＝発／列＝着。セルに金額。空欄＝設定なし）**　"
+                        "表の右上と左下がそれぞれ**上り・下り**にあたり、別々の金額を入れられます。")
+            zone_symmetric = st.checkbox("上り・下りを同額にする（外すと方向で別料金にできる）",
+                                         value=True, key=f"zsym_{tk}",
+                                         help="ON: 片方向だけ入れれば逆向きも同額に自動補完。"
+                                              "OFF: A→B と B→A（＝上り/下り）を別々の金額で入力できます。")
             _zbase = pd.DataFrame([[None] * len(_stops_all) for _ in _stops_all],
                                   index=_stops_all, columns=_stops_all)
             _zbase.insert(0, "発／着", _stops_all)
@@ -584,7 +588,8 @@ if ss().get("decision_spec"):
             zone_df = st.data_editor(_zbase, hide_index=True, key=f"zonedf_{tk}",
                                      column_config=_zcfg, use_container_width=False)
             st.caption(f"{len(_stops_all)}停留所。対角（同一停留所）は空欄でOK。"
-                       "Excelの表をコピーしてセルに貼り付けもできます。乗れる区間だけの入力でも構いません。")
+                       "**上り・下りで運賃が違う場合は上のチェックを外し、両方向のセルに入力**してください。"
+                       "Excelの表をコピー＆貼り付けも可。乗れる区間だけの入力でも構いません。")
         # 路線別運賃（多路線で運賃が違う場合）。検出が単一区分はその値を各路線の既定に。
         rfares_in = {}
         if len(_routes_now) > 1:
