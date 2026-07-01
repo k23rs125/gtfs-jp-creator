@@ -159,8 +159,10 @@ def main():
             added += 1
 
     rows.sort(key=lambda r: (r["service_id"], r["date"]))
+    # 既存行が comment 列を持つ場合があるので保持（無ければ空）。extrasaction=ignore で安全側。
     with open(outp, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["service_id", "date", "exception_type"])
+        w = csv.DictWriter(f, fieldnames=["service_id", "date", "exception_type", "comment"],
+                           extrasaction="ignore")
         w.writeheader()
         for r in rows:
             w.writerow(r)

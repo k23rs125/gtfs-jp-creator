@@ -8,6 +8,7 @@ PDF/Excelに無いメタ情報(事業者・運行日・運賃)は推測せず条
 
 起動: streamlit run app/app.py
 """
+import datetime
 import json
 import os
 import re
@@ -633,6 +634,21 @@ if ss().get("decision_spec"):
                                    help="12/29〜1/3 を運休に展開")
         hol_obon = h3.checkbox("お盆運休", value=bool(det.get("holiday_obon")), key=f"ho_{tk}",
                                help="8/13〜8/15 を運休に展開")
+        # 個別の運行日・運休日（臨時運休・特別運行）。calendar_dates(2=運休/1=臨時運行)に積む。
+        st.write("個別の運行日・運休日（臨時運休・特別運行がある日。無ければ空でOK）")
+        _cd_base = pd.DataFrame({"日付": pd.Series([], dtype="datetime64[ns]"),
+                                 "種別": pd.Series([], dtype="object")})
+        cd_editor = st.data_editor(
+            _cd_base, num_rows="dynamic", key=f"cd_{tk}", use_container_width=False,
+            column_config={
+                "日付": st.column_config.DateColumn("日付", format="YYYY-MM-DD"),
+                "種別": st.column_config.SelectboxColumn("種別", options=["運休", "臨時運行"],
+                                                         default="運休", required=True)})
+        cdp1, cdp2, cdp3 = st.columns([1, 1.4, 1.4])
+        cd_use_period = cdp1.checkbox("期間で運休", value=False, key=f"cdp_{tk}",
+                                      help="下の開始〜終了を毎日運休に（季節運休など）")
+        cd_ps = cdp2.text_input("運休期間 開始(YYYYMMDD)", value="", key=f"cdps_{tk}")
+        cd_pe = cdp3.text_input("運休期間 終了(YYYYMMDD)", value="", key=f"cdpe_{tk}")
         # 乗降制約（降車専用＝乗車不可）。抽出でマーカーを検出したブロックのみ提示。
         # 範囲は自動で決めず、検出した停留所を初期選択にして人が確定する（正しく失敗）。
         board_sel = {}
@@ -720,6 +736,40 @@ if ss().get("decision_spec"):
                 block_service[bi] = "SVC"
         spec["services"] = list(services.values())
         spec["block_service"] = block_service
+        # 個別の運行日・運休日 → calendar_dates。運休(2)は全service、臨時運行(1)は基本SVCに付与。
+        _svc_ids = [s["service_id"] for s in spec["services"]] or ["SVC"]
+        _cal_dates, _seen_cd = [], set()
+
+        def _add_cd(ymd, etype, sids):
+            for sid in sids:
+                k = (sid, ymd, etype)
+                if k not in _seen_cd:
+                    _seen_cd.add(k)
+                    _cal_dates.append({"service_id": sid, "date": ymd, "exception_type": etype})
+        try:
+            for _, _r in cd_editor.iterrows():
+                _dv, _kind = _r.get("日付"), _r.get("種別")
+                if pd.isna(_dv) or not _kind:
+                    continue
+                _ymd = pd.Timestamp(_dv).strftime("%Y%m%d")
+                if _kind == "運休":
+                    _add_cd(_ymd, 2, _svc_ids)
+                elif _kind == "臨時運行":
+                    _add_cd(_ymd, 1, _svc_ids[:1])
+        except Exception:
+            pass
+        if cd_use_period and cd_ps.strip().isdigit() and cd_pe.strip().isdigit():
+            try:
+                _d0 = datetime.datetime.strptime(cd_ps.strip(), "%Y%m%d").date()
+                _d1 = datetime.datetime.strptime(cd_pe.strip(), "%Y%m%d").date()
+                _cur = _d0
+                while _cur <= _d1:
+                    _add_cd(_cur.strftime("%Y%m%d"), 2, _svc_ids)
+                    _cur += datetime.timedelta(days=1)
+            except Exception:
+                pass
+        if _cal_dates:
+            spec["calendar_dates"] = _cal_dates
         fare_matrix = []
         if zone_fare and zone_df is not None:
             for i, orig in enumerate(_stops_all):
@@ -781,7 +831,7 @@ if ss().get("decision_spec"):
                    and fare_disabled == 0 and not route_fares
                    and not (zone_fare and fare_matrix)
                    and not start.strip() and not end.strip()
-                   and not (hol_syuku or hol_nenmatsu or hol_obon))
+                   and not (hol_syuku or hol_nenmatsu or hol_obon) and not _cal_dates)
         if minimal:
             ss().pending_gen = {"spec": spec, "muni": muni, "use_nom": bool(use_nom), "hol": hol}
             ss().awaiting_confirm = True
