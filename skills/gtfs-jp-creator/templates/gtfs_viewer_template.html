@@ -439,9 +439,15 @@ function fmtTime(t) {
   const m = String(t).match(/^(\d+):(\d+)/);
   return m ? `${m[1].padStart(2,"0")}:${m[2]}` : t;
 }
+// route_color が空でも路線ごとに区別できる鮮やかな色を割り当てる（灰色にしない）。
+const ROUTE_PALETTE = ["#1976d2","#e53935","#2e7d32","#f57c00","#8e24aa","#00838f",
+                       "#c2185b","#4527a0","#00695c","#bf360c","#283593","#558b2f"];
 function routeColor(routeId) {
-  const r = (data["routes.txt"]||[]).find(x => x.route_id === routeId);
-  return r ? "#" + (r.route_color || "888888") : "#888";
+  const routes = data["routes.txt"] || [];
+  const idx = routes.findIndex(x => x.route_id === routeId);
+  const r = idx >= 0 ? routes[idx] : null;
+  if (r && r.route_color && /^[0-9A-Fa-f]{6}$/.test(r.route_color)) return "#" + r.route_color;
+  return ROUTE_PALETTE[(idx < 0 ? 0 : idx) % ROUTE_PALETTE.length];
 }
 function routeName(routeId) {
   const r = (data["routes.txt"]||[]).find(x => x.route_id === routeId);
@@ -529,7 +535,7 @@ function renderHome() {
   for (const t of trips) (tripsByRoute[t.route_id] = tripsByRoute[t.route_id] || []).push(t);
 
   document.getElementById("routeGrid").innerHTML = routes.map(r => {
-    const color = "#" + (r.route_color || "888888");
+    const color = routeColor(r.route_id);
     const jp = jpRoutes[r.route_id] || {};
     const tripList = tripsByRoute[r.route_id] || [];
     // ダイヤごとの便数
@@ -1051,7 +1057,8 @@ function renderMap() {
       if (!activeRouteIds.has(rid)) continue;
       const pts = grp[sid].slice().sort((a,b) => +a.shape_pt_sequence - +b.shape_pt_sequence)
         .map(p => [+p.shape_pt_lat, +p.shape_pt_lon]);
-      L.polyline(pts, { color: routeColor(rid), weight: 5, opacity: 0.8 }).addTo(shapeGroup);
+      L.polyline(pts, { color: "#ffffff", weight: 9, opacity: 0.9 }).addTo(shapeGroup);   // 白縁で下地
+      L.polyline(pts, { color: routeColor(rid), weight: 5.5, opacity: 1 }).addTo(shapeGroup);
       drawnRoutes.add(rid);
     }
     // フォールバック: shape の無い路線は、代表便(最長)の停留所を停車順に結んだ点線で経路を示す
@@ -1072,8 +1079,10 @@ function renderMap() {
       const pts = best.slice().sort((a,b) => +a.stop_sequence - +b.stop_sequence)
         .map(st => stopById[st.stop_id]).filter(Boolean)
         .map(s => [+s.stop_lat, +s.stop_lon]).filter(([a,b]) => isFinite(a) && isFinite(b));
-      if (pts.length >= 2)
-        L.polyline(pts, { color: routeColor(rid), weight: 4, opacity: 0.7, dashArray: "6,7" }).addTo(shapeGroup);
+      if (pts.length >= 2) {
+        L.polyline(pts, { color: "#ffffff", weight: 8, opacity: 0.85 }).addTo(shapeGroup);   // 白縁で下地
+        L.polyline(pts, { color: routeColor(rid), weight: 4.5, opacity: 0.95, dashArray: "6,7" }).addTo(shapeGroup);
+      }
     }
     mapLayers.shapes = shapeGroup.addTo(map);
 
