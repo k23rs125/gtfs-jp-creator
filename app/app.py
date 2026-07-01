@@ -99,9 +99,50 @@ def render_ocr_panel():
                 st.caption("できた out.md を①に再アップロードしてください。")
 
 
+def render_source_panel(where=""):
+    """アップロードした原本（PDF/画像）を編集画面の隣で見られる開閉パネル。
+    時刻・停留所・運賃を原典と横並びで照合できるようにし、誤読・誤りの見落としを減らす。"""
+    sp = ss().get("source_display")
+    if not sp or not Path(sp).exists():
+        return
+    low = sp.lower()
+    with st.expander("📄 原本（アップロードした資料）を見ながら確認する", expanded=False):
+        if low.endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")):
+            zoom = st.slider("拡大", 0.6, 2.5, 1.2, 0.2, key=f"imgzoom_{where}")
+            st.image(sp, width=int(760 * zoom))
+            return
+        if not low.endswith(".pdf"):
+            st.caption("原本プレビューはPDF・画像のみ対応です（Excel/md は元ファイルを直接ご参照ください）。")
+            return
+        try:
+            import pymupdf
+            doc = pymupdf.open(sp)
+            npages = doc.page_count
+        except Exception as e:
+            st.caption("PDFを開けませんでした: " + str(e))
+            return
+        cc = st.columns([1, 2])
+        page = int(cc[0].number_input("ページ", 1, npages, 1, key=f"srcpage_{where}")) if npages > 1 else 1
+        zoom = cc[1].slider("拡大", 0.6, 2.5, 1.2, 0.2, key=f"srczoom_{where}")
+        cache = WORK / f"srcpage_{page}.png"
+        if not cache.exists():
+            try:
+                pix = doc[page - 1].get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0))
+                pix.save(str(cache))
+            except Exception as e:
+                st.caption("ページを描画できませんでした: " + str(e))
+                return
+        st.image(str(cache), width=int(760 * zoom))
+        st.caption("原典と**時刻・停留所名・運賃**を見比べてください。OCRは誤読があります。"
+                   "違う所は上の表で直せます。")
+
+
 def do_extract(src):
     ext_out = WORK / "extract.json"
     low = str(src).lower()
+    # 原本プレビュー用に元ファイルを記録（OCR後の .md では上書きせず、元のPDF/画像を保持）。
+    if not low.endswith(".md"):
+        ss()["source_display"] = str(src)
     if low.endswith(".xlsx"):
         rc, so, se = run([SCRIPTS / "extract_timetable_excel.py", src, "-o", ext_out])
     elif low.endswith(".md"):
@@ -370,6 +411,7 @@ if "extract" in ss():
     blocks_t = ss().extract.get("blocks", [])
     if blocks_t:
         st.subheader("⏰ 時刻表の確認・修正（全便・全停留所）")
+        render_source_panel("tt")   # 原本（PDF/画像）を並べて照合できるパネル
         n_an = len(anomalies)
         st.caption("抽出した**全時刻**です。原典（紙やPDF）と見比べて、違うセルを直接直してください。"
                    "空欄＝通過。"
