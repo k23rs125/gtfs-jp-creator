@@ -33,6 +33,10 @@ try:
     from detect_time_anomalies import detect_anomalies  # 編集後の疑いをライブ再計算
 except Exception:
     detect_anomalies = None
+try:
+    from stop_name_merge import detect_variants, apply_merges, all_stop_names
+except Exception:
+    detect_variants = None
 
 st.set_page_config(page_title="GTFS-JP 半自動生成", page_icon="🚌", layout="wide")
 ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
@@ -191,6 +195,34 @@ if "extract" in ss():
         st.write(f"- block {b.get('block_index')}（{b.get('direction_hint') or '方向見出しなし'}）"
                  f": 便 {len(trips)} / 停留所 {len(full)}{tag}")
         st.caption("　順: " + " → ".join(full))
+
+    # ---- 停留所の名寄せ（表記ゆれの統合）----
+    # OCR/原本のゆれで同じ停留所が別名に割れると別 stop_id になり網・座標・運賃が崩れる。
+    # 検出して人が確定（似ていて別物もあるため自動統合はしない＝正しく失敗）。
+    if detect_variants:
+        _groups = detect_variants(all_stop_names(ex))
+        if _groups:
+            st.subheader("🔗 停留所の名寄せ（表記ゆれの確認）")
+            st.caption("同じ停留所が別表記で分かれている可能性があります。**同じなら統合**してください"
+                       "（別物ならチェックを外す）。統合すると1つの停留所にまとまります。")
+            _tk = ss().get("extract_token", "")
+            merge_map = {}
+            for gi, g in enumerate(_groups):
+                cols = st.columns([3, 2])
+                on = cols[0].checkbox("統合する：" + " ／ ".join(g["names"]),
+                                      value=True, key=f"mg_{_tk}_{gi}", help=g["reason"])
+                canon = cols[1].selectbox("正規名（残す名前）", g["names"],
+                                          key=f"mgc_{_tk}_{gi}", disabled=not on)
+                if on:
+                    for nm in g["names"]:
+                        if nm != canon:
+                            merge_map[nm] = canon
+            if st.button("この内容で名寄せを反映", type="primary", disabled=not merge_map):
+                n = apply_merges(ss().extract, merge_map)
+                for k in ("decision_spec", "result", "confirmed", "anomalies_token"):
+                    ss().pop(k, None)
+                st.success(f"名寄せを反映しました（{n}箇所を統合）。②以降が新しい停留所で組み直されます。")
+                st.rerun()
 
 # =====================================================================
 # Step 2: 路線の割り当て（多路線対応の構造化）
