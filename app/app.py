@@ -575,8 +575,15 @@ if ss().get("decision_spec"):
                 rch = pcols[2].number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"rfc_{rid}_{tk}")
                 rdi = pcols[3].number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"rfd_{rid}_{tk}")
                 rfares_in[rid] = (ra, rch, rdi)
+        c2.caption("**事業者情報**（正式提出に必要。自治体はご自身の情報を入力）")
         ag_name = c2.text_input("事業者名", value="")
-        ag_id = c2.text_input("法人番号（不明なら空）", value="")
+        ag_official = c2.text_input("正式名称（登記名。空なら事業者名を使用）", value="", key=f"agof_{tk}")
+        ag_id = c2.text_input("法人番号（13桁・不明なら空）", value="", key=f"agid_{tk}")
+        ag_zip = c2.text_input("郵便番号（例 811-2192）", value="", key=f"agz_{tk}")
+        ag_addr = c2.text_input("住所", value="", key=f"aga_{tk}")
+        agp1, agp2 = c2.columns(2)
+        ag_pres_pos = agp1.text_input("代表者 役職", value="", key=f"agpp_{tk}", help="例: 町長・市長・社長")
+        ag_pres_name = agp2.text_input("代表者 氏名", value="", key=f"agpn_{tk}")
         ag_url = c2.text_input("URL", value=det.get("url", ""), key=f"url_{tk}")
         ag_phone = c2.text_input("電話", value=det.get("phone", ""), key=f"tel_{tk}")
         is_circular = c3.checkbox("循環路線（始点に戻る）", value=_loop,
@@ -654,6 +661,9 @@ if ss().get("decision_spec"):
         if not ag_name.strip():
             st.warning("事業者名が空です。agency は暫定値（agency_id=AGENCY_TBD／『未定（自治体が記入）』）"
                        "で出力されます。正式提出前に事業者名・法人番号を記入してください。")
+        # 法人番号は13桁の数字。桁が違えば注意（止めはしない）。
+        if ag_id.strip() and not re.fullmatch(r"\d{13}", ag_id.strip()):
+            st.warning("法人番号は**13桁の数字**です。桁数をご確認ください（不明なら空でOK）。")
         spec = dict(ss()["decision_spec"])
         if route_name:
             spec["routes"][0]["route_long_name"] = route_name
@@ -712,15 +722,21 @@ if ss().get("decision_spec"):
                     for bi, sel in board_sel.items()]
         if boarding:
             spec["boarding"] = boarding
-        aid = ag_id or "AGENCY_TBD"
+        aid = ag_id.strip() or "AGENCY_TBD"
+        _zip = re.sub(r"[^0-9]", "", ag_zip)   # 郵便番号は数字（7桁）に正規化
         spec["agency"] = {"agency_id": aid, "agency_name": ag_name or "未定（自治体が記入）",
                           "agency_url": ag_url or None, "agency_phone": ag_phone or None}
-        spec["agency_jp"] = {"agency_official_name": ag_name or None, "agency_zip_number": None,
-                             "agency_address": None, "agency_president_pos": None, "agency_president_name": None}
+        spec["agency_jp"] = {"agency_official_name": (ag_official.strip() or ag_name) or None,
+                             "agency_zip_number": _zip or None,
+                             "agency_address": ag_addr.strip() or None,
+                             "agency_president_pos": ag_pres_pos.strip() or None,
+                             "agency_president_name": ag_pres_name.strip() or None}
         hol = {"syuku": hol_syuku, "nenmatsu": hol_nenmatsu, "obon": hol_obon}
         # 路線名以外がほぼ未入力なら、暫定の既定値（捏造なし）で生成してよいか確認してから生成。
         minimal = (not ag_name.strip() and not ag_id.strip() and not ag_url.strip()
-                   and not ag_phone.strip() and fare_adult == 0 and fare_child == 0
+                   and not ag_phone.strip() and not ag_official.strip() and not ag_zip.strip()
+                   and not ag_addr.strip() and not ag_pres_pos.strip() and not ag_pres_name.strip()
+                   and fare_adult == 0 and fare_child == 0
                    and fare_disabled == 0 and not route_fares
                    and not (zone_fare and zone_csv.strip())
                    and not start.strip() and not end.strip()
