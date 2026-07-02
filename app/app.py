@@ -57,10 +57,25 @@ if "work" not in ss():
     ss().work = tempfile.mkdtemp(prefix="gtfsapp_")
 WORK = Path(ss().work)
 
-# 一時保存（自動）＋復元。保存先はこのPCの安定フォルダ（セッション用tempとは別）。
-# 復元は「開いたとき1クリック」にして、勝手に古い状態が出る事故を防ぐ（折衷案）。
+# マルチユーザ隔離: 利用者ごとにURLトークン(sid)を割り当て、保存も作業領域も分ける。
+# 共有サーバで複数人が同時に使っても衝突しない。URL(?sid=...)を保つとリロードでも
+# 自分の作業だけ復元できる（別の人には別のsid＝別ファイル）。
+if "sid" not in ss():
+    _sid = st.query_params.get("sid")
+    if not _sid:
+        import secrets
+        _sid = secrets.token_hex(6)
+        try:
+            st.query_params["sid"] = _sid
+        except Exception:
+            pass
+    ss()["sid"] = _sid
+SID = ss()["sid"]
+
+# 一時保存（自動）＋復元。保存先はサーバ/PCの安定フォルダ（セッション用tempとは別）、
+# かつ sid ごとに分離。復元は「開いたとき1クリック」で事故を防ぐ（折衷案）。
 AUTOSAVE_DIR = Path.home() / ".gtfs_jp_app"
-AUTOSAVE_FILE = AUTOSAVE_DIR / "autosave.json"
+AUTOSAVE_FILE = AUTOSAVE_DIR / f"session_{SID}.json"
 # 保存する作業一式（費用の高い手作業＝抽出・時刻修正・路線割当・確定座標・検出・原本）。
 # ③の入力欄(事業者/運賃/曜日)はウィジェット値なので復元対象外＝再入力（軽い）。
 SAVE_KEYS = ["extract", "extract_token", "decision_spec", "detected", "confirmed", "source_display"]
@@ -110,7 +125,8 @@ st.caption("バス時刻表(PDF/Excel) → GTFS-JP。正確さの源は決定的
 
 restore_prompt()   # 前回の自動保存があれば「続きから復元/新規」を提示
 if ss().get("extract"):
-    st.caption("💾 作業は自動保存されています（タブを閉じても、次に開くと『続きから復元』できます）。")
+    st.caption("💾 作業は自動保存されています。**このページのURLをブックマーク**しておくと、"
+               "タブを閉じても同じURLを開けば『続きから復元』できます（他の人の作業とは分離）。")
 
 # =====================================================================
 # Step 1: アップロード → 抽出
