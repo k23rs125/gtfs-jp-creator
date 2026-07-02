@@ -610,7 +610,8 @@ def main() -> int:
     # 独自に検証する。純 Python・Java 不要のため validate 設定に関わらず常に実行。
     ok = run_step(
         "Step 7b: GTFS-JP 拡張検証 (validate_gtfs_jp_extensions)",
-        [PYTHON, script("validate_gtfs_jp_extensions.py"), str(gtfs_dir)],
+        [PYTHON, script("validate_gtfs_jp_extensions.py"), str(gtfs_dir),
+         "-o", str(output_dir / "jp_ext_report.json")],
         args.dry_run,
     )
     record("Step 7b JP拡張検証", ok)

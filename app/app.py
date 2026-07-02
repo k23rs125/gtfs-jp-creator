@@ -1130,6 +1130,20 @@ def render_submission_checklist(out):
             pass
         items.append(("block", n_err == 0, "公式Validatorのエラーが0",
                       "問題なし" if n_err == 0 else f"ERROR {n_err}件 → ④下部の内容と対処を確認"))
+    # 1b) GTFS-JP 拡張検証 ERROR=0（標準Validatorが見ない agency_jp/office_jp 等）
+    jr = out / "jp_ext_report.json"
+    if not jr.exists():
+        items.append(("info", True, "GTFS-JP拡張検証", "レポート未生成（スキップ）"))
+    else:
+        try:
+            jd = json.loads(jr.read_text(encoding="utf-8"))
+        except Exception:
+            jd = {}
+        je = int(jd.get("error_count", 0) or 0)
+        jw = int(jd.get("warning_count", 0) or 0)
+        items.append(("block", je == 0, "GTFS-JP拡張検証のエラーが0",
+                      ("問題なし" + (f"（警告{jw}件）" if jw else "")) if je == 0
+                      else f"拡張ERROR {je}件 → " + " ／ ".join(jd.get("errors", [])[:2])))
     # 2) 全停留所の座標が確定
     confirmed = ss().get("confirmed", {}) or {}
     n_ok = n_rev = n_non = 0
@@ -1167,6 +1181,21 @@ def render_submission_checklist(out):
             miss.append(nm)
     items.append(("must", not miss, "事業者情報（法人番号・正式名称・郵便番号・住所）",
                   "入力済み" if not miss else "未入力: " + "・".join(miss) + " → ③で入力"))
+    # 4b) 内部整合（抽出時刻↔stop_times）— 座標方式/Excel経路のときだけ生成される
+    svp = out / "stoptimes_verify.json"
+    if svp.exists():
+        try:
+            svs = json.loads(svp.read_text(encoding="utf-8")).get("summary", {})
+        except Exception:
+            svs = {}
+        mm = int(svs.get("time_mismatch", 0) or 0)
+        oe = len(svs.get("only_in_extract", []) or [])
+        oo = len(svs.get("only_in_stop_times", []) or [])
+        pct = svs.get("time_match_pct", "-")
+        okv = (mm == 0 and oe == 0 and oo == 0)
+        items.append(("must", okv, "内部整合（抽出した時刻がstop_timesに保たれている）",
+                      f"一致率 {pct}％・時刻不一致{mm}・便の欠落{oe}・余分{oo}"
+                      + ("" if okv else " → 原典と生成を確認（生成漏れ・時刻改変の疑い）")))
     # 5) 時刻の原典照合（参考）
     n_anom = 0
     ap = out / "時刻アノマリ.json"

@@ -193,6 +193,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Validate GTFS-JP extension files")
     parser.add_argument("gtfs_dir", help="展開済み GTFS-JP ディレクトリ")
+    parser.add_argument("-o", "--json", dest="json_out", default=None,
+                        help="検証結果を JSON で出力する先（提出前チェック等で機械可読に使う）")
     args = parser.parse_args()
 
     gtfs_dir = Path(args.gtfs_dir)
@@ -206,6 +208,13 @@ def main() -> int:
     check_columns(gtfs_dir, errors, warnings)
     check_referential_integrity(gtfs_dir, errors, warnings)
     check_values(gtfs_dir, errors, warnings)
+
+    if args.json_out:
+        import json
+        Path(args.json_out).write_text(json.dumps(
+            {"error_count": len(errors), "warning_count": len(warnings),
+             "errors": errors, "warnings": warnings}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
 
     print("=" * 64)
     print("GTFS-JP 拡張検証レポート")
