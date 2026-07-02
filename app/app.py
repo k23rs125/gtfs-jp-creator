@@ -78,7 +78,8 @@ AUTOSAVE_DIR = Path.home() / ".gtfs_jp_app"
 AUTOSAVE_FILE = AUTOSAVE_DIR / f"session_{SID}.json"
 # 保存する作業一式（費用の高い手作業＝抽出・時刻修正・路線割当・確定座標・検出・原本）。
 # ③の入力欄(事業者/運賃/曜日)はウィジェット値なので復元対象外＝再入力（軽い）。
-SAVE_KEYS = ["extract", "extract_token", "decision_spec", "detected", "confirmed", "source_display"]
+SAVE_KEYS = ["extract", "extract_token", "decision_spec", "detected", "confirmed",
+             "source_display", "fare_matrix_doc"]
 
 
 def autosave():
@@ -301,6 +302,54 @@ def apply_conditions_doc(path, tk, routes):
         _st[f"aga_{tk}"] = merged["agency_address"]
     if merged.get("agency_president_name"):
         _st[f"agpn_{tk}"] = merged["agency_president_name"]
+    # 区間運賃のExcel（三角の運賃早見表）→ 非均一なら区間運賃表に自動取り込み。
+    # 均一（全区間同額）は手入力の方が速いので取り込まない（利用者の方針）。
+    if str(path).lower().endswith(".xlsx"):
+        _stops = []
+        for _b in (ss().get("extract") or {}).get("blocks", []):
+            for _s in _b.get("stops", []):
+                nm = _s.get("name")
+                if nm and nm not in _stops:
+                    _stops.append(nm)
+        fmj = WORK / "fare_matrix_doc.json"
+        if fmj.exists():
+            fmj.unlink()
+        _args = [SCRIPTS / "parse_fare_matrix_excel.py", path, "-o", fmj]
+        if _stops:
+            _args += ["--stops", ",".join(_stops)]
+        run(_args)
+        fm = {}
+        if fmj.exists():
+            try:
+                fm = json.loads(fmj.read_text(encoding="utf-8"))
+            except Exception:
+                fm = {}
+        adult = fm.get("大人") or []
+        prices = {p["price"] for p in adult}
+        nm = Path(path).name
+        if adult and len(prices) > 1:            # 非均一のみ自動取り込み
+            ss()["fare_matrix_doc"] = adult
+            _st[f"zonechk_{tk}"] = True
+            _st.pop(f"zonedf_{tk}", None)         # 表を取り込み値で作り直す
+            ss()["fare_matrix_doc_msg"] = (
+                f"料金表『{nm}』から区間運賃 {len(adult)}区間を取り込みました"
+                f"（{min(prices)}〜{max(prices)}円・③の表で要確認）。")
+        elif adult and len(prices) == 1:
+            ss()["fare_matrix_doc_msg"] = (
+                f"料金表『{nm}』は均一運賃（{next(iter(prices))}円）のようです。"
+                "③の運賃欄に手入力してください（均一は入力の方が速いため自動取り込みしません）。")
+        elif not adult and _stops:
+            # フィルタ無しでは表が読めるのに停留所一致が0＝表記ゆれの可能性を通知
+            _args2 = [SCRIPTS / "parse_fare_matrix_excel.py", path, "-o", fmj]
+            run(_args2)
+            try:
+                fm2 = json.loads(fmj.read_text(encoding="utf-8")) if fmj.exists() else {}
+            except Exception:
+                fm2 = {}
+            if fm2.get("大人"):
+                ss()["fare_matrix_doc_msg"] = (
+                    f"料金表『{nm}』を読めましたが、停留所名が時刻表と一致しませんでした"
+                    "（表記ゆれの可能性）。③の区間運賃表に手入力するか、名称をそろえてください。")
     return True
 
 
@@ -719,7 +768,10 @@ if ss().get("decision_spec"):
     # 運賃・運行条件などが別資料(Excel/Word/PDF)にある場合、それをアップロードすると
     # 検出して③に初期入力する（時刻表と同じ発想。値は利用者が確認）。フォーム外に置く。
     cond_doc = st.file_uploader("運賃・運行条件などの資料があれば（任意・PDF/Excel/Word/テキスト）",
-                                type=["pdf", "xlsx", "md", "txt", "docx"], key=f"conddoc_{tk}")
+                                type=["pdf", "xlsx", "md", "txt", "docx"], key=f"conddoc_{tk}",
+                                help="運賃・運行日・事業者情報などを検出して③に初期入力します。"
+                                     "区間ごとに運賃が違う『運賃早見表（三角の表）』のExcelは、区間運賃の表へ"
+                                     "自動取り込みします（均一運賃は入力の方が速いので手入力のまま）。値は必ず要確認。")
     if cond_doc is not None and ss().get("conddoc_name") != cond_doc.name:
         _cp = WORK / ("cond_" + cond_doc.name)
         _cp.write_bytes(cond_doc.getbuffer())
@@ -736,6 +788,8 @@ if ss().get("decision_spec"):
             _nm = _s.get("name")
             if _nm and _nm not in _stops_all:
                 _stops_all.append(_nm)
+    if ss().get("fare_matrix_doc_msg"):
+        st.info(ss()["fare_matrix_doc_msg"])
     zone_fare = st.checkbox("区間運賃にする（停留所ごと・区間ごとに運賃が違う）", key=f"zonechk_{tk}",
                             help="チェックすると③の中に『区間運賃の表（発×着）』が出ます。区間ごとに金額を入れます。")
     with st.form("conditions"):
@@ -767,8 +821,11 @@ if ss().get("decision_spec"):
                                          value=True, key=f"zsym_{tk}",
                                          help="ON: 片方向だけ入れれば逆向きも同額に自動補完。"
                                               "OFF: A→B と B→A（＝上り/下り）を別々の金額で入力できます。")
-            _zbase = pd.DataFrame([[None] * len(_stops_all) for _ in _stops_all],
-                                  index=_stops_all, columns=_stops_all)
+            _doc_fm = ss().get("fare_matrix_doc") or []
+            _fm_lookup = {(m["from"], m["to"]): m["price"] for m in _doc_fm}
+            _zbase = pd.DataFrame(
+                [[_fm_lookup.get((_o, _d)) for _d in _stops_all] for _o in _stops_all],
+                index=_stops_all, columns=_stops_all)
             _zbase.insert(0, "発／着", _stops_all)
             _zcfg = {"発／着": st.column_config.TextColumn("発／着", disabled=True)}
             for _c in _stops_all:
