@@ -151,9 +151,11 @@ def detect(text: str, today: str = None) -> dict:
                 ev["date_stale"] = f"検出した日付 {start} は古い（2年以上前）ため自動入力せず・利用者が確認"
 
     # --- 電話 / URL ---
-    mp = re.search(r"0\d{1,4}[-(\s]\d{1,4}[-)\s]\d{3,4}", t)
+    # 区切りは - ( ) と半角スペースのみ（改行を含めない）。改行を跨ぐと料金表の「200」の
+    # 縦並びを電話と誤検出するため。市外局番は 0 に続けて 1-9（00始まりの誤検出も防ぐ）。
+    mp = re.search(r"0[1-9]\d{0,3}[-( ]\d{1,4}[-) ]\d{3,4}", t)
     if mp:
-        res["phone"] = re.sub(r"[()\s]", "-", mp.group(0)).strip("-"); ev["phone"] = mp.group(0)
+        res["phone"] = re.sub(r"[() ]", "-", mp.group(0)).strip("-"); ev["phone"] = mp.group(0)
     mu = re.search(r"https?://[^\s　」）)]+", t)
     if mu:
         res["url"] = mu.group(0); ev["url"] = mu.group(0)
