@@ -978,18 +978,21 @@ def render_submission_checklist(out):
     def _rows(p):
         return list(_csv.DictReader(p.open(encoding="utf-8-sig"))) if p.exists() else []
     items = []  # (level, ok, label, detail)  level: block(必須) / must(重要) / info(参考)
-    # 1) 公式Validator ERROR=0
-    n_err = 0
+    # 1) 公式Validator ERROR=0（未実行なら「OK」と誤表示しない）
     rep = out / "validation" / "report.json"
-    if rep.exists():
+    if not rep.exists():
+        items.append(("block", False, "公式Validatorのエラーが0",
+                      "検証が未実行です（Java/Validator未設定の可能性）→ 検証を実行してください"))
+    else:
+        n_err = 0
         try:
             n_err = sum(n.get("totalNotices", 0)
                         for n in json.loads(rep.read_text(encoding="utf-8")).get("notices", [])
                         if n.get("severity") == "ERROR")
         except Exception:
             pass
-    items.append(("block", n_err == 0, "公式Validatorのエラーが0",
-                  "問題なし" if n_err == 0 else f"ERROR {n_err}件 → ④下部の内容と対処を確認"))
+        items.append(("block", n_err == 0, "公式Validatorのエラーが0",
+                      "問題なし" if n_err == 0 else f"ERROR {n_err}件 → ④下部の内容と対処を確認"))
     # 2) 全停留所の座標が確定
     confirmed = ss().get("confirmed", {}) or {}
     n_ok = n_rev = n_non = 0
