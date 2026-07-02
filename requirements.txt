@@ -27,3 +27,5 @@ pymupdf4llm    # 装飾PDF → Markdown（既定エンジン）/ Step1
 # - 国土数値情報 P11 Shapefile: download_p11.py で都道府県別に自動取得（要 pyshp）
 # - (任意) 内閣府 祝日CSV     : Step3.6 で祝日運休を展開する場合のみ
 #     （syukujitsu.csv, https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv）
+
+python-docx    # 運賃・運行条件のWord(.docx)資料の読み取り（detect_conditions）

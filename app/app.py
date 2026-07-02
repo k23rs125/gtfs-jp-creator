@@ -649,6 +649,27 @@ if ss().get("decision_spec"):
         st.warning("💴 PDF に複数の運賃候補がありました（路線で異なる可能性）。"
                    + "／".join(f"{c['category']}{c['price']}円" for c in det["fare_candidates"])
                    + " — 下の**路線ごとの運賃**で割り当ててください（勝手に1つを全路線に適用しません）。")
+    # 運賃・運行条件などが別資料(Excel/Word/PDF)にある場合、それをアップロードすると
+    # 検出して③に初期入力する（時刻表と同じ発想。値は利用者が確認）。フォーム外に置く。
+    cond_doc = st.file_uploader("運賃・運行条件などの資料があれば（任意・PDF/Excel/Word/テキスト）",
+                                type=["pdf", "xlsx", "md", "txt", "docx"], key=f"conddoc_{tk}")
+    if cond_doc is not None and ss().get("conddoc_name") != cond_doc.name:
+        _cp = WORK / ("cond_" + cond_doc.name)
+        _cp.write_bytes(cond_doc.getbuffer())
+        _co = WORK / "conditions2.json"
+        run([SCRIPTS / "detect_conditions.py", _cp, "-o", _co])
+        if _co.exists():
+            _d2 = json.loads(_co.read_text(encoding="utf-8"))
+            _merged = dict(ss().get("detected", {}) or {})
+            for k, v in _d2.items():
+                if k == "_evidence":
+                    _merged.setdefault("_evidence", {}).update(v or {})
+                elif v not in (None, "", []):
+                    _merged[k] = v          # 資料の検出値で補う/上書き（要確認）
+            ss()["detected"] = _merged
+            ss()["conddoc_name"] = cond_doc.name
+            st.success(f"資料『{cond_doc.name}』から運賃・運行条件を検出し、③に初期入力しました（要確認）。")
+            st.rerun()
     _days_def = det.get("days") or [1, 1, 1, 1, 1, 0, 0]
     # 区間運賃（停留所ごと・区間ごとに運賃が違う）。st.form内ではトグルで表示を
     # 切り替えられないため、トグルはフォーム外に置き、ON時だけフォーム内に表を出す。
@@ -726,8 +747,10 @@ if ss().get("decision_spec"):
         is_circular = c3.checkbox("循環路線（始点に戻る）", value=_loop,
                                   help="始点=終点を検出すると自動でチェック。違えば外してください。")
         headsign = c3.text_input("行き先表示（方向名）", value="",
-                                 help="空なら自動（方向見出し→無ければ終点名）。"
-                                      "方向見出しが無い路線（循環など）に適用。例『循環』")
+                                 placeholder="例: 太宰府市役所前 行 / 右回り / 循環",
+                                 help="バスの前面に出る行き先。空なら自動（方向見出し→無ければ終点名）。"
+                                      "循環など終点名が行き先にならない路線で入力。"
+                                      "例:『太宰府市役所前 行』『右回り』『循環』")
         st.write("運行する曜日")
         d = st.columns(7)
         days = [d[i].checkbox(x, value=bool(_days_def[i]), key=f"day{i}_{tk}")

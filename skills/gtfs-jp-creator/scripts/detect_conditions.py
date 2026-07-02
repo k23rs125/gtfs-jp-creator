@@ -35,6 +35,18 @@ def _read_text(path: Path) -> str:
             return "\n".join(out)
         except Exception:
             return ""
+    if ext == ".docx":
+        try:
+            import docx
+            d = docx.Document(str(path))
+            parts = [p.text for p in d.paragraphs]
+            for t in d.tables:                       # 表内の運賃・条件も拾う
+                for row in t.rows:
+                    for c in row.cells:
+                        parts.append(c.text)
+            return "\n".join(parts)
+        except Exception:
+            return ""
     if ext == ".pdf":
         try:
             import pdfplumber
