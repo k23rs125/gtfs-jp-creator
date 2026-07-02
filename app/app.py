@@ -237,6 +237,60 @@ def do_extract(src):
         st.error("抽出に失敗しました。\n" + se[-800:])
 
 
+def apply_conditions_doc(path, tk, routes):
+    """運賃・運行条件の資料(path)を検出し、③の入力に反映する。
+    ③の各ウィジェットは key付きで session_state が優先されるため、ss().detected の更新に
+    加えて**ウィジェットの session_state を直接書き換える**（そうしないと欄に反映されない）。
+    反映したら True。呼び出し側で st.rerun() すること。"""
+    co = WORK / "conditions2.json"
+    run([SCRIPTS / "detect_conditions.py", path, "-o", co])
+    if not co.exists():
+        return False
+    d2 = json.loads(co.read_text(encoding="utf-8"))
+    merged = dict(ss().get("detected", {}) or {})
+    for k, v in d2.items():
+        if k == "_evidence":
+            merged.setdefault("_evidence", {}).update(v or {})
+        elif v not in (None, "", []):
+            merged[k] = v
+    ss()["detected"] = merged
+    # ③の各ウィジェットは key付きで session_state が優先される。キー削除では Streamlit の
+    # 内部状態が残り value= を読み直さないため、検出値を session_state に直接書き込む
+    # （value= との二重指定でログ警告が出るが機能は正しい・利用者には無害）。
+    _st = st.session_state
+    fa, fc, fd = merged.get("fare_adult"), merged.get("fare_child"), merged.get("fare_disabled")
+    if fa is not None:
+        _st[f"fa_{tk}"] = int(fa)
+        for r in routes:
+            _st[f"rfa_{r['route_id']}_{tk}"] = int(fa)
+    if fc is not None:
+        _st[f"fc_{tk}"] = int(fc)
+        for r in routes:
+            _st[f"rfc_{r['route_id']}_{tk}"] = int(fc)
+    if fd is not None:
+        _st[f"fd_{tk}"] = int(fd)
+        for r in routes:
+            _st[f"rfd_{r['route_id']}_{tk}"] = int(fd)
+    if merged.get("phone"):
+        _st[f"tel_{tk}"] = merged["phone"]
+    if merged.get("url"):
+        _st[f"url_{tk}"] = merged["url"]
+    if merged.get("start_date"):
+        _st[f"st_{tk}"] = merged["start_date"]
+    if merged.get("end_date"):
+        _st[f"en_{tk}"] = merged["end_date"]
+    if merged.get("holiday_syukujitsu"):
+        _st[f"hs_{tk}"] = True
+    if merged.get("holiday_nenmatsu"):
+        _st[f"hn_{tk}"] = True
+    if merged.get("holiday_obon"):
+        _st[f"ho_{tk}"] = True
+    if merged.get("days") and len(merged["days"]) == 7:
+        for i in range(7):
+            _st[f"day{i}_{tk}"] = bool(merged["days"][i])
+    return True
+
+
 def run_generation(spec, muni, use_nom, hol):
     """spec から GTFS-JP を生成（apply_decisions→run_pipeline）。ss().result に結果を入れる。"""
     # 都道府県だけだと P11 の市域bboxが効かず、同名バス停を県内別所に誤マッチしやすい。
@@ -656,17 +710,7 @@ if ss().get("decision_spec"):
     if cond_doc is not None and ss().get("conddoc_name") != cond_doc.name:
         _cp = WORK / ("cond_" + cond_doc.name)
         _cp.write_bytes(cond_doc.getbuffer())
-        _co = WORK / "conditions2.json"
-        run([SCRIPTS / "detect_conditions.py", _cp, "-o", _co])
-        if _co.exists():
-            _d2 = json.loads(_co.read_text(encoding="utf-8"))
-            _merged = dict(ss().get("detected", {}) or {})
-            for k, v in _d2.items():
-                if k == "_evidence":
-                    _merged.setdefault("_evidence", {}).update(v or {})
-                elif v not in (None, "", []):
-                    _merged[k] = v          # 資料の検出値で補う/上書き（要確認）
-            ss()["detected"] = _merged
+        if apply_conditions_doc(_cp, tk, _routes_now):
             ss()["conddoc_name"] = cond_doc.name
             st.success(f"資料『{cond_doc.name}』から運賃・運行条件を検出し、③に初期入力しました（要確認）。")
             st.rerun()
