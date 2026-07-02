@@ -970,12 +970,102 @@ if ss().get("decision_spec"):
         if cc2.button("入力に戻る"):
             ss().pop("awaiting_confirm", None); ss().pop("pending_gen", None); st.rerun()
 
+def render_submission_checklist(out):
+    """提出前チェックリスト。生成物を根拠に『そのまま提出してよいか』を判定して見せる。
+    正確さの総仕上げ＝官公庁が『なぜ提出可か』を確認できるようにする。"""
+    import csv as _csv
+
+    def _rows(p):
+        return list(_csv.DictReader(p.open(encoding="utf-8-sig"))) if p.exists() else []
+    items = []  # (level, ok, label, detail)  level: block(必須) / must(重要) / info(参考)
+    # 1) 公式Validator ERROR=0
+    n_err = 0
+    rep = out / "validation" / "report.json"
+    if rep.exists():
+        try:
+            n_err = sum(n.get("totalNotices", 0)
+                        for n in json.loads(rep.read_text(encoding="utf-8")).get("notices", [])
+                        if n.get("severity") == "ERROR")
+        except Exception:
+            pass
+    items.append(("block", n_err == 0, "公式Validatorのエラーが0",
+                  "問題なし" if n_err == 0 else f"ERROR {n_err}件 → ④下部の内容と対処を確認"))
+    # 2) 全停留所の座標が確定
+    confirmed = ss().get("confirmed", {}) or {}
+    n_ok = n_rev = n_non = 0
+    for rr in _rows(out / "座標_信頼度.csv"):
+        c = "確定" if rr.get("stop_name") in confirmed else rr.get("confidence", "")
+        if c == "確定":
+            n_ok += 1
+        elif c == "要確認":
+            n_rev += 1
+        else:
+            n_non += 1
+    tot = n_ok + n_rev + n_non
+    items.append(("block", tot > 0 and n_rev == 0 and n_non == 0, "全停留所の座標が確定",
+                  f"確定{n_ok} / 要確認{n_rev} / 未補完{n_non}"
+                  + ("" if (n_rev == 0 and n_non == 0) else " → ⑤の地図で確定してください")))
+    # 3) 全路線に路線名
+    n_no = nr = 0
+    for rr in _rows(out / "gtfs" / "routes.txt"):
+        nr += 1
+        if not (str(rr.get("route_short_name", "")).strip() or str(rr.get("route_long_name", "")).strip()):
+            n_no += 1
+    items.append(("block", nr > 0 and n_no == 0, "全路線に路線名がある",
+                  f"{nr}路線すべてOK" if n_no == 0 else f"名前なし {n_no}路線 → ③で入力"))
+    # 4) 事業者情報（GTFS-JP正式提出に必要）
+    ag = _rows(out / "gtfs" / "agency.txt")
+    ajp = _rows(out / "gtfs" / "agency_jp.txt")
+    aid = (ag[0].get("agency_id", "") if ag else "")
+    a0 = ajp[0] if ajp else {}
+    miss = []
+    if not aid or aid == "AGENCY_TBD":
+        miss.append("法人番号")
+    for key, nm in (("agency_official_name", "正式名称"), ("agency_zip_number", "郵便番号"),
+                    ("agency_address", "住所")):
+        if not str(a0.get(key, "") or "").strip():
+            miss.append(nm)
+    items.append(("must", not miss, "事業者情報（法人番号・正式名称・郵便番号・住所）",
+                  "入力済み" if not miss else "未入力: " + "・".join(miss) + " → ③で入力"))
+    # 5) 時刻の原典照合（参考）
+    n_anom = 0
+    ap = out / "時刻アノマリ.json"
+    if ap.exists():
+        try:
+            n_anom = len(json.loads(ap.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    items.append(("info", n_anom == 0, "時刻の原典照合",
+                  "疑いなし" if n_anom == 0 else f"OCR誤読の疑い {n_anom}件 — 原典と見比べて確認を"))
+    # 6) 有効期間（参考）
+    fi = _rows(out / "gtfs" / "feed_info.txt")
+    end = (fi[0].get("feed_end_date", "") if fi else "")
+    today = datetime.date.today().strftime("%Y%m%d")
+    ok_p = bool(end) and end >= today
+    items.append(("info", ok_p, "有効期間が現在以降",
+                  (f"終了 {end}" if end else "未設定") + ("" if ok_p else " → ③で有効期間を確認")))
+
+    block_ng = [i for i in items if i[0] == "block" and not i[1]]
+    must_ng = [i for i in items if i[0] == "must" and not i[1]]
+    st.subheader("✅ 提出前チェック")
+    if not block_ng and not must_ng:
+        st.success("提出できる状態です（必須項目クリア）。")
+    elif not block_ng:
+        st.warning("提出は可能ですが、事業者情報などに未入力があります（下記）。")
+    else:
+        st.error("まだ提出しない方がよいです。下記の必須項目を対応してください。")
+    for level, ok, label, detail in items:
+        icon = "✅" if ok else ("⛔" if level == "block" else ("⚠" if level == "must" else "🔸"))
+        st.markdown(f"{icon} **{label}** — {detail}")
+
+
 # =====================================================================
 # Step 4: 結果（検証・地図・ダウンロード）
 # =====================================================================
 if ss().get("result"):
     st.header("④ 結果")
     out = WORK / "out"
+    render_submission_checklist(out)
     # 内部整合
     sv = out / "stoptimes_verify.json"
     if sv.exists():
