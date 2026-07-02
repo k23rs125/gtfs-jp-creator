@@ -288,6 +288,19 @@ def apply_conditions_doc(path, tk, routes):
     if merged.get("days") and len(merged["days"]) == 7:
         for i in range(7):
             _st[f"day{i}_{tk}"] = bool(merged["days"][i])
+    # 事業者情報（運行主体者資料などから）
+    if merged.get("agency_name"):
+        _st[f"agn_{tk}"] = merged["agency_name"]
+    if merged.get("agency_official_name"):
+        _st[f"agof_{tk}"] = merged["agency_official_name"]
+    if merged.get("agency_id"):
+        _st[f"agid_{tk}"] = merged["agency_id"]
+    if merged.get("agency_zip"):
+        _st[f"agz_{tk}"] = merged["agency_zip"]
+    if merged.get("agency_address"):
+        _st[f"aga_{tk}"] = merged["agency_address"]
+    if merged.get("agency_president_name"):
+        _st[f"agpn_{tk}"] = merged["agency_president_name"]
     return True
 
 
@@ -778,7 +791,7 @@ if ss().get("decision_spec"):
                 rdi = pcols[3].number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"rfd_{rid}_{tk}")
                 rfares_in[rid] = (ra, rch, rdi)
         c2.caption("**事業者情報**（正式提出に必要。自治体はご自身の情報を入力）")
-        ag_name = c2.text_input("事業者名", value="")
+        ag_name = c2.text_input("事業者名", value="", key=f"agn_{tk}")
         ag_official = c2.text_input("正式名称（登記名。空なら事業者名を使用）", value="", key=f"agof_{tk}")
         ag_id = c2.text_input("法人番号（13桁・不明なら空）", value="", key=f"agid_{tk}")
         ag_zip = c2.text_input("郵便番号（例 811-2192）", value="", key=f"agz_{tk}")

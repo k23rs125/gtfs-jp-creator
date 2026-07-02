@@ -15,6 +15,7 @@ import datetime
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 
@@ -65,7 +66,8 @@ def _to_ymd(g):
 
 def detect(text: str, today: str = None) -> dict:
     res, ev = {}, {}
-    t = text.replace("　", " ")
+    # NFKC で全角→半角に正規化（全角数字の電話 ０９４９… や ＴＥＬ・全角ダッシュ等に対応）。
+    t = unicodedata.normalize("NFKC", text or "")
     if today is None:
         today = datetime.date.today().strftime("%Y%m%d")
 
@@ -155,6 +157,32 @@ def detect(text: str, today: str = None) -> dict:
     mu = re.search(r"https?://[^\s　」）)]+", t)
     if mu:
         res["url"] = mu.group(0); ev["url"] = mu.group(0)
+
+    # --- 事業者情報（運行主体者資料などに見出しがある場合だけ拾う。見出しベースで安全） ---
+    def label_val(labels):
+        for k in labels:
+            m = re.search(k + r"[\s:：]*([^\n]+)", t)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+        return None
+    _name = label_val([r"氏名又は名称", r"事業者名", r"名\s*称"])
+    if _name:
+        res["agency_name"] = _name
+        res["agency_official_name"] = _name
+        ev["agency_name"] = _name
+    _hojin = re.search(r"法人番号[\s:：]*(\d{13})", t) or re.search(r"(?<!\d)(\d{13})(?!\d)", t)
+    if _hojin:
+        res["agency_id"] = _hojin.group(1); ev["agency_id"] = _hojin.group(1)
+    _zip = re.search(r"(?:〒|郵便番号)[\s:：]*(\d{3})[-\s]?(\d{4})", t)
+    if _zip:
+        res["agency_zip"] = _zip.group(1) + _zip.group(2)
+        ev["agency_zip"] = f"{_zip.group(1)}-{_zip.group(2)}"
+    _addr = label_val([r"住\s*所"])
+    if _addr:
+        res["agency_address"] = _addr; ev["agency_address"] = _addr
+    _pres = label_val([r"代表者名", r"代表者"])
+    if _pres:
+        res["agency_president_name"] = _pres; ev["agency_president_name"] = _pres
 
     res["_evidence"] = ev
     return res
