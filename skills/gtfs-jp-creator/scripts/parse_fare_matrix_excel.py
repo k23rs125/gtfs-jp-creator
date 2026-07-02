@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
 """区間運賃のExcel（三角形の運賃早見表）を解析し、fare_matrix [{from,to,price}] を得る。
 
-日本のバス運賃表は「対角に停留所名、右上(または左下)の三角に区間運賃」を並べた形式が多い。
+日本のバス運賃表は次の2形式が多い。本スクリプトは両方を自動判定して解析する：
+  - 三角形式：「対角に停留所名、右上(または左下)の三角に区間運賃」を並べた運賃早見表。
+  - 正方形式：1行に着の停留所、1列に発の停留所を並べ、交点に運賃を入れた行列表
+    （長方形＝発と着で停留所数が違う表も同様に扱える）。
 さらに『大人』『子供・障がい者』など複数の表が縦に並ぶことがある。ここでは：
   - 値のある行の塊(ブロック)で表を分離
-  - 各ブロック内で列ごと/行ごとの停留所名セルを特定し、数値セルを (発→着, 運賃) に変換
+  - ブロックごとに三角/正方形を判定（各行・各列に停留所が複数並べば正方形、1つずつなら三角）
+  - 停留所名セルと数値セルを対応づけ、数値セルを (発→着, 運賃) に変換
   - 区分ラベル(大人/小児/障がい)でブロックの区分を判定
 均一(全部同額)でも動くが、非均一(距離で変わる)こそ手入力が大変なので自動化の価値が高い。
 
@@ -82,26 +86,8 @@ def parse_fare_matrix(xlsx_path, valid_stops=None):
         m = re.search(r"(\d{2,4})", unicodedata.normalize("NFKC", str(v)))
         return int(m.group(1)) if m else None
 
-    out = {}
-    for blk in blocks:
-        rset = set(blk)
-        bcells = [((r, c), v) for (r, c), v in cells.items() if r in rset]
-        cat = _category_of(bcells)
-        # 列ごと・行ごとの停留所名（三角表では各列/各行に停留所名セルが1つ）
-        col_stop, row_stop = {}, {}
-        for (r, c), v in bcells:
-            if is_stop(v):
-                col_stop.setdefault(c, str(v).strip())
-                if r not in row_stop:
-                    row_stop[r] = str(v).strip()
-                else:                       # 行に停留所が複数なら左側を採用
-                    row_stop[r] = row_stop[r]
-        # 行の停留所は「その行で最も左の停留所セル」に統一
-        left_stop = {}
-        for (r, c), v in sorted(bcells):
-            if is_stop(v) and r not in left_stop:
-                left_stop[r] = str(v).strip()
-        row_stop = left_stop
+    def _pairs_from(bcells, row_stop, col_stop):
+        """行→発・列→着の対応から、数値セルを (発→着, 運賃) に変換する。"""
         pairs, seen = [], set()
         for (r, c), v in bcells:
             if is_stop(v):
@@ -110,13 +96,54 @@ def parse_fare_matrix(xlsx_path, valid_stops=None):
             if not price:
                 continue
             rs, cs = row_stop.get(r), col_stop.get(c)
-            if not rs or not cs or rs == cs:
+            if not rs or not cs or rs == cs or (rs, cs) in seen:
                 continue
-            key = (rs, cs)
-            if key in seen:
-                continue
-            seen.add(key)
+            seen.add((rs, cs))
             pairs.append({"from": rs, "to": cs, "price": price})
+        return pairs
+
+    def _stop_counts(bcells):
+        """行ごと・列ごとの停留所名セル数を返す。"""
+        per_row, per_col = {}, {}
+        for (r, c), v in bcells:
+            if is_stop(v):
+                per_row[r] = per_row.get(r, 0) + 1
+                per_col[c] = per_col.get(c, 0) + 1
+        return per_row, per_col
+
+    def parse_square(bcells, per_row, per_col):
+        """正方形/長方形マトリクス（1行に着の停留所、1列に発の停留所を並べ、交点に運賃）。
+           停留所が最も多い行を着ヘッダ、最も多い列を発ヘッダとみなす。"""
+        hr = max(per_row, key=per_row.get)          # 着（列見出し）の行
+        hc = max(per_col, key=per_col.get)          # 発（行見出し）の列
+        col_stop = {c: str(v).strip() for (r, c), v in bcells if r == hr and is_stop(v)}
+        row_stop = {r: str(v).strip() for (r, c), v in bcells if c == hc and is_stop(v)}
+        body = [((r, c), v) for (r, c), v in bcells if r != hr and c != hc]
+        return _pairs_from(body, row_stop, col_stop)
+
+    def parse_triangular(bcells):
+        """三角の運賃早見表（対角に停留所名、右上/左下の三角に区間運賃）。
+           各行/各列に停留所名が1つずつ並ぶ。"""
+        col_stop = {}
+        for (r, c), v in bcells:
+            if is_stop(v):
+                col_stop.setdefault(c, str(v).strip())
+        row_stop = {}                                # 行の停留所は最も左のセルを採用
+        for (r, c), v in sorted(bcells):
+            if is_stop(v) and r not in row_stop:
+                row_stop[r] = str(v).strip()
+        return _pairs_from(bcells, row_stop, col_stop)
+
+    out = {}
+    for blk in blocks:
+        rset = set(blk)
+        bcells = [((r, c), v) for (r, c), v in cells.items() if r in rset]
+        cat = _category_of(bcells)
+        per_row, per_col = _stop_counts(bcells)
+        # 正方形＝ある行・ある列の双方に停留所が複数並ぶ。三角は各行/各列に1つずつ。
+        is_square = (per_row and max(per_row.values()) >= 2
+                     and per_col and max(per_col.values()) >= 2)
+        pairs = parse_square(bcells, per_row, per_col) if is_square else parse_triangular(bcells)
         if pairs:
             out.setdefault(cat, []).extend(pairs)
     return out
