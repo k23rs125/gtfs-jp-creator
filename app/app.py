@@ -1386,6 +1386,59 @@ if ss().get("result"):
     if rc_csv.exists():
         st.warning("同名複数候補の要確認リストがあります（地図で確認を）。")
         st.download_button("座標_要確認.csv をDL", rc_csv.read_bytes(), "座標_要確認.csv")
+    # ふりがな・英語の確認・修正（GTFS-JP必須。pykakasiの難読地名の誤読を人が直す）
+    _trans = out / "gtfs" / "translations.txt"
+    if _trans.exists():
+        import csv as _csvr
+        _trows = list(_csvr.DictReader(_trans.open(encoding="utf-8-sig")))
+        _cur, _order = {}, []
+        for _r in _trows:
+            if (_r.get("table_name") or "").strip() != "stops":
+                continue
+            _nm = (_r.get("field_value") or "").strip()
+            _lang = (_r.get("language") or "").strip()
+            if _nm and _nm not in _cur:
+                _cur[_nm] = {}; _order.append(_nm)
+            if _lang in ("ja-Hrkt", "en"):
+                _cur[_nm][_lang] = _r.get("translation", "")
+        _has_en = any("en" in v for v in _cur.values())
+        with st.expander("🈁 ふりがな・英語の確認・修正（難読地名の誤読をここで直す）"):
+            st.caption("pykakasi が自動生成した読みです。難読地名は誤読することがあります"
+                       "（例: 壱町原「いちまちはら」→ 正しくは「いっちょうばる」）。"
+                       "直したい行だけ書き換えて反映してください（GTFS-JP の必須項目）。")
+            _rows = [{"停留所名": _nm, "ふりがな(ja-Hrkt)": _cur[_nm].get("ja-Hrkt", ""),
+                      **({"英語(en)": _cur[_nm].get("en", "")} if _has_en else {})} for _nm in _order]
+            with st.form("readings_form"):
+                _cfg = {"停留所名": st.column_config.TextColumn("停留所名", disabled=True)}
+                _edited = st.data_editor(pd.DataFrame(_rows), hide_index=True,
+                                         key="readings_editor", column_config=_cfg,
+                                         use_container_width=True)
+                if st.form_submit_button("この読みで反映（zipを更新）"):
+                    _by = {}
+                    for _i, _nm in enumerate(_order):
+                        _spec = {}
+                        _nh = str(_edited.iloc[_i]["ふりがな(ja-Hrkt)"]).strip()
+                        if _nh and _nh != _cur[_nm].get("ja-Hrkt", ""):
+                            _spec["ja-Hrkt"] = _nh
+                        if _has_en:
+                            _ne = str(_edited.iloc[_i].get("英語(en)", "")).strip()
+                            if _ne and _ne != _cur[_nm].get("en", ""):
+                                _spec["en"] = _ne
+                        if _spec:
+                            _by[_nm] = _spec
+                    if not _by:
+                        st.info("変更がありませんでした。")
+                    else:
+                        _mr = WORK / "manual_readings.json"
+                        _mr.write_text(json.dumps({"by_stop_name": _by}, ensure_ascii=False, indent=2),
+                                       encoding="utf-8")
+                        run([SCRIPTS / "apply_manual_readings.py", _trans, "--readings", _mr])
+                        _zz = list(out.glob("*_gtfs-jp.zip"))
+                        if _zz:
+                            run([SCRIPTS / "package_gtfs_zip.py", out / "gtfs", "-o", _zz[0]])
+                        st.success(f"{len(_by)}件の読みを反映し、GTFS-JP(zip)を更新しました。"
+                                   "下のボタンで再ダウンロードしてください。")
+                        st.rerun()
     # zip ダウンロード
     zips = list(out.glob("*_gtfs-jp.zip"))
     if zips:
