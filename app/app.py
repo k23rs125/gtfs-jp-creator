@@ -44,39 +44,62 @@ st.set_page_config(page_title="GTFS-JP メーカー", page_icon="🚌", layout="
 # --- 見た目（官公庁向けの信頼感ある青系テーマ。CSS注入なのでサーバ/ローカル問わず効く） ---
 st.markdown("""
 <style>
-  :root { --brand:#1E5FA8; --brand-dark:#123E70; --brand-light:#E8F0FA;
-          --ink:#1A2733; --bg:#F6F8FC; --card:#FFFFFF; --border:#E1E8F2; }
-  .stApp { background: var(--bg); }
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&display=swap');
+  :root { --brand:#1E5FA8; --brand-dark:#123E70; --brand-2:#2E86C8; --brand-light:#E8F0FA;
+          --ink:#16202B; --bg:#F4F7FC; --card:#FFFFFF; --border:#E1E8F2; }
+  html, body, .stApp, [class*="css"], input, textarea, button {
+    font-family:'Noto Sans JP','Inter',system-ui,-apple-system,sans-serif; }
+  .stApp { background:
+     radial-gradient(1200px 520px at 82% -8%, #E7F0FB 0%, rgba(231,240,251,0) 55%),
+     radial-gradient(900px 440px at -6% 0%, #ECF3FC 0%, rgba(236,243,252,0) 50%),
+     var(--bg); }
   [data-testid="stHeader"] { background: transparent; }
-  .block-container { max-width: 1120px; padding-top: 1.1rem; }
-  h1, h2, h3 { color: var(--brand-dark); font-weight: 700; letter-spacing: .01em; }
-  h2 { border-bottom: 2px solid var(--brand-light); padding-bottom: .3rem; margin-top: 1.5rem; }
+  .block-container { max-width:1120px; padding-top:1.0rem; }
+  h1,h2,h3 { color:var(--brand-dark); font-weight:800; letter-spacing:.01em; }
+  /* セクション見出し：短いグラデーションのアクセント下線でモダンに */
+  h2 { border-bottom:none; padding-bottom:.1rem; margin-top:1.6rem; }
+  h2::after { content:''; display:block; width:52px; height:3px; margin-top:.4rem;
+    background:linear-gradient(90deg,var(--brand),var(--brand-2)); border-radius:3px; }
   /* ブランドヘッダー */
-  .app-hero { display:flex; align-items:center; gap:16px;
-    background: linear-gradient(120deg,#123E70 0%,#1E5FA8 58%,#2E86C8 100%);
-    color:#fff; border-radius:14px; padding:20px 24px; margin:.1rem 0 1rem;
-    box-shadow:0 6px 20px rgba(18,62,112,.22); }
-  .app-hero-icon { font-size:40px; line-height:1; background:rgba(255,255,255,.16);
-    border-radius:12px; padding:6px 12px; }
-  .app-hero-title { font-size:1.7rem; font-weight:800; letter-spacing:.02em; }
-  .app-hero-sub { font-size:.95rem; opacity:.93; margin-top:3px; }
-  .app-hero-title small { font-weight:600; font-size:.85rem; opacity:.8; margin-left:.5rem; }
-  /* ボタン */
-  .stButton>button, .stDownloadButton>button {
-    border-radius:9px; border:1px solid var(--brand); color:var(--brand);
-    font-weight:600; padding:.42rem 1.05rem; transition:all .15s ease; }
-  .stButton>button:hover, .stDownloadButton>button:hover {
-    background:var(--brand); color:#fff; border-color:var(--brand); }
-  .stButton>button[kind="primary"], [data-testid="stFormSubmitButton"]>button {
-    background:var(--brand); color:#fff; border-color:var(--brand); }
-  .stButton>button[kind="primary"]:hover, [data-testid="stFormSubmitButton"]>button:hover {
-    background:var(--brand-dark); border-color:var(--brand-dark); color:#fff; }
-  /* 入力・展開・フォームを白カード風に */
-  [data-testid="stFileUploaderDropzone"] { border-radius:10px; border:1.5px dashed #B9C9DF; background:#FBFDFF; }
-  div[data-testid="stExpander"] { border:1px solid var(--border); border-radius:10px; background:var(--card); }
-  [data-testid="stForm"] { border:1px solid var(--border); border-radius:12px; background:var(--card);
-    padding:1rem 1.1rem; box-shadow:0 1px 3px rgba(20,50,90,.05); }
+  @keyframes heroIn { from{opacity:0; transform:translateY(-8px)} to{opacity:1; transform:none} }
+  .app-hero { position:relative; overflow:hidden; display:flex; align-items:center; gap:18px;
+    background: linear-gradient(120deg,#0E3B6E 0%,#1E5FA8 55%,#2E86C8 100%);
+    color:#fff; border-radius:18px; padding:22px 26px; margin:.1rem 0 1.1rem;
+    box-shadow:0 12px 30px rgba(18,62,112,.28); animation:heroIn .5s ease; }
+  .app-hero::after { content:''; position:absolute; right:-50px; top:-60px; width:240px; height:240px;
+    background:radial-gradient(circle, rgba(255,255,255,.16), rgba(255,255,255,0) 62%); pointer-events:none; }
+  .app-hero::before { content:''; position:absolute; left:-30px; bottom:-72px; width:170px; height:170px;
+    background:radial-gradient(circle, rgba(255,255,255,.10), rgba(255,255,255,0) 60%); pointer-events:none; }
+  .app-hero-icon { font-size:42px; line-height:1; background:rgba(255,255,255,.18);
+    border-radius:14px; padding:8px 13px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.22); }
+  .app-hero-title { font-size:1.8rem; font-weight:800; letter-spacing:.02em; line-height:1.15; }
+  .app-hero-title small { font-weight:600; font-size:.78rem; opacity:.9; margin-left:.6rem;
+    padding:.16rem .55rem; border:1px solid rgba(255,255,255,.38); border-radius:999px; vertical-align:middle; }
+  .app-hero-sub { font-size:.96rem; opacity:.94; margin-top:5px; }
+  /* ボタン（通常＝青枠、主要＝グラデ塗り） */
+  .stButton>button {
+    border-radius:10px; border:1px solid var(--brand); color:var(--brand); background:#fff;
+    font-weight:600; padding:.44rem 1.1rem; transition:all .16s ease; }
+  .stButton>button:hover {
+    background:var(--brand-light); color:var(--brand-dark); border-color:var(--brand);
+    transform:translateY(-1px); box-shadow:0 4px 12px rgba(30,95,168,.18); }
+  .stButton>button[kind="primary"], [data-testid="stFormSubmitButton"]>button, .stDownloadButton>button {
+    background:linear-gradient(120deg,var(--brand),var(--brand-2)); color:#fff; border:none;
+    font-weight:700; border-radius:10px; padding:.46rem 1.15rem;
+    box-shadow:0 5px 15px rgba(30,95,168,.30); transition:all .16s ease; }
+  .stButton>button[kind="primary"]:hover, [data-testid="stFormSubmitButton"]>button:hover,
+  .stDownloadButton>button:hover { filter:brightness(1.07); transform:translateY(-1px); color:#fff; }
+  /* カード群 */
+  [data-testid="stFileUploaderDropzone"] { border-radius:12px; border:1.5px dashed #B9C9DF; background:#FBFDFF; }
+  div[data-testid="stExpander"] { border:1px solid var(--border); border-radius:12px; background:var(--card);
+    box-shadow:0 1px 2px rgba(20,50,90,.04); }
+  [data-testid="stForm"] { border:1px solid var(--border); border-radius:14px; background:var(--card);
+    padding:1.1rem 1.2rem; box-shadow:0 2px 10px rgba(20,50,90,.06); }
+  [data-testid="stMetric"] { background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:.7rem .95rem; box-shadow:0 1px 3px rgba(20,50,90,.05); }
+  [data-testid="stAlert"] { border-radius:12px; box-shadow:0 1px 4px rgba(20,50,90,.05); }
   [data-testid="stCaptionContainer"], .stCaption { color:#5B6B7C; }
+  a, a:visited { color:var(--brand); }
 </style>
 """, unsafe_allow_html=True)
 ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
