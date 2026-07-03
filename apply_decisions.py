@@ -26,7 +26,7 @@ decision spec（LLM出力）の例:
 agency を spec に載せると agency.txt/agency_jp.txt に反映され、fare_attributes.agency_id も
 本体 agency に一致させる（AGENCY_TBD 固定をやめ desync を防ぐ）。手書き構造化スクリプト不要。
 """
-import argparse, json, os, sys
+import argparse, json, os, re, sys
 
 def main():
     ap = argparse.ArgumentParser()
@@ -55,6 +55,11 @@ def main():
     exclude_unnumbered = dec.get("exclude_unnumbered", True)
     stop_key = dec.get("stop_key", "name")
     bdir = {int(k): v for k, v in dec.get("block_direction", {}).items()}
+    # 行き/帰りで停留所を分けるか（既定ON）。多くの停留所は反対車線にあり方向ごとに座標が
+    # 異なるため、方向(direction_id)込みでキー化して別停留所にする。循環・片方向のみの
+    # 停留所は方向が1つなので結果的に1つのまま。stop_desc に方面（行先ベース）を入れる。
+    split_dir = dec.get("split_by_direction", True)
+    bhead = dec.get("block_headsign", {})
 
     def cell_excluded(c):
         if exclude_reserve and c.get("reserve"):
@@ -63,9 +68,41 @@ def main():
             return True
         return False
 
-    # 停留所レジストリ
-    reg = {}   # key -> (name, num_for_sort)
-    for b in blocks:
+    def base_key(c):
+        nm = (c.get("name") or "").strip()
+        return nm if stop_key == "name" else (int(c["num"]) if c.get("num") is not None else None)
+
+    def key_of(c, did):
+        bk = base_key(c)
+        return (bk, did) if split_dir else bk
+
+    # 方面（行先ベース）を direction ごとに決める → stop_desc に入れる。
+    def _houmen(h):
+        h = (h or "").strip()
+        if not h:
+            return ""
+        if h.endswith(("回り", "循環")):          # 循環はそのまま（「左回り」等）
+            return h
+        h = re.sub(r"(行き|行|方面|方向)$", "", h).strip()
+        return (h + "方面") if h else ""
+    dir_head = {}   # did -> 方面テキスト
+    for _bi, _b in enumerate(blocks):
+        _did = bdir.get(_bi, 0)
+        if _did in dir_head:
+            continue
+        _h = bhead.get(str(_bi)) or bhead.get(_bi)
+        if not _h:                                # 方向名が無ければその方向の最終停留所名
+            for _t in _b["trips"]:
+                _cs = [c for c in _t["cells"] if not cell_excluded(c)]
+                if _cs:
+                    _h = (_cs[-1].get("name") or "").strip()
+                    break
+        dir_head[_did] = _houmen(_h) or ("行き方面" if _did == 0 else "帰り方面")
+
+    # 停留所レジストリ（split時は (base, did) をキー＝方向ごとに別停留所）
+    reg = {}   # key -> (name, num_for_sort, did)
+    for _bi, b in enumerate(blocks):
+        did = bdir.get(_bi, 0)
         for t in b["trips"]:
             for c in t["cells"]:
                 if cell_excluded(c):
@@ -73,18 +110,15 @@ def main():
                 nm = (c.get("name") or "").strip()
                 num = c.get("num")
                 num = int(num) if num is not None else None
-                key = nm if stop_key == "name" else num
+                key = key_of(c, did)
                 if key not in reg:
-                    reg[key] = (nm, num if num is not None else 99999)
-    # S採番（代表num昇順→名称。無番号は登場順を保つため大きな番号扱い）
-    ordered = sorted(reg, key=lambda k: (reg[k][1], reg[k][0]))
+                    reg[key] = (nm, num if num is not None else 99999, did)
+    # S採番（代表num昇順→方向→名称）
+    ordered = sorted(reg, key=lambda k: (reg[k][1], reg[k][2], reg[k][0]))
     sid_of = {k: f"S{i:03d}" for i, k in enumerate(ordered, 1)}
-    stops = [{"stop_id": sid_of[k], "stop_name": reg[k][0], "stop_lat": None, "stop_lon": None}
+    stops = [{"stop_id": sid_of[k], "stop_name": reg[k][0], "stop_lat": None, "stop_lon": None,
+              "stop_desc": (dir_head.get(reg[k][2], "") if split_dir else "")}
              for k in ordered]
-
-    def key_of(c):
-        nm = (c.get("name") or "").strip()
-        return nm if stop_key == "name" else int(c["num"])
 
     routes, trips, stop_times = [], [], []
     svc = dec.get("service", {})
@@ -139,7 +173,7 @@ def main():
                 for seq, c in enumerate(cells, 1):
                     hhmmss = c["time"] if c["time"].count(":") == 2 else c["time"] + ":00"
                     p = hhmmss.split(":"); p[0] = p[0].zfill(2); hhmmss = ":".join(p)
-                    strec = {"trip_id": trip_id, "stop_id": sid_of[key_of(c)],
+                    strec = {"trip_id": trip_id, "stop_id": sid_of[key_of(c, did)],
                              "stop_sequence": seq, "arrival_time": hhmmss, "departure_time": hhmmss}
                     pu, do = _board_codes(rid, did, bi, (c.get("name") or "").strip())
                     if pu:   # 降車専用（乗車不可）。0は付けず generate の要予約=2既定を壊さない

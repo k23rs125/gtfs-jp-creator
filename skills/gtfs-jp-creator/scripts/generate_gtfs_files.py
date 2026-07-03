@@ -276,6 +276,7 @@ def generate_stops(data: dict, output_dir: Path) -> None:
     """
     rows = []
     has_zone = any(s.get("zone_id") for s in data["stops"])
+    has_desc = any((s.get("stop_desc") or "").strip() for s in data["stops"])
     for s in data["stops"]:
         row = {
             "stop_id": s["stop_id"],
@@ -283,10 +284,15 @@ def generate_stops(data: dict, output_dir: Path) -> None:
             "stop_lat": s.get("stop_lat"),
             "stop_lon": s.get("stop_lon"),
         }
+        if has_desc:
+            row["stop_desc"] = (s.get("stop_desc") or "").strip()   # 方面（行き/帰りの向き）
         if has_zone:
             row["zone_id"] = s.get("zone_id") or ""
         rows.append(row)
-    fieldnames = ["stop_id", "stop_name", "stop_lat", "stop_lon"]
+    fieldnames = ["stop_id", "stop_name"]
+    if has_desc:
+        fieldnames.append("stop_desc")
+    fieldnames += ["stop_lat", "stop_lon"]
     if has_zone:
         fieldnames.append("zone_id")   # 区間運賃(zone制)のとき出力
     write_csv(output_dir / "stops.txt", rows, fieldnames)
