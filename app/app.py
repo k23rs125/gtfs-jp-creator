@@ -1218,7 +1218,7 @@ def render_submission_checklist(out):
     confirmed = ss().get("confirmed", {}) or {}
     n_ok = n_rev = n_non = 0
     for rr in _rows(out / "座標_信頼度.csv"):
-        c = "確定" if rr.get("stop_name") in confirmed else rr.get("confidence", "")
+        c = "確定" if rr.get("stop_id") in confirmed else rr.get("confidence", "")
         if c == "確定":
             n_ok += 1
         elif c == "要確認":
@@ -1455,13 +1455,28 @@ if ss().get("result"):
     if conf_csv.exists():
         st.header("⑤ 座標の確認（地図）")
         st.caption("確定=緑／要確認=橙／未補完=赤。要確認・未補完は地図クリックか座標入力で確定する。"
-                   "**全部が確定になるまで「公式提出可」にしない**（＝推測座標を黙って出さない）。")
+                   "**全部が確定になるまで「公式提出可」にしない**（＝推測座標を黙って出さない）。"
+                   "**行き・帰りは別々の停留所**として表示されます（多くは反対車線＝別座標。"
+                   "終点・敷地内で同じ場所なら『同じ場所にする』で揃えられます）。")
         import csv as _csv
         crows = list(_csv.DictReader(conf_csv.open(encoding="utf-8-sig")))
-        confirmed = ss().setdefault("confirmed", {})  # stop_name -> (lat,lon)
+        # stop_desc(方面) を stops.txt から補う（行き/帰りの区別表示に使う）
+        _descmap = {}
+        _stpath = WORK / "out" / "gtfs" / "stops.txt"
+        if _stpath.exists():
+            for _s in _csv.DictReader(_stpath.open(encoding="utf-8-sig")):
+                _descmap[_s.get("stop_id", "")] = (_s.get("stop_desc") or "").strip()
+        confirmed = ss().setdefault("confirmed", {})  # stop_id -> (lat,lon)
+
+        def _sid(r):
+            return r.get("stop_id", "")
+
+        def _label(r):
+            d = _descmap.get(_sid(r), "")
+            return f"{r['stop_name']}（{d}）" if d else r["stop_name"]
 
         def eff_conf(r):
-            return "確定" if r["stop_name"] in confirmed else r["confidence"]
+            return "確定" if _sid(r) in confirmed else r["confidence"]
 
         n_ok = sum(1 for r in crows if eff_conf(r) == "確定")
         n_rev = sum(1 for r in crows if eff_conf(r) == "要確認")
@@ -1469,26 +1484,29 @@ if ss().get("result"):
         m1, m2, m3 = st.columns(3)
         m1.metric("確定", n_ok); m2.metric("要確認", n_rev); m3.metric("未補完", n_non)
 
-        # 地図（確定=緑/要確認=橙）。確認済み(session)は確定扱い。
-        pts = []
+        # 地図。tooltipは一意化（同名の行き/帰りを方面で区別、万一重複ならID付与）。
+        pts, tip2id = [], {}
         for r in crows:
-            nm = r["stop_name"]
-            if nm in confirmed:
-                la, lo, conf = confirmed[nm][0], confirmed[nm][1], "確定"
+            sid = _sid(r)
+            if sid in confirmed:
+                la, lo, conf = confirmed[sid][0], confirmed[sid][1], "確定"
             elif (r.get("stop_lat") or "").strip():
                 la, lo, conf = float(r["stop_lat"]), float(r["stop_lon"]), r["confidence"]
             else:
                 continue
-            pts.append((nm, la, lo, conf, r.get("reason", "")))
+            tip = _label(r)
+            if tip in tip2id:
+                tip = f"{tip}[{sid}]"
+            tip2id[tip] = sid
+            pts.append((tip, la, lo, conf, r.get("reason", "")))
         center = ([sum(p[1] for p in pts) / len(pts), sum(p[2] for p in pts) / len(pts)]
                   if pts else [35.0, 138.0])
         fmap = folium.Map(location=center, zoom_start=14)
         col = {"確定": "green", "要確認": "orange", "未補完": "red"}
-        for nm, la, lo, conf, reason in pts:
-            # ピンはドラッグで移動できる。移動後にクリックすると現在位置を取得して確定できる。
-            folium.Marker([la, lo], tooltip=nm, draggable=True,
+        for tip, la, lo, conf, reason in pts:
+            folium.Marker([la, lo], tooltip=tip, draggable=True,
                           icon=folium.Icon(color=col.get(conf, "gray")),
-                          popup=f"{nm}（{conf}）{reason}").add_to(fmap)
+                          popup=f"{tip}（{conf}）{reason}").add_to(fmap)
         st.caption("📍 ピンを**ドラッグ**して正しい位置へ動かし、そのピンを**クリック**すると、"
                    "下に『この位置で確定』ボタンが出ます（地図の空き場所クリックで座標を拾うこともできます）。")
         state = st_folium(fmap, width=900, height=460, key="confmap",
@@ -1496,26 +1514,37 @@ if ss().get("result"):
                                             "last_object_clicked_tooltip"])
         clicked = state.get("last_clicked") if state else None
         obj = state.get("last_object_clicked") if state else None
-        obj_name = state.get("last_object_clicked_tooltip") if state else None
+        obj_tip = state.get("last_object_clicked_tooltip") if state else None
         # ドラッグ→ピンをクリック で、その移動後の位置を確定できる
-        if obj and obj_name:
+        if obj and obj_tip and obj_tip in tip2id:
+            sid = tip2id[obj_tip]
             la2, lo2 = round(obj["lat"], 6), round(obj["lng"], 6)
-            already = confirmed.get(obj_name)
+            already = confirmed.get(sid)
             moved = (not already) or abs(already[0] - la2) > 1e-6 or abs(already[1] - lo2) > 1e-6
-            st.success(f"選択中のピン『{obj_name}』: {la2:.6f}, {lo2:.6f}")
-            if st.button(f"『{obj_name}』をこのピン位置で確定する", disabled=not moved):
-                confirmed[obj_name] = (la2, lo2); st.rerun()
+            st.success(f"選択中のピン『{obj_tip}』: {la2:.6f}, {lo2:.6f}")
+            if st.button(f"『{obj_tip}』をこのピン位置で確定する", disabled=not moved):
+                confirmed[sid] = (la2, lo2); st.rerun()
         if clicked:
             st.info(f"地図クリック位置: {clicked['lat']:.6f}, {clicked['lng']:.6f}"
                     "（下で停留所を選び『地図クリック位置を使う』）")
 
-        todo = [r["stop_name"] for r in crows if eff_conf(r) != "確定"]
+        todo = [r for r in crows if eff_conf(r) != "確定"]
         if todo:
             st.subheader(f"要確認・未補完を確定する（残り {len(todo)} 件）")
-            sel = st.selectbox("停留所", todo)
-            cur = next((r for r in crows if r["stop_name"] == sel), {})
+            _todo_ids = [_sid(r) for r in todo]
+            sel = st.selectbox("停留所", _todo_ids,
+                               format_func=lambda s: next((_label(r) for r in crows if _sid(r) == s), s))
+            cur = next((r for r in crows if _sid(r) == sel), {})
             st.write(f"現在の座標: {cur.get('stop_lat','')}, {cur.get('stop_lon','')} ／ "
                      f"理由: {cur.get('reason','')}")
+            # 同じ場所（終点・敷地内）: 同名で反対方向の停留所と同座標にする
+            _sibs = [r for r in crows if r["stop_name"] == cur.get("stop_name") and _sid(r) != sel]
+            for _sb in _sibs[:1]:
+                _sbid = _sid(_sb)
+                _sbc = confirmed.get(_sbid) or ((float(_sb["stop_lat"]), float(_sb["stop_lon"]))
+                                                if (_sb.get("stop_lat") or "").strip() else None)
+                if _sbc and st.button(f"『{_label(_sb)}』と同じ場所にする（敷地内・終点向け）"):
+                    confirmed[sel] = (round(_sbc[0], 6), round(_sbc[1], 6)); st.rerun()
             a1, a2, a3 = st.columns([1, 1, 1])
             if a1.button("地図クリック位置を使う", disabled=not clicked):
                 confirmed[sel] = (round(clicked["lat"], 6), round(clicked["lng"], 6)); st.rerun()
@@ -1529,8 +1558,8 @@ if ss().get("result"):
         if confirmed:
             st.write(f"確認済み（手動確定）: {len(confirmed)} 件")
             if st.button("確定座標で再生成する", type="primary"):
-                mc = {"by_stop_name": {nm: {"lat": la, "lon": lo}
-                                       for nm, (la, lo) in confirmed.items()}}
+                mc = {"by_stop_id": {sid: {"lat": la, "lon": lo}
+                                     for sid, (la, lo) in confirmed.items()}}
                 (WORK / "manual_coords.json").write_text(json.dumps(mc, ensure_ascii=False), encoding="utf-8")
                 cfg = json.loads((WORK / "config.json").read_text(encoding="utf-8"))
                 cfg["manual_coords"] = str(WORK / "manual_coords.json")

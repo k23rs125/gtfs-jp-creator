@@ -126,9 +126,11 @@ def main() -> int:
                 offroute[sid] = min(offroute.get(sid, dd), dd)
 
     sources = load_sources(Path(a.reports_dir))
-    manual_names = set()
+    manual_names, manual_ids = set(), set()
     if a.manual and Path(a.manual).exists():
-        manual_names = set(json.loads(Path(a.manual).read_text(encoding="utf-8")).get("by_stop_name", {}))
+        _mj = json.loads(Path(a.manual).read_text(encoding="utf-8"))
+        manual_names = set(_mj.get("by_stop_name", {}))
+        manual_ids = set(_mj.get("by_stop_id", {}))   # 方向別の手動座標(stop_id指定)も確定扱い
 
     def final_source(sid):
         """最終座標(lat,lon)に一致する由来を返す。"""
@@ -161,7 +163,7 @@ def main() -> int:
         if not c:
             conf, src, reason = "未補完", "-", "座標なし"
         else:
-            src = "manual" if nm in manual_names else final_source(sid)
+            src = "manual" if (nm in manual_names or sid in manual_ids) else final_source(sid)
             orm = offroute.get(sid)
             if src in ("official", "manual"):
                 conf, reason = "確定", ("公式/旧feed再利用" if src == "official" else "手動指定")
