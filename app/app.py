@@ -1266,6 +1266,24 @@ def render_submission_checklist(out):
         items.append(("must", okv, "内部整合（抽出した時刻がstop_timesに保たれている）",
                       f"一致率 {pct}％・時刻不一致{mm}・便の欠落{oe}・余分{oo}"
                       + ("" if okv else " → 原典と生成を確認（生成漏れ・時刻改変の疑い）")))
+    # 4c) 区間速度チェック（座標/時刻の誤りを炙り出す。「確定」でも別地点座標を捕捉）
+    spd = _rows(out / "速度_check.csv")
+    if spd:
+        n_fast = sum(1 for r in spd if r.get("判定") == "速すぎ")
+        n_zero = sum(1 for r in spd if r.get("判定") == "時間0")
+        n_slow = sum(1 for r in spd if r.get("判定") == "遅すぎ")
+        bad = n_fast + n_zero
+        items.append(("must", bad == 0, "区間速度が現実的（座標・時刻に飛びがない）",
+                      f"速すぎ{n_fast}・時間0 {n_zero}・遅すぎ{n_slow}"
+                      + ("" if bad == 0 else " → 該当区間の座標/時刻を確認（別地点への誤マッチや時刻誤りの疑い）")))
+    # 4d) 経路(shape)が停留所を通っているか（参考）
+    shp = _rows(out / "shape_coverage.csv")
+    if shp:
+        n_far = sum(1 for r in shp if "離れすぎ" in (r.get("判定") or ""))
+        n_rev = sum(1 for r in shp if "順序逆転" in (r.get("判定") or ""))
+        items.append(("info", n_far == 0 and n_rev == 0, "経路(shape)が停留所を通っている",
+                      f"離れすぎ{n_far}・順序逆転{n_rev}"
+                      + ("" if (n_far == 0 and n_rev == 0) else " — 経路生成/座標を確認（参考）")))
     # 5) 時刻の原典照合（参考）
     n_anom = 0
     ap = out / "時刻アノマリ.json"

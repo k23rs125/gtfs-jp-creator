@@ -651,6 +651,32 @@ def main() -> int:
         record("Step 7d 時刻アノマリ検出", True, skipped=True)
         log("Step 7d: extract_json 未指定のためスキップ")
 
+    # ---- Step 7e: 速度チェック（区間速度から座標/時刻の誤りを炙り出す） ----
+    # 停留所間の直線距離と時刻差から速度を出し、非現実的な速すぎ/時間0を検出する。
+    # 「確定」でも別地点に付いた座標は速度が飛ぶため、名称照合をすり抜けた誤りを捕捉できる。
+    ok = run_step(
+        "Step 7e: 速度チェック (check_speed)",
+        [PYTHON, script("check_speed.py"),
+         "--stops", str(gtfs_dir / "stops.txt"),
+         "--stop-times", str(gtfs_dir / "stop_times.txt"),
+         "-o", str(output_dir / "速度_check.csv")],
+        args.dry_run,
+    )
+    record("Step 7e 速度チェック", ok)
+
+    # ---- Step 7f: 経路(shape)カバレッジ（shapeが各停留所を通っているか） ----
+    if (gtfs_dir / "shapes.txt").exists():
+        ok = run_step(
+            "Step 7f: 経路カバレッジ (check_shape_coverage)",
+            [PYTHON, script("check_shape_coverage.py"), str(gtfs_dir),
+             "--out", str(output_dir / "shape_coverage.csv")],
+            args.dry_run,
+        )
+        record("Step 7f 経路カバレッジ", ok)
+    else:
+        record("Step 7f 経路カバレッジ", True, skipped=True)
+        log("Step 7f: shapes.txt が無いためスキップ")
+
     # ---- 最終サマリ ----
     print(file=sys.stderr)
     print("=" * 64, file=sys.stderr)
