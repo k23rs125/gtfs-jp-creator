@@ -39,7 +39,46 @@ try:
 except Exception:
     detect_variants = None
 
-st.set_page_config(page_title="GTFS-JP 半自動生成", page_icon="🚌", layout="wide")
+st.set_page_config(page_title="GTFS-JP メーカー", page_icon="🚌", layout="wide")
+
+# --- 見た目（官公庁向けの信頼感ある青系テーマ。CSS注入なのでサーバ/ローカル問わず効く） ---
+st.markdown("""
+<style>
+  :root { --brand:#1E5FA8; --brand-dark:#123E70; --brand-light:#E8F0FA;
+          --ink:#1A2733; --bg:#F6F8FC; --card:#FFFFFF; --border:#E1E8F2; }
+  .stApp { background: var(--bg); }
+  [data-testid="stHeader"] { background: transparent; }
+  .block-container { max-width: 1120px; padding-top: 1.1rem; }
+  h1, h2, h3 { color: var(--brand-dark); font-weight: 700; letter-spacing: .01em; }
+  h2 { border-bottom: 2px solid var(--brand-light); padding-bottom: .3rem; margin-top: 1.5rem; }
+  /* ブランドヘッダー */
+  .app-hero { display:flex; align-items:center; gap:16px;
+    background: linear-gradient(120deg,#123E70 0%,#1E5FA8 58%,#2E86C8 100%);
+    color:#fff; border-radius:14px; padding:20px 24px; margin:.1rem 0 1rem;
+    box-shadow:0 6px 20px rgba(18,62,112,.22); }
+  .app-hero-icon { font-size:40px; line-height:1; background:rgba(255,255,255,.16);
+    border-radius:12px; padding:6px 12px; }
+  .app-hero-title { font-size:1.7rem; font-weight:800; letter-spacing:.02em; }
+  .app-hero-sub { font-size:.95rem; opacity:.93; margin-top:3px; }
+  .app-hero-title small { font-weight:600; font-size:.85rem; opacity:.8; margin-left:.5rem; }
+  /* ボタン */
+  .stButton>button, .stDownloadButton>button {
+    border-radius:9px; border:1px solid var(--brand); color:var(--brand);
+    font-weight:600; padding:.42rem 1.05rem; transition:all .15s ease; }
+  .stButton>button:hover, .stDownloadButton>button:hover {
+    background:var(--brand); color:#fff; border-color:var(--brand); }
+  .stButton>button[kind="primary"], [data-testid="stFormSubmitButton"]>button {
+    background:var(--brand); color:#fff; border-color:var(--brand); }
+  .stButton>button[kind="primary"]:hover, [data-testid="stFormSubmitButton"]>button:hover {
+    background:var(--brand-dark); border-color:var(--brand-dark); color:#fff; }
+  /* 入力・展開・フォームを白カード風に */
+  [data-testid="stFileUploaderDropzone"] { border-radius:10px; border:1.5px dashed #B9C9DF; background:#FBFDFF; }
+  div[data-testid="stExpander"] { border:1px solid var(--border); border-radius:10px; background:var(--card); }
+  [data-testid="stForm"] { border:1px solid var(--border); border-radius:12px; background:var(--card);
+    padding:1rem 1.1rem; box-shadow:0 1px 3px rgba(20,50,90,.05); }
+  [data-testid="stCaptionContainer"], .stCaption { color:#5B6B7C; }
+</style>
+""", unsafe_allow_html=True)
 ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
 
 
@@ -120,9 +159,17 @@ def restore_prompt():
         st.rerun()
 
 
-st.title("🚌 GTFS-JP 半自動生成アプリ")
-st.caption("バス時刻表(PDF/Excel) → GTFS-JP。正確さの源は決定的スクリプト、"
-           "LLMは構造化の判断のみ、無い情報は推測せず確認フォームで入力（正しく失敗）。")
+st.markdown("""
+<div class="app-hero">
+  <div class="app-hero-icon">🚌</div>
+  <div>
+    <div class="app-hero-title">GTFS-JP メーカー<small>バス時刻表 → 標準フォーマット</small></div>
+    <div class="app-hero-sub">バス時刻表（PDF・Excel）から、正確な GTFS-JP を半自動で生成します</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+st.caption("正確さの源は決定的スクリプト、LLMは構造化の判断のみ、"
+           "無い情報は推測せず確認フォームで入力します（誤りを作らない＝正しく失敗）。")
 
 restore_prompt()   # 前回の自動保存があれば「続きから復元/新規」を提示
 if ss().get("extract"):

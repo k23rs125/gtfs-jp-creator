@@ -1,0 +1,7 @@
+# 官公庁向けの信頼感ある青系テーマ（ウィジェットの基調色。詳細な装飾は app.py のCSSで付与）
+[theme]
+primaryColor = "#1E5FA8"
+backgroundColor = "#F6F8FC"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1A2733"
+font = "sans serif"
