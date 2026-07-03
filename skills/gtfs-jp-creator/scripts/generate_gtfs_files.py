@@ -3,7 +3,12 @@ generate_gtfs_files.py
 ======================
 
 Step 3: 構造化された中間表現 (Step 2 の出力 JSON) から、
-        GTFS-JP v4.0 の CSV ファイル群を生成する。
+        GTFS-JP v4（公共交通運行情報標準データ仕様, 令和8年3月）に準拠した
+        CSV ファイル群を生成する。対象は地域バスの静的時刻表であり、コア
+        (feed_info/agency/stops/routes/trips/stop_times/calendar/translations/shapes 等)
+        を生成する。v4で「参考」に移った jp 拡張 (agency_jp/office_jp) は事業者情報の
+        ために併せて出力する。v4で追加された Pathways/Flex/Fares V2 拡張は、駅構内経路・
+        デマンド交通・複雑運賃向けでありコミュニティバスの時刻表では用いないため対象外。
 
 Input:
     JSON ファイル。スキーマは references/prompts/02_structured_extraction.md を参照。
@@ -469,14 +474,21 @@ def generate_feed_info(data: dict, output_dir: Path) -> None:
     agency = data["agency"]
     fi = data.get("feed_info") or {}
     today = datetime.now().strftime("%Y%m%d")
+    # GTFS-JP v4（公共交通運行情報標準データ仕様）では feed_start_date/feed_end_date/
+    # feed_version が必須。空にしないよう、未指定時は運行期間(calendar)から補完する。
+    cal = data.get("calendar") or []
+    cal_starts = [c.get("start_date") for c in cal if c.get("start_date")]
+    cal_ends = [c.get("end_date") for c in cal if c.get("end_date")]
+    def_start = min(cal_starts) if cal_starts else DEFAULT_START_DATE
+    def_end = max(cal_ends) if cal_ends else compute_default_end_date(def_start)
     row = {
         "feed_publisher_name": fi.get("feed_publisher_name")
         or agency.get("agency_name") or "Unknown Publisher",
         "feed_publisher_url": fi.get("feed_publisher_url")
         or agency.get("agency_url") or PLACEHOLDER_URL,
         "feed_lang": DEFAULT_LANG,
-        "feed_start_date": fi.get("feed_start_date") or "",
-        "feed_end_date": fi.get("feed_end_date") or "",
+        "feed_start_date": fi.get("feed_start_date") or def_start,
+        "feed_end_date": fi.get("feed_end_date") or def_end,
         "feed_version": fi.get("feed_version") or today,
     }
     fieldnames = [

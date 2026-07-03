@@ -37,7 +37,10 @@ JP_EXTENSION_SCHEMA = {
         "required": ["agency_id", "agency_official_name",
                      "agency_zip_number", "agency_address"],
         "optional": ["agency_president_pos", "agency_president_name"],
-        "mandatory_file": True,   # GTFS-JP 必須ファイル
+        # GTFS-JP v4（公共交通運行情報標準データ仕様）で jp 拡張は本体から外れ「参考」扱いに
+        # なったため必須ファイルとはしない。ただし事業者の正式名称・住所を保持するため生成は
+        # 継続し、存在する場合は必須カラムの整合を検証する。
+        "mandatory_file": False,
     },
     "office_jp.txt": {
         "required": ["office_id", "office_name"],
