@@ -159,6 +159,9 @@
   .map-legend .item { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 10px; border-radius: 16px; background: #fff; border: 1px solid var(--line); }
   .map-legend .item.off { opacity: 0.35; }
   .map-legend .swatch { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.2); }
+  .map-dir { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .map-dir .dirbtn { cursor: pointer; padding: 4px 12px; border-radius: 16px; background: #fff; border: 1px solid var(--line); font-size: 13px; color: #333; }
+  .map-dir .dirbtn.active { background: #1E5FA8; border-color: #1E5FA8; color: #fff; font-weight: 600; }
 
   /* Stop list */
   .stop-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
@@ -300,6 +303,7 @@
   <strong>実際の停留所の位置と、地図上の位置が合っているか確認してください。</strong>マーカーをクリックすると、バス停名・読みがな・通る路線が表示されます。凡例の路線名をクリックすると、その路線だけの表示に絞り込めます。</p>
 
   <div class="card">
+    <div class="map-dir" id="mapDirFilter" style="margin-bottom:8px"></div>
     <div class="map-legend" id="mapLegend"></div>
     <div id="map"></div>
   </div>
@@ -995,10 +999,11 @@ function renderStops() {
   // unique stop names with all routes merged
   const byName = {};
   for (const s of stops) {
-    if (!byName[s.stop_name]) byName[s.stop_name] = { name: s.stop_name, yomi: yomi[s.stop_id]||"", en: en[s.stop_id]||"", routes: new Set(), ids: [] };
+    if (!byName[s.stop_name]) byName[s.stop_name] = { name: s.stop_name, yomi: yomi[s.stop_id]||"", en: en[s.stop_id]||"", routes: new Set(), ids: [], descs: new Set() };
     byName[s.stop_name].ids.push(s.stop_id);
     if (yomi[s.stop_id]) byName[s.stop_name].yomi = yomi[s.stop_id];
     if (en[s.stop_id]) byName[s.stop_name].en = en[s.stop_id];
+    if ((s.stop_desc||"").trim()) byName[s.stop_name].descs.add(s.stop_desc.trim());   // 方面（行き/帰り）
     (stopRoutes[s.stop_id]||new Set()).forEach(r => byName[s.stop_name].routes.add(r));
   }
 
@@ -1012,7 +1017,7 @@ function renderStops() {
     document.getElementById("stopList").innerHTML = filtered.map(s => `
       <div class="stop-item">
         <div class="yomi">${s.yomi||""}</div>
-        <div class="name">${s.name}</div>
+        <div class="name">${s.name}${s.descs && s.descs.size ? ` <span style="font-size:11px;color:#1565c0;font-weight:600">（${[...s.descs].join("・")}）</span>` : ""}</div>
         <div class="roman">${s.en||""}</div>
         <div class="routes">${[...s.routes].map(rid => `<span class="pill" style="background:${routeColor(rid)}">${routeName(rid)}</span>`).join("")}</div>
       </div>
@@ -1048,6 +1053,37 @@ function renderMap() {
   const shape2route = {};
   for (const t of trips) if (t.shape_id) shape2route[t.shape_id] = t.route_id;
 
+  // 方向（行き/帰り）フィルタ用のマップと方面ラベル
+  const tripById = {}; for (const t of trips) tripById[t.trip_id] = t;
+  const shape2dir = {}; for (const t of trips) if (t.shape_id) shape2dir[t.shape_id] = String(t.direction_id ?? "0");
+  const stopDirs = {};
+  for (const st of stopTimes) {
+    const t = tripById[st.trip_id]; if (!t) continue;
+    (stopDirs[st.stop_id] = stopDirs[st.stop_id] || new Set()).add(String(t.direction_id ?? "0"));
+  }
+  const dirLabel = {};
+  for (const t of trips) {
+    const d = String(t.direction_id ?? "0");
+    if (!dirLabel[d] && t.trip_headsign) {
+      const h = t.trip_headsign.replace(/(行き|行|方面|方向)$/, "");
+      dirLabel[d] = /(回り|循環)$/.test(t.trip_headsign) ? t.trip_headsign : (h ? h + "方面" : t.trip_headsign);
+    }
+  }
+  const dirs = [...new Set(trips.map(t => String(t.direction_id ?? "0")))].sort();
+  window.__mapDir = window.__mapDir || "all";
+  const dirEl = document.getElementById("mapDirFilter");
+  if (dirEl) {
+    if (dirs.length >= 2) {
+      const opts = [["all", "全方向"], ...dirs.map(d => [d, dirLabel[d] || ("方向 " + d)])];
+      dirEl.style.display = "";
+      dirEl.innerHTML = `<span style="font-size:13px;color:var(--muted);margin-right:2px">方向：</span>` +
+        opts.map(([v, l]) => `<button class="dirbtn ${window.__mapDir === v ? 'active' : ''}" data-dir="${v}">${l}</button>`).join("");
+      dirEl.querySelectorAll(".dirbtn").forEach(b => b.onclick = () => { window.__mapDir = b.dataset.dir; renderMap(); });
+    } else {
+      dirEl.style.display = "none";
+    }
+  }
+
   activeRouteIds = activeRouteIds || new Set(routes.map(r => r.route_id));
 
   // Legend with toggles
@@ -1077,6 +1113,7 @@ function renderMap() {
     for (const sid of Object.keys(grp)) {
       const rid = shape2route[sid];
       if (!activeRouteIds.has(rid)) continue;
+      if (window.__mapDir !== "all" && shape2dir[sid] && shape2dir[sid] !== window.__mapDir) continue;
       const pts = grp[sid].slice().sort((a,b) => +a.shape_pt_sequence - +b.shape_pt_sequence)
         .map(p => [+p.shape_pt_lat, +p.shape_pt_lon]);
       L.polyline(pts, { color: "#ffffff", weight: 9, opacity: 0.9 }).addTo(shapeGroup);   // 白縁で下地
@@ -1094,6 +1131,7 @@ function renderMap() {
       let best = null, bestLen = 0;
       for (const t of trips) {
         if (t.route_id !== rid) continue;
+        if (window.__mapDir !== "all" && String(t.direction_id ?? "0") !== window.__mapDir) continue;
         const ts = tripStops[t.trip_id] || [];
         if (ts.length > bestLen) { bestLen = ts.length; best = ts; }
       }
@@ -1114,6 +1152,7 @@ function renderMap() {
     for (const s of stops) {
       const sRoutes = stopRoutes[s.stop_id];
       if (!sRoutes || ![...sRoutes].some(r => activeRouteIds.has(r))) continue;
+      if (window.__mapDir !== "all") { const sd = stopDirs[s.stop_id]; if (!sd || !sd.has(window.__mapDir)) continue; }
       // 同名同位置の重複を1つに（_e/_w など）
       const key = s.stop_name + Math.round(+s.stop_lat*1e5) + "_" + Math.round(+s.stop_lon*1e5);
       if (seen.has(key)) continue;
@@ -1128,7 +1167,7 @@ function renderMap() {
       const routesHere = [...sRoutes].filter(r => activeRouteIds.has(r));
       const y = stopYomi(s.stop_id);
       const sv = `https://maps.google.com/maps?q=&layer=c&cbll=${lat},${lon}`;
-      const popup = `${y?`<div style="font-size:11px;color:#777">${y}</div>`:""}<strong style="font-size:14px">${s.stop_name}</strong><br>
+      const popup = `${y?`<div style="font-size:11px;color:#777">${y}</div>`:""}<strong style="font-size:14px">${s.stop_name}</strong>${(s.stop_desc||"").trim()?`<div style="font-size:11px;color:#1565c0">${s.stop_desc}</div>`:""}<br>
         ${routesHere.map(r => `<span class="pill" style="background:${routeColor(r)}">${routeName(r)}</span>`).join("")}
         <div style="margin-top:6px"><a href="${sv}" target="_blank" rel="noopener" style="font-size:12px;color:#1565c0;text-decoration:none">📷 ストリートビューで見る</a></div>`;
       marker.bindPopup(popup);
