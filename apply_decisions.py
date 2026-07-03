@@ -81,22 +81,29 @@ def main():
         h = (h or "").strip()
         if not h:
             return ""
-        if h.endswith(("回り", "循環")):          # 循環はそのまま（「左回り」等）
-            return h
         h = re.sub(r"(行き|行|方面|方向)$", "", h).strip()
         return (h + "方面") if h else ""
-    dir_head = {}   # did -> 方面テキスト
+
+    def _dest_of(_b):
+        """その方向の行先(最終停留所)。循環(起点に戻る)なら手前の停留所を行先とする。"""
+        for _t in _b["trips"]:
+            _cs = [c for c in _t["cells"] if not cell_excluded(c)]
+            if len(_cs) >= 2:
+                _names = [(c.get("name") or "").strip() for c in _cs]
+                if _names[-1] == _names[0] and len(_names) >= 3:   # 循環は起点手前を行先に
+                    return _names[-2]
+                return _names[-1]
+        return ""
+
+    dir_head = {}   # did -> 方面テキスト（stop_desc・行先表示に使う）
     for _bi, _b in enumerate(blocks):
         _did = bdir.get(_bi, 0)
         if _did in dir_head:
             continue
         _h = bhead.get(str(_bi)) or bhead.get(_bi)
-        if not _h:                                # 方向名が無ければその方向の最終停留所名
-            for _t in _b["trips"]:
-                _cs = [c for c in _t["cells"] if not cell_excluded(c)]
-                if _cs:
-                    _h = (_cs[-1].get("name") or "").strip()
-                    break
+        # 右回り/左回り/循環 は分かりにくいので、行先ベースの「○○方面」にする
+        if not _h or re.search(r"(回り|循環)", str(_h)):
+            _h = _dest_of(_b)
         dir_head[_did] = _houmen(_h) or ("行き方面" if _did == 0 else "帰り方面")
 
     # 停留所レジストリ（split時は (base, did) をキー＝方向ごとに別停留所）
@@ -165,7 +172,9 @@ def main():
                 trip_id = f"{rid}_{did}_{bi}_{ti}"
                 # 行先: 決定スペックの block_headsign（循環は「左回り/右回り」等）優先、
                 # 無ければ最終停留所名。
-                head = bhead.get(str(bi)) or bhead.get(int(bi)) or (cells[-1].get("name") or "").strip()
+                head = bhead.get(str(bi)) or bhead.get(int(bi))
+                if not head or re.search(r"(回り|循環)", str(head)):   # 右回り/左回り→○○方面
+                    head = dir_head.get(did) or (cells[-1].get("name") or "").strip()
                 svc_id = block_service.get(int(bi), sid)
                 used_services.add(svc_id)
                 trips.append({"trip_id": trip_id, "route_id": rid, "service_id": svc_id,

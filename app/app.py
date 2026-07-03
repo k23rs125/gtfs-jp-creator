@@ -100,6 +100,16 @@ st.markdown("""
   [data-testid="stAlert"] { border-radius:12px; box-shadow:0 1px 4px rgba(20,50,90,.05); }
   [data-testid="stCaptionContainer"], .stCaption { color:#5B6B7C; }
   a, a:visited { color:var(--brand); }
+  /* 入力欄を白背景でも枠が分かるように（クリックしないと欄が見えない問題の対策） */
+  div[data-baseweb="input"], div[data-baseweb="base-input"],
+  div[data-baseweb="select"] > div, div[data-baseweb="textarea"] {
+    background:#F5F9FF !important; border:1.5px solid #B7C9E2 !important; border-radius:8px !important; }
+  div[data-baseweb="input"]:focus-within, div[data-baseweb="select"] > div:focus-within,
+  div[data-baseweb="textarea"]:focus-within {
+    border-color:var(--brand) !important; box-shadow:0 0 0 3px rgba(30,95,168,.16) !important; }
+  .stTextInput input, .stNumberInput input, .stDateInput input, .stTextArea textarea { background:transparent; }
+  .stNumberInput button { background:#E9F0FB; border-color:#B7C9E2; }
+  .stDateInput div[data-baseweb="input"] { background:#F5F9FF !important; }
 </style>
 """, unsafe_allow_html=True)
 ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
@@ -931,10 +941,10 @@ if ss().get("decision_spec"):
         is_circular = c3.checkbox("循環路線（始点に戻る）", value=_loop,
                                   help="始点=終点を検出すると自動でチェック。違えば外してください。")
         headsign = c3.text_input("行き先表示（方向名）", value="",
-                                 placeholder="例: 太宰府市役所前 行 / 右回り / 循環",
-                                 help="バスの前面に出る行き先。空なら自動（方向見出し→無ければ終点名）。"
-                                      "循環など終点名が行き先にならない路線で入力。"
-                                      "例:『太宰府市役所前 行』『右回り』『循環』")
+                                 placeholder="例: 太宰府市役所 方面",
+                                 help="バスの前面に出る行き先。空なら自動で行先ベースの『○○方面』にします"
+                                      "（右回り/左回り/循環も分かりやすい『○○方面』に変換）。"
+                                      "特定の表示にしたいときだけ入力。例:『太宰府市役所 方面』")
         st.write("運行する曜日")
         d = st.columns(7)
         days = [d[i].checkbox(x, value=bool(_days_def[i]), key=f"day{i}_{tk}")

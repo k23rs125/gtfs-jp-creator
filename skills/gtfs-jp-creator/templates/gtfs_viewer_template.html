@@ -750,7 +750,7 @@ function dirLabel(routeId, trips) {
   const labels = {};
   for (const t of trips) {
     const d = t.direction_id || "0";
-    if (!labels[d] && t.trip_headsign) labels[d] = `${t.trip_headsign} 行き`;
+    if (!labels[d] && t.trip_headsign) labels[d] = /(方面|方向|行き?|回り|循環)$/.test(t.trip_headsign) ? t.trip_headsign : `${t.trip_headsign} 行き`;
   }
   return labels;
 }
