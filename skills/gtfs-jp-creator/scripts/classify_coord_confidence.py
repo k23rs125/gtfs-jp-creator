@@ -87,6 +87,8 @@ def main() -> int:
     ap.add_argument("--stop-times", required=True)
     ap.add_argument("--reports-dir", required=True)
     ap.add_argument("--manual", default=None, help="手動座標JSON(by_stop_name)。確定扱い")
+    ap.add_argument("--estimated", default=None,
+                    help="推定オフセットJSON(estimated_ids)。列挙stop_idは要確認に落とす（絶対に確認させる）")
     ap.add_argument("--on-route-m", type=float, default=500.0,
                     help="P11完全一致でも経路からこのm以上外れたら要確認(同名誤マッチ疑い)")
     ap.add_argument("--agree-m", type=float, default=100.0,
@@ -131,6 +133,12 @@ def main() -> int:
         _mj = json.loads(Path(a.manual).read_text(encoding="utf-8"))
         manual_names = set(_mj.get("by_stop_name", {}))
         manual_ids = set(_mj.get("by_stop_id", {}))   # 方向別の手動座標(stop_id指定)も確定扱い
+    estimated_ids = set()
+    if a.estimated and Path(a.estimated).exists():
+        try:
+            estimated_ids = set(json.loads(Path(a.estimated).read_text(encoding="utf-8")).get("estimated_ids", []))
+        except Exception:
+            estimated_ids = set()
 
     def final_source(sid):
         """最終座標(lat,lon)に一致する由来を返す。"""
@@ -189,6 +197,10 @@ def main() -> int:
                     if len(types) >= 2:
                         conf = "確定"
                         reason = f"複数ソース一致({'+'.join(sorted(types))}, ≤{int(a.agree_m)}m)"
+        # 行き/帰りを反対側へ自動配置した推定座標は、手動確定でない限り必ず要確認にする
+        if sid in estimated_ids and not (nm in manual_names or sid in manual_ids):
+            conf = "要確認"
+            reason = "進行方向の反対側へ自動配置（推定）。必ず地図で確認してください"
         counts[conf] += 1
         out.append({"stop_id": sid, "stop_name": nm,
                     "stop_lat": r.get("stop_lat", ""), "stop_lon": r.get("stop_lon", ""),

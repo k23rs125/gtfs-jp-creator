@@ -1470,6 +1470,13 @@ if ss().get("result"):
                    "終点・敷地内で同じ場所なら『同じ場所にする』で揃えられます）。")
         import csv as _csv
         crows = list(_csv.DictReader(conf_csv.open(encoding="utf-8-sig")))
+        # ★行き/帰りを反対側へ自動推定配置した停留所は、必ず確認してもらう（推定なので）
+        _n_est = sum(1 for r in crows if "反対側へ自動配置" in (r.get("reason") or ""))
+        if _n_est:
+            st.error(f"⚠ 行き・帰りを自動で **反対側（反対車線）に推定配置** した停留所が **{_n_est} 件** あります。"
+                     "これは経路からの**推定**であり、正しい位置とは限りません。"
+                     "**必ず地図で1件ずつ正しい位置を確認して『確定』にしてください**"
+                     "（確認が終わるまで公式提出はできません。同じ場所なら『同じ場所にする』で戻せます）。")
         # stop_desc(方面) を stops.txt から補う（行き/帰りの区別表示に使う）
         _descmap = {}
         _stpath = WORK / "out" / "gtfs" / "stops.txt"

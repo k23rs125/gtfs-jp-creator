@@ -451,6 +451,23 @@ def main() -> int:
         shutil.copy(stops_current, gtfs_dir / "stops.txt")
         log(f"最終 stops.txt を反映: {stops_current} → {gtfs_dir / 'stops.txt'}")
 
+    # ---- Step 3.5e2: 行き/帰りの同座標を反対側へ推定オフセット（方向分割時・要確認） ----
+    # 多くの停留所は反対車線にあり方向で座標が異なるが、P11は上り/下りを別座標で持たない。
+    # 経路(停留所の並び)から進行方向の左（日本は左側通行）へ寄せ、行き/帰りを反対側に分ける。
+    # ★推定なので必ず要確認（classifyで要確認に落とし、提出前チェックでブロック）。手動確定は除外。
+    off_report = work_dir / "direction_offset_report.json"
+    if cfg.get("direction_offset", True):
+        cmd = [PYTHON, script("offset_direction_coords.py"), str(gtfs_dir),
+               "--report", str(off_report)]
+        if manual_coords:
+            cmd += ["--manual", manual_coords]
+        ok = run_step("Step 3.5e2: 行き/帰りを反対側へ推定オフセット (offset_direction_coords)",
+                      cmd, args.dry_run)
+        record("Step 3.5e2 方向オフセット(推定)", ok)
+    else:
+        record("Step 3.5e2 方向オフセット(推定)", True, skipped=True)
+        log("Step 3.5e2: direction_offset=false のためスキップ")
+
     # ---- Step 3.5f: 座標の信頼度分類（確定/要確認/未補完。既定ON） ----
     # 各停留所の最終座標を補完源と経路整合から分類し、output_dir/座標_信頼度.csv に出力する。
     # 「推測座標(内挿/Nominatim/あいまい一致)を確定として黙って出さない」ための層で、官公庁
@@ -463,6 +480,8 @@ def main() -> int:
                "--report", str(work_dir / "coord_confidence_report.json")]
         if manual_coords:
             cmd += ["--manual", manual_coords]
+        if cfg.get("direction_offset", True) and off_report.exists():
+            cmd += ["--estimated", str(off_report)]   # 推定オフセットは要確認に落とす
         ok = run_step("Step 3.5f: 座標の信頼度分類 (classify_coord_confidence)", cmd, args.dry_run)
         record("Step 3.5f 座標信頼度", ok)
     else:
