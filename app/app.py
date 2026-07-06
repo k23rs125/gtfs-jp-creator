@@ -752,6 +752,7 @@ if "extract" in ss():
                 edited_cells.append(cs)
             css = pd.DataFrame("", index=ed.index, columns=ed.columns)
             rev = []            # 逆行セル（誤りの疑い＝赤）
+            rev_cells = []      # 赤セルの位置(i, 列ラベル, 停留所名, 時刻) 直接修正用
             nextday = []        # 日跨ぎ（夜→翌朝。逆行でない＝青。GTFSは24時超で表す）
             for j, cs in enumerate(edited_cells):
                 prev = None
@@ -767,6 +768,7 @@ if "extract" in ss():
                                 "background-color:#1565c0;color:#ffffff"   # 青＝日跨ぎ（翌日）
                         else:
                             rev.append((labels[j].split("#")[0], c["name"], c["time"][:5]))
+                            rev_cells.append((c["i"], labels[j], c["name"], c["time"][:5]))
                             css.iloc[c["i"], ed.columns.get_loc(labels[j])] = \
                                 "background-color:#c62828;color:#ffffff;font-weight:700"   # 赤＝逆行
                     prev = m
@@ -806,9 +808,22 @@ if "extract" in ss():
                         f"{a['stop_name']} {a['current'][:5]}→"
                         f"{(a['suggested'][:5] if a.get('suggested') else '要確認')}" for a in live_an[:8]))
                 if rev or nextday:
-                    with st.expander("色付きで表示（🔴逆行=要修正／🔵日跨ぎ=翌日）"):
+                    with st.expander("色付きで表示（🔴逆行=要修正／🔵日跨ぎ=翌日）", expanded=bool(rev)):
                         st.dataframe(ed.style.apply(lambda _x: css, axis=None),
                                      hide_index=True, use_container_width=True)
+                        if rev_cells:
+                            st.markdown("**🔴 逆行セルをここで直す**"
+                                        "（正しい時刻を入れると上書き。空欄なら上の表のまま）")
+                            for (ci, lab_raw, nm, tm) in rev_cells:
+                                cA, cB = st.columns([3, 2])
+                                cA.markdown(f"便 **{lab_raw.split('#')[0]}**｜{nm}"
+                                            f"　<span style='color:#c62828'>現在 {tm}</span>",
+                                            unsafe_allow_html=True)
+                                cB.text_input("正しい時刻", value="", placeholder=tm,
+                                              key=f"fix_{tok}_{bi}_{ci}_{lab_raw}",
+                                              label_visibility="collapsed")
+                            st.caption("例）7:30 と入力。停留所（行）ごと消したい待機時間は上の表の"
+                                       "左端で行を削除してください。")
             else:
                 st.caption("✅ 逆行なし・全セルが妥当な時刻です。")
         if issue_tot["rev"] or issue_tot["inval"] or issue_tot["an"]:
@@ -834,7 +849,9 @@ if "extract" in ss():
                         nm = new_names[i]
                         if not nm or lab is None or lab not in ed.columns:
                             continue   # 削除された停留所行はスキップ
-                        val = str(ed.iloc[i][lab]).strip()
+                        # 赤セル修正欄に入力があれば優先（空欄なら表の値）
+                        _fix = str(ss().get(f"fix_{tok}_{bi}_{i}_{lab}", "") or "").strip()
+                        val = _fix if _fix else str(ed.iloc[i][lab]).strip()
                         m = re.match(r"^(\d{1,2}):(\d{2})", val)
                         if not m:
                             continue
