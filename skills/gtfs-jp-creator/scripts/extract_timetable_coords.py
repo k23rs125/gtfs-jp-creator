@@ -63,6 +63,10 @@ def is_noise_name(nm: str) -> bool:
     # （実在の停留所に「ﾌｧﾐﾘｰﾏｰﾄ城島店（中町整骨院）」＝18字のような長い名称があるため）。
     if nm.startswith("※") or "⇒" in nm or "⇨" in nm or "→" in nm:
         return True
+    # ルート・方向見出し（「第１ルート（時計回り）」等）。これらの語は停留所名には現れない。
+    # 文字が二重に描画される PDF（第第１１ルルーートト…）でも「回り」は部分一致で拾える。
+    if "ルート" in nm or "回り" in nm or "循環" in nm:
+        return True
     for kw in ("到着", "発車", "乗車時刻", "利用前日", "予約", "時刻表", "改正版",
                "運行になります", "ダイヤでの運行"):
         # 「予約」を含むが「要予約【…】」は停留所なので別扱い（下で判定）
@@ -106,10 +110,20 @@ def cluster_cols(xs, gap):
     return [sum(c) / len(c) for c in cols]
 
 def detect_name_x0(name_tokens):
-    """停留所名列の代表x0（最頻値）を自動検出。"""
+    """停留所名列の左端x0を自動検出。
+    均等割り付けで停留所名が横に広がる時刻表では、最頻値だと各行の最後の文字（右端）を
+    拾ってしまい名前が先頭側で切れる（例: 新宮町マリンクス土曜ページ）。そこで、最頻に
+    近い頻度で現れる x0 のうち最も左（＝名前の先頭文字位置）を採用する。コンパクトな
+    名前（1トークン）では先頭＝最頻なので従来と同じ結果になる。"""
     if not name_tokens:
         return None
-    return Counter(round(w['x0']) for w in name_tokens).most_common(1)[0][0]
+    c = Counter(round(w['x0']) for w in name_tokens)
+    mode, top = c.most_common(1)[0]
+    # mode と同程度に頻出し（>=0.7×最頻）、mode より左で名前の広がり(~110pt)以内にある x0 の
+    # 最も左を名前の先頭とみなす。左に離れた別列（校区・番号など、行ごとに現れず頻度が低い）は
+    # しきい値で自然に除外される。コンパクトな名前では mode 自身が返り従来と同じ。
+    cands = [x for x, n in c.items() if n >= top * 0.7 and mode - 110 <= x <= mode]
+    return min(cands) if cands else mode
 
 # 方面/方向セクションの見出し行（縦ブロック分割の境界）。
 # コスモス号 弓削線のように、同じ時刻列を共有して方面ごとに縦2セクション積層する
