@@ -306,19 +306,26 @@ def generate_stops(data: dict, output_dir: Path) -> None:
 def generate_trips(data: dict, output_dir: Path) -> None:
     """trips.txt を生成。"""
     rows = []
+    has_block = any((t.get("block_id") or "").strip() for t in data["trips"])
     for t in data["trips"]:
-        rows.append({
+        row = {
             "route_id": t["route_id"],
             "service_id": t["service_id"],
             "trip_id": t["trip_id"],
             "trip_headsign": t.get("trip_headsign") or "",
             "direction_id": t.get("direction_id", 0),
             "shape_id": t.get("shape_id") or "",
-        })
+        }
+        if has_block:
+            row["block_id"] = (t.get("block_id") or "").strip()   # 車両運用（through-running等）
+        rows.append(row)
     fieldnames = [
         "route_id", "service_id", "trip_id", "trip_headsign",
-        "direction_id", "shape_id",
+        "direction_id",
     ]
+    if has_block:
+        fieldnames.append("block_id")
+    fieldnames.append("shape_id")
     write_csv(output_dir / "trips.txt", rows, fieldnames)
 
 

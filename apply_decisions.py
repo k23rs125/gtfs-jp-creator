@@ -156,6 +156,7 @@ def main():
                     do = 1
         return pu, do
 
+    trip_by_biti = {}   # (block_index, trip_index) -> trip dict。block_id 割当に使う
     for r in dec["routes"]:
         rid = r["route_id"]
         routes.append({"route_id": rid, "route_short_name": "",
@@ -179,6 +180,7 @@ def main():
                 used_services.add(svc_id)
                 trips.append({"trip_id": trip_id, "route_id": rid, "service_id": svc_id,
                               "direction_id": did, "trip_headsign": head, "shape_id": None})
+                trip_by_biti[(int(bi), ti)] = trips[-1]
                 for seq, c in enumerate(cells, 1):
                     hhmmss = c["time"] if c["time"].count(":") == 2 else c["time"] + ":00"
                     p = hhmmss.split(":"); p[0] = p[0].zfill(2); hhmmss = ":".join(p)
@@ -190,6 +192,16 @@ def main():
                     if do:   # 乗車専用（降車不可）
                         strec["drop_off_type"] = do
                     stop_times.append(strec)
+
+    # 車両運用（ブロック）: through-running など、同一車両が続けて走る便に共通の block_id を振る。
+    # block_links: [[{"block":bi,"trip":ti}, ...], ...]  各グループが1つの車両ブロック（例: 山らいず
+    # 15便→相らんど第1 10便）。指定された便にだけ付与し、他は空（＝公式と同じ運用の表し方）。
+    for gi, group in enumerate(dec.get("block_links", []) or [], 1):
+        block_id = f"B{gi:03d}"
+        for ref in group:
+            key = (int(ref["block"]), int(ref["trip"]))
+            if key in trip_by_biti:
+                trip_by_biti[key]["block_id"] = block_id
 
     # カレンダー: services(複数ダイヤ) があれば各々を、無ければ単一 service を出す。
     # 既定の開始/終了は単一 service の値を流用。実際に便が参照する service だけを残す。
