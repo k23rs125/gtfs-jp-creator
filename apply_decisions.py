@@ -133,6 +133,12 @@ def main():
     # 複数ダイヤ対応: block_service でブロックごとに service_id を割り当てられる
     # （平日/土日 で時刻が違う＝別ブロックのときに別カレンダーへ）。無指定は既定 sid。
     block_service = {int(k): v for k, v in dec.get("block_service", {}).items()}
+    # 便ごとのサービス割当（block_service より優先）。季節ダイヤ（相らんど第2の夏季/冬季を
+    # 別サービスにする等）で、同じブロック内の便を別カレンダーへ振り分けるのに使う。
+    # trip_service: [{"block":bi,"trip":ti,"service":"平日（夏季）"}, ...]
+    trip_svc = {}
+    for _ts in dec.get("trip_service", []) or []:
+        trip_svc[(int(_ts["block"]), int(_ts["trip"]))] = _ts["service"]
     used_services = set()
 
     # 乗降制約（降車専用/乗車専用）。範囲は推測せず spec で明示する（route_id/direction_id/
@@ -176,7 +182,7 @@ def main():
                 head = bhead.get(str(bi)) or bhead.get(int(bi))
                 if not head or re.search(r"(回り|循環)", str(head)):   # 右回り/左回り→○○方面
                     head = dir_head.get(did) or (cells[-1].get("name") or "").strip()
-                svc_id = block_service.get(int(bi), sid)
+                svc_id = trip_svc.get((int(bi), ti)) or block_service.get(int(bi), sid)
                 used_services.add(svc_id)
                 trips.append({"trip_id": trip_id, "route_id": rid, "service_id": svc_id,
                               "direction_id": did, "trip_headsign": head, "shape_id": None})
