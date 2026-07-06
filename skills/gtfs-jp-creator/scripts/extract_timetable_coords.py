@@ -78,6 +78,9 @@ def is_noise_name(nm: str) -> bool:
 # 番号が同じなら同一停留所として扱う方針(案ア)に基づき、名称からは除去する。
 DIRECTION_SUFFIX = re.compile(r'[（(](?:[東西南北]行き?|上り|下り|のりば\d*|\d+番のりば)[）)]\s*$')
 
+_FW_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
+
+
 def normalize_name(s: str) -> str:
     """停留所名の正規化。
     1) 先頭のアイコン文字(店/駅 等)・全角空白を除去
@@ -85,6 +88,7 @@ def normalize_name(s: str) -> str:
     """
     s = ICON_PREFIX.sub('', s).strip()
     s = DIRECTION_SUFFIX.sub('', s).strip()
+    s = s.translate(_FW_DIGITS)   # 全角数字→半角（「湊坂２丁目」→「湊坂2丁目」。公式GTFSは半角）
     return s
 
 def cluster_rows(items, thr):
