@@ -630,19 +630,28 @@ def _auto_route_rows(bs):
         rname = f"{nm0[0]}～{nm0[-1]}" if nm0 else f"路線{gi + 1}"
         for d, bi in enumerate(members):
             nm = [s.get("name") for s in bs[bi].get("stops", [])]
-            rows.append({"ブロック": bi, "見出し": bs[bi].get("direction_hint") or "",
+            # 行き先の既定: 方向見出し(direction_hint)があれば入れる。無ければ空にして、
+            # 生成時に終点名/循環判定から自動で「○○方面」にさせる（循環の起点手前も正しく扱う）。
+            dh = bs[bi].get("direction_hint")
+            rows.append({"ブロック": bi, "見出し": dh or "",
                          "停留所数": len(nm), "路線名": rname, "方向(0/1)": d % 2,
-                         "運行日": "③の曜日"})
+                         "行き先表示": dh or "", "運行日": "③の曜日"})
     return rows
 
 
 # 運行日パターン → 曜日フラグ（平日/土日で時刻が違う時刻表は、ブロックごとに変える）
 DAY_PATTERNS = {
     "平日(月〜金)": dict(mon=1, tue=1, wed=1, thu=1, fri=1, sat=0, sun=0),
+    "土曜": dict(mon=0, tue=0, wed=0, thu=0, fri=0, sat=1, sun=0),
+    "日曜・祝日": dict(mon=0, tue=0, wed=0, thu=0, fri=0, sat=0, sun=1),
     "土日祝": dict(mon=0, tue=0, wed=0, thu=0, fri=0, sat=1, sun=1),
     "毎日": dict(mon=1, tue=1, wed=1, thu=1, fri=1, sat=1, sun=1),
 }
-PATTERN_SID = {"平日(月〜金)": "WD", "土日祝": "WE", "毎日": "ALL"}
+PATTERN_SID = {"平日(月〜金)": "WD", "土曜": "SAT", "日曜・祝日": "SUN",
+               "土日祝": "WE", "毎日": "ALL"}
+# 祝日に「運行する側」のパターン（=祝日はこのダイヤ）。平日系は祝日を運休にする。
+PATTERN_RUNS_HOLIDAY = {"日曜・祝日": True, "土日祝": True, "毎日": True,
+                        "平日(月〜金)": False, "土曜": False}
 
 
 if "extract" in ss():
@@ -660,13 +669,16 @@ if "extract" in ss():
             "停留所数": st.column_config.NumberColumn("停留所数", disabled=True),
             "路線名": st.column_config.TextColumn("路線名", help="同じ路線名のブロックが1つの路線にまとまる"),
             "方向(0/1)": st.column_config.SelectboxColumn("方向(0/1)", options=[0, 1], required=True),
+            "行き先表示": st.column_config.TextColumn(
+                "行き先表示", help="バス前面に出る行き先。ブロック(便のまとまり)ごとに指定できます。"
+                "空なら終点名から『○○方面』。循環は『右回り/左回り』等でもOK。"),
             "運行日": st.column_config.SelectboxColumn(
                 "運行日", options=["③の曜日"] + list(DAY_PATTERNS), required=True,
-                help="平日/土日で時刻が違う時刻表は、便のブロックごとに運行日を変える（別ダイヤとして出力）"),
+                help="平日/土曜/日祝で時刻が違う時刻表は、便のブロックごとに運行日を変える（別ダイヤで出力）"),
         },
     )
-    st.caption("⚠ **平日と土日で時刻が違う**時刻表は、該当ブロックの『運行日』を変えてください"
-               "（別カレンダーで出力されます）。同じなら『③の曜日』のままでOK。")
+    st.caption("⚠ **平日・土曜・日祝で時刻が違う**時刻表は、該当ブロックの『運行日』を変えてください"
+               "（別カレンダーで出力）。同じなら『③の曜日』のまま。**行き先表示**もブロックごとに直せます。")
     # 割り当て表から decision_spec を構築（同じ路線名のブロックを1路線にまとめる）
     name_blocks, block_dir, headsign, block_pattern = {}, {}, {}, {}
     for _, r in edited.iterrows():
@@ -674,9 +686,12 @@ if "extract" in ss():
         name_blocks.setdefault(nm, []).append(bi)
         block_dir[str(bi)] = int(r["方向(0/1)"])
         block_pattern[str(bi)] = str(r.get("運行日") or "③の曜日")
-        dh = blocks_e[bi].get("direction_hint")
-        if dh:
-            headsign[str(bi)] = dh
+        # 行き先表示: 表で編集された値を優先。空なら方向見出し(direction_hint)を使う。
+        _head = str(r.get("行き先表示") or "").strip()
+        if _head:
+            headsign[str(bi)] = _head
+        elif blocks_e[bi].get("direction_hint"):
+            headsign[str(bi)] = blocks_e[bi]["direction_hint"]
     routes = [{"route_id": f"R{i + 1:02d}", "route_long_name": nm, "blocks": bidx, "circular": False}
               for i, (nm, bidx) in enumerate(name_blocks.items())]
     ss().decision_spec = {"routes": routes, "block_direction": block_dir, "block_headsign": headsign,
@@ -1068,12 +1083,10 @@ if ss().get("decision_spec"):
         ag_phone = c2.text_input("電話", value=det.get("phone", ""), key=f"tel_{tk}")
         is_circular = c3.checkbox("循環路線（始点に戻る）", value=_loop,
                                   help="始点=終点を検出すると自動でチェック。違えば外してください。")
-        headsign = c3.text_input("行き先表示（方向名）", value="",
-                                 placeholder="例: 太宰府市役所 方面",
-                                 help="バスの前面に出る行き先。空なら自動で行先ベースの『○○方面』にします"
-                                      "（右回り/左回り/循環も分かりやすい『○○方面』に変換）。"
-                                      "特定の表示にしたいときだけ入力。例:『太宰府市役所 方面』")
-        st.write("運行する曜日")
+        c3.caption("🚌 **行き先表示は②の割り当て表**でブロック（便のまとまり）ごとに設定できます"
+                   "（複数の行き先に対応）。")
+        st.write("運行する曜日（②で『③の曜日』のままのブロックに適用。土曜/日祝だけ別ダイヤにする"
+                 "ブロックは②の『運行日』で指定）")
         d = st.columns(7)
         days = [d[i].checkbox(x, value=bool(_days_def[i]), key=f"day{i}_{tk}")
                 for i, x in enumerate(["月", "火", "水", "木", "金", "土", "日"])]
@@ -1164,15 +1177,9 @@ if ss().get("decision_spec"):
         spec = dict(ss()["decision_spec"])
         if route_name:
             spec["routes"][0]["route_long_name"] = route_name
-        # 循環フラグ（意図の記録）と、行き先表示の上書き（方向見出しが無いブロックに適用）
+        # 循環フラグ（意図の記録）。行き先表示は②の割り当て表→block_headsign に反映済み。
         for r in spec.get("routes", []):
             r["circular"] = bool(is_circular)
-        if headsign.strip():
-            bh = dict(spec.get("block_headsign", {}))
-            for b in ss().extract.get("blocks", []):
-                if not b.get("direction_hint"):
-                    bh[str(b.get("block_index"))] = headsign.strip()
-            spec["block_headsign"] = bh
         period = {"start_date": start or "20250401", "end_date": end or "20271231"}
         form_days = {"mon": int(days[0]), "tue": int(days[1]), "wed": int(days[2]),
                      "thu": int(days[3]), "fri": int(days[4]), "sat": int(days[5]), "sun": int(days[6])}
@@ -1222,6 +1229,34 @@ if ss().get("decision_spec"):
                     _cur += datetime.timedelta(days=1)
             except Exception:
                 pass
+        # 祝日: パターン別に正しいサービスへ割り当てる（平日/土曜=運休2、日祝/土日祝/毎日=運行1、
+        # 既に走る曜日はスキップ）。run_pipeline の一律運休は複数ダイヤで日祝サービスの日曜まで
+        # 消してしまうため、祝日はここで決定的に展開する。年末年始/お盆(全休)は従来どおり後段で。
+        _syuku_inapp_ok = False
+        if hol_syuku:
+            try:
+                from generate_calendar_dates import load_syukujitsu
+                _holidays = load_syukujitsu(
+                    str(SCRIPTS.parent / "references" / "data" / "syukujitsu.csv"))
+                _p0 = datetime.datetime.strptime(period["start_date"], "%Y%m%d").date()
+                _p1 = datetime.datetime.strptime(period["end_date"], "%Y%m%d").date()
+                _daykeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+                _sid_pat = {v: k for k, v in PATTERN_SID.items()}   # WD→平日(月〜金) 等
+                for _d in _holidays:
+                    if not (_p0 <= _d <= _p1):
+                        continue
+                    _ymd = _d.strftime("%Y%m%d"); _dk = _daykeys[_d.weekday()]
+                    for _s in spec["services"]:
+                        _sid = _s["service_id"]
+                        _runs_hol = PATTERN_RUNS_HOLIDAY.get(_sid_pat.get(_sid, ""), False)
+                        _covers = int(_s.get(_dk, 0)) == 1
+                        if _runs_hol and not _covers:
+                            _add_cd(_ymd, 1, [_sid])   # 祝日はこのダイヤで運行(追加)
+                        elif (not _runs_hol) and _covers:
+                            _add_cd(_ymd, 2, [_sid])   # 平日/土曜は祝日運休
+                _syuku_inapp_ok = True
+            except Exception:
+                _syuku_inapp_ok = False   # 失敗時は後段の一律運休へフォールバック
         if _cal_dates:
             spec["calendar_dates"] = _cal_dates
         fare_matrix = []
@@ -1276,7 +1311,9 @@ if ss().get("decision_spec"):
                              "agency_address": ag_addr.strip() or None,
                              "agency_president_pos": ag_pres_pos.strip() or None,
                              "agency_president_name": ag_pres_name.strip() or None}
-        hol = {"syuku": hol_syuku, "nenmatsu": hol_nenmatsu, "obon": hol_obon}
+        # 祝日をアプリ側で正しく展開できたら後段の一律運休は使わない（二重・誤運休を防ぐ）。
+        hol = {"syuku": hol_syuku and not _syuku_inapp_ok,
+               "nenmatsu": hol_nenmatsu, "obon": hol_obon}
         # 路線名以外がほぼ未入力なら、暫定の既定値（捏造なし）で生成してよいか確認してから生成。
         minimal = (not ag_name.strip() and not ag_id.strip() and not ag_url.strip()
                    and not ag_phone.strip() and not ag_official.strip() and not ag_zip.strip()
