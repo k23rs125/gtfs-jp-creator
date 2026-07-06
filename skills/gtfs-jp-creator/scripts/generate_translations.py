@@ -87,11 +87,43 @@ def init_kakasi():
 
 
 def to_hiragana(text: str, kks) -> str:
-    """漢字混じり文字列を ひらがな に変換する。"""
+    """漢字混じり文字列を ひらがな に変換する。
+
+    半角カナ(ﾌｧﾐﾘｰﾏｰﾄ 等)は pykakasi が濁点・半濁点を誤処理して「ふぁみり゜ま゜」の
+    ように文字化けするため、先に NFKC で全角化してから変換する（読みの精度が上がる）。
+    """
     if not text or kks is None:
         return ""
-    result = kks.convert(text)
+    norm = unicodedata.normalize("NFKC", text)
+    result = kks.convert(norm)
     return "".join(item.get("hira", "") for item in result)
+
+
+def load_reading_dict(path: Path) -> dict[str, dict]:
+    """難読地名の補正辞書 CSV を読む。列: stop_name, ja-Hrkt, en(任意)。
+
+    pykakasi が苦手な全国共通の難読地名（例: 壱町原=いっちょうばる）だけを載せる。
+    停留所名(完全一致)でひらがな/英語を上書きする。無ければ空 dict。
+    """
+    d: dict[str, dict] = {}
+    if not path or not path.exists():
+        return d
+    try:
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            for r in csv.DictReader(f):
+                nm = (r.get("stop_name") or "").strip()
+                if not nm:
+                    continue
+                spec = {}
+                if (r.get("ja-Hrkt") or "").strip():
+                    spec["ja-Hrkt"] = r["ja-Hrkt"].strip()
+                if (r.get("en") or "").strip():
+                    spec["en"] = r["en"].strip()
+                if spec:
+                    d[nm] = spec
+    except Exception as e:
+        print(f"Warning: 読み補正辞書を読めません({path}): {e}", file=sys.stderr)
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +223,9 @@ def main() -> int:
                         help="LLM 英訳結果 JSON （{name: translation, ...}）を読み込んでマージ")
     parser.add_argument("--no-hiragana", action="store_true",
                         help="pykakasi 未インストール時の救済（ja-Hrkt を生成しない）")
+    parser.add_argument("--reading-dict", default=None,
+                        help="難読地名の補正辞書CSV(stop_name,ja-Hrkt,en)。pykakasiより優先。"
+                             "未指定なら references/data/stop_readings.csv があれば自動使用")
     parser.add_argument("--include-ja", action="store_true",
                         help="ja（原文コピー）行も出力する（既定は ja-Hrkt / en のみ。"
                              "feed_lang=ja では ja 名は stops.txt が持つため既定では重複を避ける）")
@@ -235,6 +270,25 @@ def main() -> int:
             for _, _, value in targets:
                 hiragana_map[value] = to_hiragana(value, kks)
 
+    # --- 難読地名の補正辞書で pykakasi を上書き（全国共通の難読地名のみ） ---
+    if args.reading_dict:
+        dict_path = Path(args.reading_dict)
+    else:
+        dict_path = Path(__file__).resolve().parent.parent / "references" / "data" / "stop_readings.csv"
+    reading_dict = load_reading_dict(dict_path)
+    en_dict: dict[str, str] = {}
+    if reading_dict:
+        n_over = 0
+        for _, _, value in targets:
+            spec = reading_dict.get(value)
+            if not spec:
+                continue
+            if spec.get("ja-Hrkt"):
+                hiragana_map[value] = spec["ja-Hrkt"]; n_over += 1
+            if spec.get("en"):
+                en_dict[value] = spec["en"]
+        print(f"読み補正辞書: {len(reading_dict)}件中 {n_over}件を停留所名に適用 ({dict_path.name})")
+
     # --- LLM 英訳結果のマージ ---
     en_map: dict[str, str] = {}
     if args.merge_en:
@@ -248,6 +302,9 @@ def main() -> int:
         except json.JSONDecodeError as e:
             print(f"Error: en.json パース失敗: {e}", file=sys.stderr)
             return 1
+    # 補正辞書の英語は、LLMマージに無い分だけ補う（利用者指定を優先）。
+    for k, v in en_dict.items():
+        en_map.setdefault(k, v)
 
     # --- translations.txt 行を構築 ---
     fieldnames = ["table_name", "field_name", "language", "translation", "field_value"]

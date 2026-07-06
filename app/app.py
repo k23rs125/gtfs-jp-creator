@@ -38,6 +38,56 @@ try:
     from stop_name_merge import detect_variants, apply_merges, all_stop_names
 except Exception:
     detect_variants = None
+# ふりがな(ja-Hrkt)の再計算に生成側と同じロジックを使う（NFKC正規化＋難読地名辞書）。
+try:
+    from generate_translations import (init_kakasi as _init_kks, to_hiragana as _to_hira,
+                                        load_reading_dict as _load_rdict)
+    _KKS = _init_kks()
+    _RDICT = _load_rdict(SCRIPTS.parent / "references" / "data" / "stop_readings.csv")
+except Exception:
+    _KKS, _RDICT, _to_hira = None, {}, None
+
+
+def _auto_reading(name):
+    """停留所名からふりがな(ja-Hrkt)を自動生成。辞書優先→pykakasi(NFKC)。"""
+    name = (name or "").strip()
+    if name in _RDICT and _RDICT[name].get("ja-Hrkt"):
+        return _RDICT[name]["ja-Hrkt"]
+    return _to_hira(name, _KKS) if _to_hira else ""
+
+
+def _reading_suspicious(reading):
+    """自動読みが怪しい（漢字が残る・半角カナ・濁点の文字化け）なら True。要確認の目印。"""
+    r = reading or ""
+    return bool(re.search(r"[一-鿿｡-ﾟ゚゜]", r)) or not r.strip()
+
+
+def _rewrite_csv_field(path, field, rename_map, only_table=None):
+    """CSV(path)の列 field の値を rename_map(old→new)で置換して書き戻す。
+    only_table 指定時は table_name==only_table の行だけ対象。BOM/改行は踏襲。"""
+    import csv as _c
+    p = Path(path)
+    if not p.exists() or not rename_map:
+        return
+    raw = p.read_bytes()
+    has_bom = raw.startswith(b"\xef\xbb\xbf")
+    newline = "\r\n" if b"\r\n" in raw else "\n"
+    with p.open(encoding="utf-8-sig", newline="") as f:
+        rd = _c.DictReader(f)
+        fns = rd.fieldnames or []
+        rows = list(rd)
+    if field not in fns:
+        return
+    for r in rows:
+        if only_table and (r.get("table_name") or "").strip() != only_table:
+            continue
+        if (r.get(field) or "").strip() in rename_map:
+            r[field] = rename_map[(r.get(field) or "").strip()]
+    with p.open("w", encoding=("utf-8-sig" if has_bom else "utf-8"), newline="") as f:
+        w = _c.DictWriter(f, fieldnames=fns, lineterminator=newline)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k, "") for k in fns})
 
 st.set_page_config(page_title="GTFS-JP メーカー", page_icon="🚌", layout="wide")
 
@@ -1093,7 +1143,10 @@ if ss().get("decision_spec"):
         c4, c5 = st.columns(2)
         start = c4.text_input("有効期間 開始 (YYYYMMDD)", value=det.get("start_date", ""), key=f"st_{tk}")
         end = c5.text_input("有効期間 終了 (YYYYMMDD)", value=det.get("end_date", ""), key=f"en_{tk}")
-        st.write("運休日（祝日・年末年始・お盆。該当する場合のみチェック）")
+        st.write("運休日（全路線に一律で適用。該当する場合のみチェック）")
+        st.caption("運行する曜日は②の『運行日』で路線(ブロック)ごとに決めます。ここの運休日は"
+                   "全ダイヤ共通の休みです。『祝日は運休』は平日/土曜ダイヤを休みにし、日祝ダイヤが"
+                   "あればその日は日祝ダイヤで運行します（正しいサービスに自動割当）。")
         h1, h2, h3 = st.columns(3)
         hol_syuku = h1.checkbox("祝日は運休", value=bool(det.get("holiday_syukujitsu")), key=f"hs_{tk}",
                                 help="内閣府の祝日データ（同梱・〜2027年）で祝日を運休に展開")
@@ -1577,42 +1630,81 @@ if ss().get("result"):
             if _lang in ("ja-Hrkt", "en"):
                 _cur[_nm][_lang] = _r.get("translation", "")
         _has_en = any("en" in v for v in _cur.values())
-        with st.expander("🈁 ふりがな・英語の確認・修正（難読地名の誤読をここで直す）"):
-            st.caption("pykakasi が自動生成した読みです。難読地名は誤読することがあります"
-                       "（例: 壱町原「いちまちはら」→ 正しくは「いっちょうばる」）。"
-                       "直したい行だけ書き換えて反映してください（GTFS-JP の必須項目）。")
-            _rows = [{"停留所名": _nm, "ふりがな(ja-Hrkt)": _cur[_nm].get("ja-Hrkt", ""),
-                      **({"英語(en)": _cur[_nm].get("en", "")} if _has_en else {})} for _nm in _order]
+        _n_susp = sum(1 for _nm in _order if _reading_suspicious(_cur[_nm].get("ja-Hrkt", "")))
+        with st.expander(f"🈁 ふりがな・英語・停留所名の確認・修正"
+                         f"（難読地名の誤読をここで直す{f' / ⚠要確認 {_n_susp}件' if _n_susp else ''}）",
+                         expanded=bool(_n_susp)):
+            st.caption("読みは自動生成（半角カナはNFKCで正規化、難読地名は辞書で補正）です。"
+                       "それでも難読地名は誤読が残ります（例: 相島「そうしま」→正しくは「あいのしま」）。"
+                       "**⚠印**の行（漢字が残る等）は特に確認を。**停留所名そのものも直せます**"
+                       "（OCR誤りの修正など）。名前を変えると読みは自動で作り直します"
+                       "（読み欄も直せばそちらが優先）。GTFS-JP の必須項目です。")
+            _rows = []
+            for _nm in _order:
+                _h = _cur[_nm].get("ja-Hrkt", "")
+                _row = {"要確認": "⚠" if _reading_suspicious(_h) else "",
+                        "停留所名": _nm, "ふりがな(ja-Hrkt)": _h}
+                if _has_en:
+                    _row["英語(en)"] = _cur[_nm].get("en", "")
+                _rows.append(_row)
             with st.form("readings_form"):
-                _cfg = {"停留所名": st.column_config.TextColumn("停留所名", disabled=True)}
+                _cfg = {
+                    "要確認": st.column_config.TextColumn("⚠", disabled=True, width="small",
+                                                          help="漢字が残る等、読みが怪しい行の目印"),
+                    "停留所名": st.column_config.TextColumn(
+                        "停留所名", help="停留所名そのものを直せます（OCR誤りの修正など）。"
+                        "変更すると stops.txt と読みが更新されます。"),
+                    "ふりがな(ja-Hrkt)": st.column_config.TextColumn("ふりがな(ja-Hrkt)"),
+                }
                 _edited = st.data_editor(pd.DataFrame(_rows), hide_index=True,
                                          key="readings_editor", column_config=_cfg,
                                          use_container_width=True)
-                if st.form_submit_button("この読みで反映（zipを更新）"):
-                    _by = {}
+                if st.form_submit_button("この内容で反映（zip・地図を更新）"):
+                    _renames, _by = {}, {}   # old→new名 / new名→{ja-Hrkt?,en?}
                     for _i, _nm in enumerate(_order):
-                        _spec = {}
+                        _new = str(_edited.iloc[_i]["停留所名"]).strip()
                         _nh = str(_edited.iloc[_i]["ふりがな(ja-Hrkt)"]).strip()
-                        if _nh and _nh != _cur[_nm].get("ja-Hrkt", ""):
-                            _spec["ja-Hrkt"] = _nh
-                        if _has_en:
-                            _ne = str(_edited.iloc[_i].get("英語(en)", "")).strip()
-                            if _ne and _ne != _cur[_nm].get("en", ""):
-                                _spec["en"] = _ne
-                        if _spec:
-                            _by[_nm] = _spec
-                    if not _by:
+                        _ne = str(_edited.iloc[_i].get("英語(en)", "")).strip() if _has_en else ""
+                        _read_edited = bool(_nh) and _nh != _cur[_nm].get("ja-Hrkt", "")
+                        _en_edited = bool(_ne) and _ne != _cur[_nm].get("en", "")
+                        _key = _new or _nm
+                        if _new and _new != _nm:
+                            _renames[_nm] = _new
+                            if not _read_edited:   # 読み未編集なら新名から自動再計算
+                                _auto = _auto_reading(_new)
+                                if _auto:
+                                    _by.setdefault(_key, {})["ja-Hrkt"] = _auto
+                        if _read_edited:
+                            _by.setdefault(_key, {})["ja-Hrkt"] = _nh
+                        if _en_edited:
+                            _by.setdefault(_key, {})["en"] = _ne
+                    if not _renames and not _by:
                         st.info("変更がありませんでした。")
                     else:
-                        _mr = WORK / "manual_readings.json"
-                        _mr.write_text(json.dumps({"by_stop_name": _by}, ensure_ascii=False, indent=2),
-                                       encoding="utf-8")
-                        run([SCRIPTS / "apply_manual_readings.py", _trans, "--readings", _mr])
+                        # (1) 停留所名の変更を stops.txt / translations.txt(field_value) に反映
+                        if _renames:
+                            _stops_p = out / "gtfs" / "stops.txt"
+                            _rewrite_csv_field(_stops_p, "stop_name", _renames)
+                            _rewrite_csv_field(_trans, "field_value", _renames,
+                                               only_table="stops")
+                        # (2) 読み・英語の手動/自動値を translations.txt に上書き（新名キー）
+                        if _by:
+                            _mr = WORK / "manual_readings.json"
+                            _mr.write_text(json.dumps({"by_stop_name": _by}, ensure_ascii=False,
+                                                      indent=2), encoding="utf-8")
+                            run([SCRIPTS / "apply_manual_readings.py", _trans, "--readings", _mr])
+                        # (3) zip 再梱包 & 地図/ビューア再生成（名前変更を反映）
                         _zz = list(out.glob("*_gtfs-jp.zip"))
                         if _zz:
                             run([SCRIPTS / "package_gtfs_zip.py", out / "gtfs", "-o", _zz[0]])
-                        st.success(f"{len(_by)}件の読みを反映し、GTFS-JP(zip)を更新しました。"
-                                   "下のボタンで再ダウンロードしてください。")
+                        if _renames:
+                            run([SCRIPTS / "make_map_view.py", out / "gtfs" / "stops.txt",
+                                 "--out", out / "map_view.html", "--title", "app_feed"])
+                            run([SCRIPTS / "make_gtfs_viewer.py", "--feed", out / "gtfs",
+                                 "-o", out / "gtfs_viewer.html"])
+                        st.success(
+                            f"反映しました（停留所名 {len(_renames)}件 / 読み・英語 {len(_by)}件）。"
+                            "GTFS-JP(zip)と地図を更新しました。下のボタンで再ダウンロードしてください。")
                         st.rerun()
     # zip ダウンロード
     zips = list(out.glob("*_gtfs-jp.zip"))
