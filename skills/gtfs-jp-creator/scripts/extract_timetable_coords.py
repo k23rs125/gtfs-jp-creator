@@ -204,9 +204,20 @@ def extract_block(words, x_lo, x_hi, name_margin_left, name_margin_right,
         if skip_tops and any(abs(top - h) < row_thr for h in skip_tops):
             continue  # セクション見出し行は停留所として扱わない
         rmin = min(t['x0'] for t in r); rmax = max(t['x1'] for t in r)
-        inline = [w for w in band_extra if abs(w['top'] - top) < row_thr + 1
-                  and w['x0'] >= rmin - 2 and w['x1'] <= rmax + 2]
-        nm = normalize_name("".join(x['text'] for x in sorted(list(r) + inline, key=lambda w: w['x0'])))
+        _row_extra = [w for w in band_extra if abs(w['top'] - top) < row_thr + 1]
+        # (1) JP名のx範囲内にある非JP（中間の数字。例「緑ケ浜３丁目」の３、「下府１丁目」の１）
+        inline = [w for w in _row_extra if w['x0'] >= rmin - 2 and w['x1'] <= rmax + 2]
+        # (2) JP名の左に連続する非JP（接頭辞。例「ＪＲ福工大前駅」の J R）。gap<=8 で連結し、
+        #     30pt以上離れた左の番号列/校区列は連結されず混ざらない。
+        prefix = []; _edge = rmin
+        for w in sorted([w for w in _row_extra if w['x1'] <= rmin + 2],
+                        key=lambda w: w['x1'], reverse=True):
+            if _edge - w['x1'] <= 8:
+                prefix.append(w); _edge = w['x0']
+            else:
+                break
+        nm = normalize_name("".join(x['text'] for x in
+                                    sorted(list(r) + inline + prefix, key=lambda w: w['x0'])))
         if is_noise_name(nm):
             continue
         near = min(numlist, key=lambda x: abs(x[0] - top)) if numlist else (1e9, "")
