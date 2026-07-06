@@ -751,15 +751,25 @@ if "extract" in ss():
                                "time": f"{int(m.group(1)):02d}:{m.group(2)}:00"})
                 edited_cells.append(cs)
             css = pd.DataFrame("", index=ed.index, columns=ed.columns)
-            rev = []            # 逆行セル
+            rev = []            # 逆行セル（誤りの疑い＝赤）
+            nextday = []        # 日跨ぎ（夜→翌朝。逆行でない＝青。GTFSは24時超で表す）
             for j, cs in enumerate(edited_cells):
                 prev = None
                 for c in cs:
-                    if prev is not None and c["min"] < prev:
-                        rev.append((labels[j].split("#")[0], c["name"], c["time"][:5]))
-                        css.iloc[c["i"], ed.columns.get_loc(labels[j])] = \
-                            "background-color:#c62828;color:#ffffff;font-weight:700"
-                    prev = c["min"]
+                    m = c["min"]
+                    if prev is not None and m < prev:
+                        # 日跨ぎ判定: 翌日(+24h)にすると前から自然に続く(3時間以内で増える)なら日跨ぎ。
+                        # 待機時間(0:11等)は翌日にしても差が大きく、逆行(赤)として残す。
+                        if 0 <= (m + 1440) - prev <= 180:
+                            m += 1440
+                            nextday.append((labels[j].split("#")[0], c["name"], c["time"][:5]))
+                            css.iloc[c["i"], ed.columns.get_loc(labels[j])] = \
+                                "background-color:#1565c0;color:#ffffff"   # 青＝日跨ぎ（翌日）
+                        else:
+                            rev.append((labels[j].split("#")[0], c["name"], c["time"][:5]))
+                            css.iloc[c["i"], ed.columns.get_loc(labels[j])] = \
+                                "background-color:#c62828;color:#ffffff;font-weight:700"   # 赤＝逆行
+                    prev = m
             live_an = []        # OCR誤読の疑い（編集後の値で再計算）
             if detect_anomalies:
                 tmpb = {"block_index": bi, "trips": [
@@ -771,23 +781,32 @@ if "extract" in ss():
             issue_tot["rev"] += len(rev)
             issue_tot["inval"] += len(inval)
             issue_tot["an"] += len(live_an)
+            issue_tot["nd"] = issue_tot.get("nd", 0) + len(nextday)
             msgs = []
             if rev: msgs.append(f"🔴 時刻の逆行 {len(rev)}件")
             if inval: msgs.append(f"⚠ 時刻でない値 {len(inval)}件")
             if live_an: msgs.append(f"🟠 OCR誤読の疑い {len(live_an)}件")
+            if nextday: msgs.append(f"🔵 日跨ぎ（翌日） {len(nextday)}件")
             if msgs:
-                st.warning("　／　".join(msgs) + "　— 原典と照合して直すと自動で再チェックします。")
+                _sev = rev or inval or live_an   # 赤/非時刻/OCRは要対応、青(日跨ぎ)だけなら情報
+                (st.warning if _sev else st.info)(
+                    "　／　".join(msgs)
+                    + ("　🔴赤=要修正の逆行　🔵青=日跨ぎ（翌日・誤りではない。GTFSは24時超で出力）"
+                       if (rev or nextday) else "")
+                    + "　— 原典と照合して直すと自動で再チェックします。")
                 if rev:
                     st.caption("逆行: " + " ／ ".join(f"{l} {s} {t}" for l, s, t in rev[:8])
                                + (" ほか" if len(rev) > 8 else ""))
+                if nextday:
+                    st.caption("日跨ぎ(翌日): " + " ／ ".join(f"{l} {s} {t}" for l, s, t in nextday[:8]))
                 if inval:
                     st.caption("非時刻: " + " ／ ".join(f"{l} {s}「{v}」" for l, s, v in inval[:8]))
                 if live_an:
                     st.caption("疑い: " + " ／ ".join(
                         f"{a['stop_name']} {a['current'][:5]}→"
                         f"{(a['suggested'][:5] if a.get('suggested') else '要確認')}" for a in live_an[:8]))
-                if rev:
-                    with st.expander("🔴 逆行しているセルを色で表示"):
+                if rev or nextday:
+                    with st.expander("色付きで表示（🔴逆行=要修正／🔵日跨ぎ=翌日）"):
                         st.dataframe(ed.style.apply(lambda _x: css, axis=None),
                                      hide_index=True, use_container_width=True)
             else:

@@ -187,9 +187,19 @@ def main():
                 trips.append({"trip_id": trip_id, "route_id": rid, "service_id": svc_id,
                               "direction_id": did, "trip_headsign": head, "shape_id": None})
                 trip_by_biti[(int(bi), ti)] = trips[-1]
+                _prev_min, _dayoff = None, 0   # 便内の日跨ぎ検出（夜→翌朝は24時超で出力）
                 for seq, c in enumerate(cells, 1):
                     hhmmss = c["time"] if c["time"].count(":") == 2 else c["time"] + ":00"
-                    p = hhmmss.split(":"); p[0] = p[0].zfill(2); hhmmss = ":".join(p)
+                    _pp = hhmmss.split(":")
+                    _h, _m = int(_pp[0]), int(_pp[1]); _s = _pp[2].zfill(2) if len(_pp) > 2 else "00"
+                    _cur = _h * 60 + _m
+                    # 日跨ぎ＝翌日(+24h)。翌日扱いにすると前の時刻から自然に続く(3時間以内で増える)
+                    # ときだけ +24h する。待機時間(0:11 等の注記)は翌日にしても差が大きく、誤変換しない。
+                    if _prev_min is not None and _cur + _dayoff * 1440 < _prev_min \
+                            and 0 <= (_cur + (_dayoff + 1) * 1440) - _prev_min <= 180:
+                        _dayoff += 1
+                    _prev_min = _cur + _dayoff * 1440
+                    hhmmss = f"{_h + _dayoff * 24:02d}:{_m:02d}:{_s}"
                     strec = {"trip_id": trip_id, "stop_id": sid_of[key_of(c, did)],
                              "stop_sequence": seq, "arrival_time": hhmmss, "departure_time": hhmmss}
                     pu, do = _board_codes(rid, did, bi, (c.get("name") or "").strip())
