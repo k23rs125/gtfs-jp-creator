@@ -45,7 +45,7 @@ except ImportError:
 
 # 停留所名の先頭に紛れ込むアイコン由来文字・全角空白
 ICON_PREFIX = re.compile(r'^[店駅\u3000\s]+')
-TIME_RE = re.compile(r'^\d{1,2}:\d{2}$')
+TIME_RE = re.compile(r'^\d{1,2}[:：]\d{2}$')   # 全角コロン（5：50）の時刻表にも対応
 NUM_RE = re.compile(r'^\d{1,3}$')
 JP_RE = re.compile(r'[ぁ-んァ-ヶ一-龠]')
 
@@ -59,12 +59,15 @@ def is_noise_name(nm: str) -> bool:
         return True
     if nm.endswith("方面") or nm.endswith("」"):
         return True
-    for kw in ("到着", "発車", "乗車時刻", "利用前日", "予約", "時刻表", "改正版"):
+    # 注記（※…）・方向見出し（佐屋⇒西鉄新宮駅 等）は停留所ではない。長さでは切らない
+    # （実在の停留所に「ﾌｧﾐﾘｰﾏｰﾄ城島店（中町整骨院）」＝18字のような長い名称があるため）。
+    if nm.startswith("※") or "⇒" in nm or "⇨" in nm or "→" in nm:
+        return True
+    for kw in ("到着", "発車", "乗車時刻", "利用前日", "予約", "時刻表", "改正版",
+               "運行になります", "ダイヤでの運行"):
         # 「予約」を含むが「要予約【…】」は停留所なので別扱い（下で判定）
         if kw in nm and not nm.startswith("要予約"):
             return True
-    if nm.startswith("⇒"):
-        return True
     return False
 
 # 末尾の方向付記（（西行き）（東行き）（上り）（下り）等）。乗り場違いでも
@@ -159,8 +162,12 @@ def extract_block(words, x_lo, x_hi, name_margin_left, name_margin_right,
     if not jp_in_block:
         return {"stops": [], "uncertain": [], "trips": [], "warnings": ["停留所名(日本語)トークンが取得できません。座標抽出は不適。"]}
     xmode = detect_name_x0(jp_in_block)
-    lo, hi = xmode - name_margin_left, xmode + name_margin_right
-    name_tokens = [w for w in jp_in_block if lo <= w['x0'] <= hi and w['x0'] >= xmode - name_margin_left]
+    # 名前列の右端は、ブロック範囲 x_hi（＝時刻列の手前。呼び出し側でデータ駆動に決定）まで
+    # 広げる。均等割り付けで横に広がる停留所名（例「的 野 公 民 館 前」）を途中で切らないため。
+    # 左端は番号列を避ける margin。従来より広いが、x_hi が時刻列手前なので時刻は混ざらない。
+    lo = xmode - name_margin_left
+    hi = max(xmode + name_margin_right, x_hi)
+    name_tokens = [w for w in jp_in_block if lo <= w['x0'] <= hi]
 
     # --- 番号列（停留所名列の少し左の数字） ---
     nums = [w for w in words if num_x_lo <= w['x0'] <= num_x_hi and NUM_RE.match(w['text'])
@@ -204,7 +211,7 @@ def extract_block(words, x_lo, x_hi, name_margin_left, name_margin_right,
         ri = nearest(w['top'], tops)
         ci = nearest(w['x0'], colx)
         if abs(tops[ri] - w['top']) < row_thr + 1:
-            grid[(ri, ci)] = w['text']
+            grid[(ri, ci)] = w['text'].replace('：', ':')   # 全角コロンを半角に正規化
     trips = []
     for ci in range(len(colx)):
         cells = []
@@ -292,9 +299,25 @@ def main():
         print(f"[OK] 出力: {args.output}", file=sys.stderr)
         return
 
-    # 名前列(日本語)の x0 分布から「ブロック(方向)」を検出
-    # 縦書き1文字ラベル(校区名 等)を除くため、幅のある(>=2文字相当)トークンに限定
-    jp = [w for w in words if JP_RE.search(w['text']) and (w['x1'] - w['x0']) >= 18]
+    # 名前列(日本語)の x0 分布から「ブロック(方向)」を検出。
+    # 均等割り付けで1文字ずつに割れる停留所名（例「的 野 公 民 館 前」「佐　　屋」）に対応するため、
+    # 同一行の日本語トークンを、大きな水平ギャップ（=別方向の列）でだけ区切って結合し、
+    # 結合後の幅で判定する。縦1文字ラベル(校区名等)は行が別なので結合されず、幅フィルタで除外される。
+    def _merge_row_names(row_tokens, gap=100):
+        xs = sorted(row_tokens, key=lambda w: w['x0'])
+        groups, cur = [], [xs[0]]
+        for w in xs[1:]:
+            if w['x0'] - cur[-1]['x1'] <= gap:
+                cur.append(w)
+            else:
+                groups.append(cur); cur = [w]
+        groups.append(cur)
+        return [{'x0': g[0]['x0'], 'x1': g[-1]['x1'],
+                 'text': "".join(t['text'] for t in g)} for g in groups]
+    jp_raw = [w for w in words if JP_RE.search(w['text'])]
+    jp = []
+    for _r in cluster_rows(jp_raw, args.row_thr):
+        jp.extend(m for m in _merge_row_names(_r) if (m['x1'] - m['x0']) >= 18)
     x0c = Counter(round(w['x0']) for w in jp)
     # 出現10件以上の x0 を名前列候補とみなす
     name_x0s = sorted([x for x, c in x0c.items() if c >= 10])
@@ -327,10 +350,24 @@ def main():
     needs = []  # 要確認項目（利用者に質問を投げる材料）
     raw_blocks = []
     for bi, cx in enumerate(block_centers):
-        x_lo, x_hi = cx - 20, cx + 120
         num_x_lo, num_x_hi = cx - 58, cx - 12  # 左端を-45→-58に拡大: 3桁番号(名前の左約46pt)を取りこぼさないため
         next_cx = block_centers[bi + 1] if bi + 1 < len(block_centers) else page_w
-        time_x_lo, time_x_hi = cx + 120, next_cx - 60 if next_cx < page_w else page_w
+        # 名前/時刻の境界をデータ駆動で決める（固定 cx+120 だと名前列が狭く時刻が近い時刻表で
+        # 先頭便を取りこぼす。例: マリンクス）。最初の時刻列 x0 を基準に、その左の停留所名
+        # トークンの右端との中間を境界にする。ヘッダ「N便」・注記(※…)・方向見出し(⇒)は名前右端の
+        # 計算から除外する（時刻列付近まで伸びて境界を右に押し、先頭便を落とすため）。
+        _times_x = sorted(w['x0'] for w in words
+                          if cx - 25 < w['x0'] < next_cx and TIME_RE.match(w['text']))
+        _first_time = _times_x[0] if _times_x else cx + 120
+        _names = [w for w in words
+                  if cx - 25 <= w['x0'] < _first_time - 3 and JP_RE.search(w['text'])
+                  and not re.match(r'^[\d０-９]{1,2}便$', w['text'])
+                  and '⇒' not in w['text'] and not w['text'].startswith('※')
+                  and len(w['text']) <= 16]
+        _name_right = max((w['x1'] for w in _names), default=cx + 40)
+        boundary = min((_name_right + _first_time) / 2, _first_time - 2) if _times_x else cx + 120
+        x_lo, x_hi = cx - 20, boundary
+        time_x_lo, time_x_hi = boundary, next_cx - 60 if next_cx < page_w else page_w
 
         # --- 方面見出しによる縦セクション分割 ---
         # このブロックの水平範囲内の見出し行を検出し、時刻帯の「中段」にある見出し
