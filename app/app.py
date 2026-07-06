@@ -677,7 +677,8 @@ if "extract" in ss():
         render_source_panel("tt")   # 原本（PDF/画像）を並べて照合できるパネル
         n_an = len(anomalies)
         st.caption("抽出した**全時刻**です。原典（紙やPDF）と見比べて、違うセルを直接直してください。"
-                   "空欄＝通過。"
+                   "空欄＝通過。**停留所名も直接編集**でき、**行を選んで削除**もできます"
+                   "（「待機時間」「○○出発」など停留所でない行を消す／表記を直す）。"
                    + (f"OCR誤読の疑い **{n_an}件** は各表の下に列挙しています。" if n_an else "")
                    + "直したら『この時刻表で確定して反映』を押してください（自動では書き換えません）。")
         edited_blocks = {}
@@ -717,11 +718,19 @@ if "extract" in ss():
             df = pd.DataFrame(rows)
             dh = b.get("direction_hint")
             st.markdown(f"**block {bi}**" + (f"（{dh}）" if dh else ""))
-            colcfg = {"停留所": st.column_config.TextColumn("停留所", disabled=True)}
+            colcfg = {"停留所": st.column_config.TextColumn(
+                "停留所", help="停留所名を直接直せます。行の左端で選ぶと削除でき、"
+                "『待機時間』『渡船場出発』のような停留所でない行を消せます。")}
             for lab in labels:
                 colcfg[lab] = st.column_config.TextColumn(lab.split("#")[0])
             ed = st.data_editor(df, hide_index=True, use_container_width=True,
-                                key=f"tt_{tok}_{bi}", column_config=colcfg)
+                                key=f"tt_{tok}_{bi}", column_config=colcfg, num_rows="dynamic")
+
+            def _enm(i):   # 編集後の停留所名（削除/改名を反映）
+                try:
+                    return str(ed.iloc[i].get("停留所", "") or "").strip()
+                except Exception:
+                    return ""
             edited_blocks[bi] = (ed, labels, stops)
             # ---- 編集内容をその場で再チェック（逆行・不正値・OCR疑い）----
             edited_cells = []   # 便ごとの [{i,name,min,time}]
@@ -729,13 +738,15 @@ if "extract" in ss():
             for j, lab in enumerate(labels):
                 cs = []
                 for i in range(len(ed)):
+                    if not _enm(i):
+                        continue   # 削除された（空の）停留所行はスキップ
                     v = str(ed.iloc[i][lab]).strip()
                     if not v or v.lower() == "nan":
                         continue
                     m = re.match(r"^(\d{1,2}):(\d{2})(?::\d{2})?$", v)
                     if not m:
-                        inval.append((lab.split("#")[0], stops[i], v)); continue
-                    cs.append({"i": i, "name": stops[i],
+                        inval.append((lab.split("#")[0], _enm(i), v)); continue
+                    cs.append({"i": i, "name": _enm(i),
                                "min": int(m.group(1)) * 60 + int(m.group(2)),
                                "time": f"{int(m.group(1)):02d}:{m.group(2)}:00"})
                 edited_cells.append(cs)
@@ -793,14 +804,22 @@ if "extract" in ss():
                 if bi not in edited_blocks:
                     continue
                 ed, labels, stops = edited_blocks[bi]
+                # 編集後の停留所名（空欄＝削除された行）。行ごとに1つ。
+                new_names = [str(ed.iloc[i].get("停留所", "") or "").strip() for i in range(len(ed))]
+                # ブロックの master 停留所を編集後で更新（空行＝待機時間等は除外）
+                b["stops"] = [{"name": nm} for nm in new_names if nm]
                 for j, t in enumerate(b.get("trips", [])):
-                    lab = labels[j]; newcells = []
+                    lab = labels[j] if j < len(labels) else None
+                    newcells = []
                     for i in range(len(ed)):
+                        nm = new_names[i]
+                        if not nm or lab is None or lab not in ed.columns:
+                            continue   # 削除された停留所行はスキップ
                         val = str(ed.iloc[i][lab]).strip()
                         m = re.match(r"^(\d{1,2}):(\d{2})", val)
                         if not m:
                             continue
-                        newcells.append({"seq": len(newcells) + 1, "num": None, "name": stops[i],
+                        newcells.append({"seq": len(newcells) + 1, "num": None, "name": nm,
                                          "time": f"{int(m.group(1)):02d}:{m.group(2)}:00", "reserve": False})
                     t["cells"] = newcells; t["n_stops"] = len(newcells)
             for k in ("decision_spec", "result", "confirmed", "anomalies_token"):
