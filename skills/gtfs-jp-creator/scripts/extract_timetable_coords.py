@@ -192,11 +192,21 @@ def extract_block(words, x_lo, x_hi, name_margin_left, name_margin_right,
 
     stops = []
     uncertain = []  # 番号が取れず、停留所か不確実なもの(要確認)
+    # 名前列内の「日本語でないトークン」（例「緑ケ浜３丁目」の３、「下府１丁目」の１）。
+    # 名前は日本語トークンから作るため、名前の途中の数字が落ちる。行ごとに、その行の
+    # 日本語名の x範囲内にあるものだけを取り込む（左の番号列はスパン外なので混ざらない）。
+    band_extra = [w for w in words
+                  if lo <= w['x0'] and w['x1'] <= x_hi + 2
+                  and y_lo <= w['top'] <= y_hi and not JP_RE.search(w['text'])]
+
     for r in cluster_rows(name_tokens, row_thr):
         top = sum(t['top'] for t in r) / len(r)
         if skip_tops and any(abs(top - h) < row_thr for h in skip_tops):
             continue  # セクション見出し行は停留所として扱わない
-        nm = normalize_name("".join(x['text'] for x in sorted(r, key=lambda w: w['x0'])))
+        rmin = min(t['x0'] for t in r); rmax = max(t['x1'] for t in r)
+        inline = [w for w in band_extra if abs(w['top'] - top) < row_thr + 1
+                  and w['x0'] >= rmin - 2 and w['x1'] <= rmax + 2]
+        nm = normalize_name("".join(x['text'] for x in sorted(list(r) + inline, key=lambda w: w['x0'])))
         if is_noise_name(nm):
             continue
         near = min(numlist, key=lambda x: abs(x[0] - top)) if numlist else (1e9, "")
