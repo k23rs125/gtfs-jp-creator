@@ -285,6 +285,73 @@ def render_source_panel(where=""):
                    "違う所は上の表で直せます。")
 
 
+def _pdf_time_pages(src):
+    """時刻トークンを持つページ番号(1始まり)一覧。複数あれば全ページ抽出の対象。
+    pdfplumberが使えない/PDFでない場合は None（従来の単一ページ抽出にフォールバック）。"""
+    try:
+        import pdfplumber
+    except Exception:
+        return None
+    tre = re.compile(r'^\d{1,2}[:：]\d{2}')
+    pages = []
+    try:
+        with pdfplumber.open(src) as pdf:
+            for idx, pg in enumerate(pdf.pages):
+                try:
+                    n = sum(1 for w in pg.extract_words() if tre.match(w['text']))
+                except Exception:
+                    n = 0
+                if n >= 3:          # 時刻がごく少ないページ(表紙/凡例/連絡先)は除外
+                    pages.append(idx + 1)
+    except Exception:
+        return None
+    return pages
+
+
+def _extract_merge_pages(src, pages, ext_out):
+    """時刻のある各ページを個別抽出し、blocks を1つの extract.json に統合する。
+    block_index は全ページ通しで振り直し、needs の block 参照も付け替える。
+    複数路線が別ページに分かれた時刻表(例: マリンクス)で全ルートを取り込むための処理。"""
+    merged = {"source": str(src), "page": pages[0], "pages": pages,
+              "blocks": [], "warnings": [], "needs_confirmation": []}
+    tmp = WORK / "extract_page.json"
+    last_se, n_img = "", 0
+    for pno in pages:
+        rc, so, se = run([SCRIPTS / "extract_timetable_coords.py", src,
+                          "-o", tmp, "--page", str(pno)])
+        last_se = se or last_se
+        if rc != 0 or not tmp.exists():
+            merged["warnings"].append(f"p{pno}: 抽出に失敗（スキップ）")
+            continue
+        pj = json.loads(tmp.read_text(encoding="utf-8"))
+        if not pj.get("blocks") and any(n.get("type") == "image_pdf_use_ocr"
+                                        for n in pj.get("needs_confirmation", [])):
+            n_img += 1
+        off = len(merged["blocks"])          # このページのブロックを通し番号へ
+        idx_map = {}
+        for b in pj.get("blocks", []):
+            old = b.get("block_index")
+            b["page"] = pno
+            b["block_index"] = off + (old if isinstance(old, int) else 0)
+            idx_map[old] = b["block_index"]
+            merged["blocks"].append(b)
+        for nd in pj.get("needs_confirmation", []):
+            if nd.get("type") == "image_pdf_use_ocr":
+                continue             # 個別ページのOCR誘導は全体では出さない
+            if "block" in nd and nd["block"] in idx_map:
+                nd = dict(nd); nd["block"] = idx_map[nd["block"]]
+            merged["needs_confirmation"].append(nd)
+        for w in pj.get("warnings", []):
+            merged["warnings"].append(f"p{pno}: {w}")
+    # 全ページ画像化でブロックが1つも取れない → OCR経路へ誘導（単一ページ時と同じ挙動）
+    if not merged["blocks"] and n_img:
+        merged["needs_confirmation"].append({
+            "type": "image_pdf_use_ocr", "page": pages[0],
+            "message": "全ページが画像化(テキストレイヤなし)と判定しました。OCR(MinerU)経路で抽出してください。"})
+    ext_out.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    return 0, "", last_se
+
+
 def do_extract(src):
     ext_out = WORK / "extract.json"
     low = str(src).lower()
@@ -296,7 +363,13 @@ def do_extract(src):
     elif low.endswith(".md"):
         rc, so, se = run([SCRIPTS / "extract_timetable_markdown.py", src, "-o", ext_out])
     else:
-        rc, so, se = run([SCRIPTS / "extract_timetable_coords.py", src, "-o", ext_out])
+        # 複数ページ(路線が別ページに分かれている)時刻表は全ページ抽出して統合。
+        # 1ページのみ/判定不可なら従来どおり最多時刻ページを自動抽出。
+        _pages = _pdf_time_pages(src)
+        if _pages and len(_pages) > 1:
+            rc, so, se = _extract_merge_pages(src, _pages, ext_out)
+        else:
+            rc, so, se = run([SCRIPTS / "extract_timetable_coords.py", src, "-o", ext_out])
     ss().pop("ocr_pending", None)   # 新しい抽出のたびに前回のOCR待ちを消す
     if rc == 0 and ext_out.exists():
         ex = json.loads(ext_out.read_text(encoding="utf-8"))
