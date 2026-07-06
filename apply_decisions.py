@@ -84,30 +84,36 @@ def main():
         h = re.sub(r"(行き|行|方面|方向)$", "", h).strip()
         return (h + "方面") if h else ""
 
+    def _dest_of_cells(_cs):
+        """便(セル列)の行先。循環(起点に戻る)なら起点手前を行先とする。"""
+        _names = [(c.get("name") or "").strip() for c in _cs]
+        if len(_names) < 1:
+            return ""
+        if len(_names) >= 3 and _names[-1] == _names[0]:   # 循環は起点手前を行先に
+            return _names[-2]
+        return _names[-1]
+
     def _dest_of(_b):
-        """その方向の行先(最終停留所)。循環(起点に戻る)なら手前の停留所を行先とする。"""
+        """そのブロックの行先(最初の有効便の最終停留所)。stop_desc の既定に使う。"""
         for _t in _b["trips"]:
             _cs = [c for c in _t["cells"] if not cell_excluded(c)]
             if len(_cs) >= 2:
-                _names = [(c.get("name") or "").strip() for c in _cs]
-                if _names[-1] == _names[0] and len(_names) >= 3:   # 循環は起点手前を行先に
-                    return _names[-2]
-                return _names[-1]
+                return _dest_of_cells(_cs)
         return ""
 
-    dir_head = {}   # did -> 方面テキスト（stop_desc・行先表示に使う）
-    for _bi, _b in enumerate(blocks):
-        _did = bdir.get(_bi, 0)
-        if _did in dir_head:
-            continue
-        _h = bhead.get(str(_bi)) or bhead.get(_bi)
-        # 右回り/左回り/循環 は分かりにくいので、行先ベースの「○○方面」にする
-        if not _h or re.search(r"(回り|循環)", str(_h)):
-            _h = _dest_of(_b)
-        dir_head[_did] = _houmen(_h) or ("行き方面" if _did == 0 else "帰り方面")
+    def _block_houmen(bi):
+        """ブロック bi の「○○方面」テキスト。stop_desc・行先の既定に使う。
+        方向IDだけのグローバルにすると、別路線（先に処理した路線）の行先を流用して
+        しまう（例: 循環路線に「佐屋方面」）。必ずそのブロック自身の終点から作る。"""
+        _h = bhead.get(str(bi)) or bhead.get(int(bi))
+        if not _h or re.search(r"(回り|循環)", str(_h)):   # 右回り/左回り→行先ベースの方面
+            _h = _dest_of(blocks[int(bi)])
+        _did = bdir.get(int(bi), 0)
+        return _houmen(_h) or ("行き方面" if _did == 0 else "帰り方面")
 
     # 停留所レジストリ（split時は (base, did) をキー＝方向ごとに別停留所）
     reg = {}   # key -> (name, num_for_sort, did)
+    reg_block = {}   # key -> 代表ブロック（方面=stop_desc をそのブロックの終点から出す）
     for _bi, b in enumerate(blocks):
         did = bdir.get(_bi, 0)
         for t in b["trips"]:
@@ -120,11 +126,12 @@ def main():
                 key = key_of(c, did)
                 if key not in reg:
                     reg[key] = (nm, num if num is not None else 99999, did)
+                    reg_block[key] = _bi
     # S採番（代表num昇順→方向→名称）
     ordered = sorted(reg, key=lambda k: (reg[k][1], reg[k][2], reg[k][0]))
     sid_of = {k: f"S{i:03d}" for i, k in enumerate(ordered, 1)}
     stops = [{"stop_id": sid_of[k], "stop_name": reg[k][0], "stop_lat": None, "stop_lon": None,
-              "stop_desc": (dir_head.get(reg[k][2], "") if split_dir else "")}
+              "stop_desc": (_block_houmen(reg_block[k]) if split_dir else "")}
              for k in ordered]
 
     routes, trips, stop_times = [], [], []
@@ -178,10 +185,14 @@ def main():
                     continue
                 trip_id = f"{rid}_{did}_{bi}_{ti}"
                 # 行先: 決定スペックの block_headsign（循環は「左回り/右回り」等）優先、
-                # 無ければ最終停留所名。
+                # 無ければこのブロック自身の終点から「○○方面」。
+                # dir_head（方向IDだけのグローバル）を先に使うと、先に処理した別路線の行先を
+                # 流用してしまう（例: 循環路線 R02 に山らいず R01 の「佐屋方面」が付く）。
                 head = bhead.get(str(bi)) or bhead.get(int(bi))
                 if not head or re.search(r"(回り|循環)", str(head)):   # 右回り/左回り→○○方面
-                    head = dir_head.get(did) or (cells[-1].get("name") or "").strip()
+                    # この便自身の終点から方面を作る（区間便も正確に）。無ければブロック既定。
+                    head = (_houmen(_dest_of_cells(cells)) or _block_houmen(bi)
+                            or (cells[-1].get("name") or "").strip())
                 svc_id = trip_svc.get((int(bi), ti)) or block_service.get(int(bi), sid)
                 used_services.add(svc_id)
                 trips.append({"trip_id": trip_id, "route_id": rid, "service_id": svc_id,
