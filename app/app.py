@@ -608,8 +608,44 @@ def apply_conditions_doc(path, tk, routes):
     return True
 
 
-def run_generation(spec, muni, use_nom, hol):
+def _ai_readings_apply(ai_key, ai_ctx):
+    """生成後の translations.txt に対し、AIが探索した読みを『自動読みと違う所だけ』既定値に反映。
+    自動確定ではなく“既定値”＝④で必ず人が確認する前提。反映した停留所を ss()['ai_applied'] に記録。"""
+    ss().pop("ai_applied", None)
+    _tp = WORK / "out" / "gtfs" / "translations.txt"
+    if not _tp.exists():
+        return
+    import csv as _c2
+    _cur = {}
+    for _r in _c2.DictReader(_tp.open(encoding="utf-8-sig")):
+        if (_r.get("table_name") or "").strip() == "stops" and (_r.get("language") or "").strip() == "ja-Hrkt":
+            _cur[(_r.get("field_value") or "").strip()] = _r.get("translation", "")
+    if not _cur:
+        return
+    with st.spinner("AIで読みを探索中..."):
+        _sug = claude_structure.suggest_readings(list(_cur.keys()), ai_key, context=ai_ctx)
+    _by, _applied = {}, {}
+    for _nm, _s in (_sug or {}).items():
+        _y = (_s.get("yomi") or "").strip()
+        if _y and _nm in _cur and _y != _cur[_nm]:   # 自動読みと違う所だけ既定値に
+            _by[_nm] = {"ja-Hrkt": _y}
+            _applied[_nm] = {"before": _cur[_nm], "yomi": _y,
+                             "confidence": _s.get("confidence", ""), "note": _s.get("note", "")}
+    if _by:
+        _mr = WORK / "manual_readings.json"
+        _mr.write_text(json.dumps({"by_stop_name": _by}, ensure_ascii=False, indent=2), encoding="utf-8")
+        run([SCRIPTS / "apply_manual_readings.py", _tp, "--readings", _mr])
+        _zz = list((WORK / "out").glob("*_gtfs-jp.zip"))
+        if _zz:
+            run([SCRIPTS / "package_gtfs_zip.py", WORK / "out" / "gtfs", "-o", _zz[0]])
+    ss()["ai_applied"] = _applied
+    st.info(f"AIが読みを探索し、自動読みと違う **{len(_applied)} 件**を既定値に反映しました。"
+            "**④で必ず確認**してください（AI由来＝要確認）。")
+
+
+def run_generation(spec, muni, use_nom, hol, ai_read=False, ai_key="", ai_ctx=""):
     """spec から GTFS-JP を生成（apply_decisions→run_pipeline）。ss().result に結果を入れる。"""
+    ss().pop("ai_applied", None)   # 再生成のたびに前回のAI探索マークを消す
     # 都道府県だけだと P11 の市域bboxが効かず、同名バス停を県内別所に誤マッチしやすい。
     if muni and not any(k in muni for k in ("市", "町", "村", "区")):
         st.warning(f"⚠ 対象自治体が「{muni}」（都道府県のみ）です。**市区町村まで**入れると"
@@ -639,6 +675,12 @@ def run_generation(spec, muni, use_nom, hol):
         (WORK / "config.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
         rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
     ss().result = {"rc": rc, "log": se}
+    # 生成後、任意でAIが読みを探索して既定値に反映（④で確認）。失敗しても生成物は無事。
+    if rc == 0 and ai_read and ai_key:
+        try:
+            _ai_readings_apply(ai_key, ai_ctx or muni)
+        except Exception as _e:
+            st.warning(f"AI読み探索はスキップしました（{_e}）。④で個別に実行できます。")
     st.success("完了しました。" if rc == 0 else "完了（警告/エラーあり）。")
 
 
@@ -1251,6 +1293,12 @@ if ss().get("decision_spec"):
                 if sel:
                     board_sel[bi] = sel
         use_nom = st.checkbox("Nominatim 補完を使う（POI多い路線向け・遅い）", value=False)
+        ai_read_gen = st.checkbox("🔎 生成時にAIで読み(ふりがな)を探索して既定値にする（任意・要確認）",
+                                  value=False,
+                                  help="生成後、Claudeが停留所名の読みを探索し、自動読み(pykakasi)と違う所だけを"
+                                       "既定値に反映します。④で必ず確認してください（AI由来＝要確認・推測を鵜呑みにしない）。")
+        ai_gen_key = st.text_input("ANTHROPIC_API_KEY（上のAIチェックを使う時。環境変数があれば空でOK）",
+                                   type="password", value="", key=f"aigk_{tk}")
         submitted = st.form_submit_button("GTFS-JP を生成する", type="primary")
 
     if submitted:
@@ -1439,12 +1487,16 @@ if ss().get("decision_spec"):
                    and not (zone_fare and fare_matrix)
                    and not start.strip() and not end.strip()
                    and not (hol_syuku or hol_nenmatsu or hol_obon) and not _cal_dates)
+        _aikey = ai_gen_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        _aion = bool(ai_read_gen)
         if minimal:
-            ss().pending_gen = {"spec": spec, "muni": muni, "use_nom": bool(use_nom), "hol": hol}
+            ss().pending_gen = {"spec": spec, "muni": muni, "use_nom": bool(use_nom), "hol": hol,
+                                "ai_read": _aion, "ai_key": _aikey}
             ss().awaiting_confirm = True
             st.rerun()
         else:
-            run_generation(spec, muni, bool(use_nom), hol)
+            run_generation(spec, muni, bool(use_nom), hol,
+                           ai_read=_aion, ai_key=_aikey, ai_ctx=muni)
 
     # 路線名のみ入力 → 暫定既定値での生成確認（捏造せず、要確認として入れる）
     if ss().get("awaiting_confirm"):
@@ -1463,7 +1515,9 @@ if ss().get("decision_spec"):
         cc1, cc2 = st.columns(2)
         if cc1.button("この暫定内容で生成する", type="primary"):
             ss().pop("awaiting_confirm", None)
-            run_generation(sp, pg.get("muni", "福岡県"), pg.get("use_nom", False), pg.get("hol", {}))
+            run_generation(sp, pg.get("muni", "福岡県"), pg.get("use_nom", False), pg.get("hol", {}),
+                           ai_read=pg.get("ai_read", False), ai_key=pg.get("ai_key", ""),
+                           ai_ctx=pg.get("muni", ""))
             st.rerun()
         if cc2.button("入力に戻る"):
             ss().pop("awaiting_confirm", None); ss().pop("pending_gen", None); st.rerun()
@@ -1693,20 +1747,31 @@ if ss().get("result"):
             if _lang in ("ja-Hrkt", "en"):
                 _cur[_nm][_lang] = _r.get("translation", "")
         _has_en = any("en" in v for v in _cur.values())
+        _aiap = ss().get("ai_applied") or {}   # 生成時にAIが探索して既定化した読み（要確認）
         _n_susp = sum(1 for _nm in _order if _reading_suspicious(_cur[_nm].get("ja-Hrkt", "")))
+        _hdr = (f' / ⚠要確認 {_n_susp}件' if _n_susp else '') + (f' / 🔎AI {len(_aiap)}件' if _aiap else '')
         with st.expander(f"🈁 ふりがな・英語・停留所名の確認・修正"
-                         f"（難読地名の誤読をここで直す{f' / ⚠要確認 {_n_susp}件' if _n_susp else ''}）",
-                         expanded=bool(_n_susp) or bool(ss().get("ai_readings"))):
+                         f"（難読地名の誤読をここで直す{_hdr}）",
+                         expanded=bool(_n_susp) or bool(_aiap) or bool(ss().get("ai_readings"))):
             st.caption("読みは自動生成（半角カナはNFKCで正規化、難読地名は辞書で補正）です。"
                        "それでも難読地名は誤読が残ります（例: 相島「そうしま」→正しくは「あいのしま」）。"
                        "**⚠印**の行（漢字が残る等）は特に確認を。**停留所名そのものも直せます**"
                        "（OCR誤りの修正など）。名前を変えると読みは自動で作り直します"
                        "（読み欄も直せばそちらが優先）。GTFS-JP の必須項目です。")
+            if _aiap:
+                st.info(f"🔎 **AIが探索して既定にした読み {len(_aiap)}件**（表の🔎AI印）。"
+                        "AI由来なので**原典で確認**してください。下の表で 元の自動読み→AIの読み・確度を確認できます。")
+                _aidf = [{"停留所名": _k, "元の自動読み": _v.get("before", ""),
+                          "AIが入れた読み": _v.get("yomi", ""), "確度": _v.get("confidence", ""),
+                          "根拠(AI)": _v.get("note", "")} for _k, _v in _aiap.items()]
+                st.dataframe(pd.DataFrame(_aidf), hide_index=True, use_container_width=True)
             _rows = []
             for _nm in _order:
                 _h = _cur[_nm].get("ja-Hrkt", "")
-                _row = {"要確認": "⚠" if _reading_suspicious(_h) else "",
-                        "停留所名": _nm, "ふりがな(ja-Hrkt)": _h}
+                _mk = "⚠" if _reading_suspicious(_h) else ""
+                if _nm in _aiap:
+                    _mk = (_mk + " 🔎AI").strip()
+                _row = {"要確認": _mk, "停留所名": _nm, "ふりがな(ja-Hrkt)": _h}
                 if _has_en:
                     _row["英語(en)"] = _cur[_nm].get("en", "")
                 _rows.append(_row)
