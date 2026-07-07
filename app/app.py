@@ -1696,7 +1696,7 @@ if ss().get("result"):
         _n_susp = sum(1 for _nm in _order if _reading_suspicious(_cur[_nm].get("ja-Hrkt", "")))
         with st.expander(f"🈁 ふりがな・英語・停留所名の確認・修正"
                          f"（難読地名の誤読をここで直す{f' / ⚠要確認 {_n_susp}件' if _n_susp else ''}）",
-                         expanded=bool(_n_susp)):
+                         expanded=bool(_n_susp) or bool(ss().get("ai_readings"))):
             st.caption("読みは自動生成（半角カナはNFKCで正規化、難読地名は辞書で補正）です。"
                        "それでも難読地名は誤読が残ります（例: 相島「そうしま」→正しくは「あいのしま」）。"
                        "**⚠印**の行（漢字が残る等）は特に確認を。**停留所名そのものも直せます**"
@@ -1769,6 +1769,72 @@ if ss().get("result"):
                             f"反映しました（停留所名 {len(_renames)}件 / 読み・英語 {len(_by)}件）。"
                             "GTFS-JP(zip)と地図を更新しました。下のボタンで再ダウンロードしてください。")
                         st.rerun()
+
+            # ---- 🔎 AIで読みをチェック（任意・要確認）----
+            # 難読地名は自動読み(pykakasi)が“静かに”誤ることがある(⚠も付かない)。
+            # Claude に読み候補を尋ね、自動読みと食い違う所を洗い出す＝第二の意見。
+            # 候補は必ず人が原典で確認してから採用する（推測を鵜呑みにしない＝正しく失敗）。
+            st.markdown("---")
+            st.markdown("**🔎 AIで読みをチェック（任意・要確認）**")
+            st.caption("Claude に読みの候補を尋ね、**自動読みと食い違う所**を洗い出します（難読地名の"
+                       "静かな誤読対策）。**AIの候補も必ず原典で確認**してから採用してください。")
+            _ak = st.text_input("ANTHROPIC_API_KEY（環境変数があれば空でOK）", type="password",
+                                value="", key="ai_read_key")
+            _akey = _ak or os.environ.get("ANTHROPIC_API_KEY", "")
+            st.text_input("地域（文脈・任意。読みの曖昧さを減らす）", key="ai_read_ctx",
+                          placeholder="例: 福岡県古賀市")
+            if st.button("AIに読みを提案させる", key="ai_read_btn"):
+                if not _akey:
+                    st.warning("APIキーが未設定です。環境変数 ANTHROPIC_API_KEY を設定するか入力してください。")
+                else:
+                    try:
+                        with st.spinner("Claude に読みを問い合わせ中..."):
+                            ss()["ai_readings"] = claude_structure.suggest_readings(
+                                _order, _akey, context=ss().get("ai_read_ctx", ""))
+                        st.rerun()   # 取得結果を、展開を保ったまま表示する
+                    except Exception as _e:
+                        st.error(f"読み候補の取得に失敗しました: {_e}")
+            _air = ss().get("ai_readings") or {}
+            if _air:
+                _cmp = []
+                for _nm in _order:
+                    _cur_y = _cur[_nm].get("ja-Hrkt", "")
+                    _sug = _air.get(_nm) or {}
+                    _ay = (_sug.get("yomi") or "").strip()
+                    _diff = bool(_ay) and _ay != _cur_y
+                    _cmp.append({"停留所名": _nm, "現在の読み": _cur_y, "AI候補": _ay,
+                                 "判定": "" if not _ay else ("○ 一致" if not _diff else "✗ 違う"),
+                                 "確度": _sug.get("confidence", ""), "根拠(AI)": _sug.get("note", "")})
+                _mis = [r for r in _cmp if str(r["判定"]).startswith("✗")]
+                st.caption(f"AIと自動読みが**食い違う停留所：{len(_mis)}件**（ここが確認の要。"
+                           "低確度は特に慎重に）。")
+                st.dataframe(pd.DataFrame(_cmp), hide_index=True, use_container_width=True)
+                if _mis:
+                    _sel = st.multiselect("AI候補を採用する停留所（原典で確認して選ぶ）",
+                                          [r["停留所名"] for r in _mis], default=[], key="ai_read_sel")
+                    if st.button("選んだAI候補を反映（zip更新）", key="ai_read_apply"):
+                        if not _sel:
+                            st.info("採用する停留所を選んでください。")
+                        else:
+                            _byai = {}
+                            for _nm in _sel:
+                                _sug = _air.get(_nm) or {}
+                                _spec = {}
+                                if (_sug.get("yomi") or "").strip():
+                                    _spec["ja-Hrkt"] = _sug["yomi"].strip()
+                                if _has_en and (_sug.get("romaji") or "").strip():
+                                    _spec["en"] = _sug["romaji"].strip()
+                                if _spec:
+                                    _byai[_nm] = _spec
+                            _mr = WORK / "manual_readings.json"
+                            _mr.write_text(json.dumps({"by_stop_name": _byai}, ensure_ascii=False,
+                                                      indent=2), encoding="utf-8")
+                            run([SCRIPTS / "apply_manual_readings.py", _trans, "--readings", _mr])
+                            _zz = list(out.glob("*_gtfs-jp.zip"))
+                            if _zz:
+                                run([SCRIPTS / "package_gtfs_zip.py", out / "gtfs", "-o", _zz[0]])
+                            st.success(f"{len(_byai)}件のAI候補を反映しました（要確認）。zipを更新しました。")
+                            st.rerun()
     # zip ダウンロード（完成物の主ボタンは下の⑥ビューア直下。ここは修正後の再取得用）
     zips = list(out.glob("*_gtfs-jp.zip"))
     if zips:

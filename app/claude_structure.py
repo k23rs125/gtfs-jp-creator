@@ -41,6 +41,38 @@ def summarize_extract(extract: dict) -> str:
     return "\n".join(lines)
 
 
+READ_SYSTEM = """あなたは日本の地名・バス停名の読み(ふりがな)の専門家です。
+与えられたバス停名それぞれに、正しいひらがな読み(ja-Hrkt)とヘボン式ローマ字を返します。
+重要(この出力は人が最終確認する「候補」です):
+- **推測で自信ありげに答えない**。自信が持てない時は confidence を "low" にし、note に理由や
+  別の読みの可能性を書く。わざと当てにいかない。
+- 施設名(市役所/病院/公民館/学校 等)は一般的な読み、固有名詞(地名・難読)は地理知識に基づく読み。
+- 文脈(自治体名)があれば、その地域での読みを優先する。
+- 分割・方向付記(（西行き）等)や記号は無視し、停留所名そのものの読みにする。
+出力は JSON のみ(前後に文章を付けない):
+{"<バス停名>": {"yomi":"<ひらがな>","romaji":"<ヘボン式>","confidence":"high|low","note":"<任意>"}, ...}
+"""
+
+
+def suggest_readings(names, api_key: str, context: str = "",
+                     model: str = "claude-sonnet-4-6") -> dict:
+    """バス停名リストの読み候補を Claude に尋ねる。人が確認する前提の「候補」を返す。
+    戻り値: {name: {"yomi","romaji","confidence","note"}}。"""
+    from anthropic import Anthropic
+    client = Anthropic(api_key=api_key)
+    uniq = list(dict.fromkeys(n for n in names if n))
+    ctx = f"対象地域(文脈): {context}\n" if context else ""
+    body = ctx + "次のバス停名の読みを返してください:\n" + "\n".join(f"- {n}" for n in uniq)
+    msg = client.messages.create(
+        model=model, max_tokens=3000, system=READ_SYSTEM,
+        messages=[{"role": "user", "content": body}])
+    text = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text")
+    a, z = text.find("{"), text.rfind("}")
+    if a < 0 or z < 0:
+        raise ValueError(f"Claude応答からJSONを抽出できませんでした:\n{text[:400]}")
+    return json.loads(text[a:z + 1])
+
+
 def structure(extract: dict, api_key: str, model: str = "claude-sonnet-4-6") -> dict:
     """Claude API で decision-spec を得る。"""
     from anthropic import Anthropic
