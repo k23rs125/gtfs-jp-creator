@@ -815,7 +815,8 @@ def _auto_route_rows(bs):
             # 生成時に終点名/循環判定から自動で「○○方面」にさせる（循環の起点手前も正しく扱う）。
             dh = bs[bi].get("direction_hint")
             rows.append({"ブロック": bi, "見出し": dh or "",
-                         "停留所数": len(nm), "路線名": rname, "方向(0/1)": d % 2,
+                         "停留所数": len(nm), "路線名": rname,
+                         "方向(0/1)": "0（行き）" if d % 2 == 0 else "1（帰り）",
                          "行き先表示": dh or "", "運行日": "③の曜日"})
     return rows
 
@@ -837,8 +838,9 @@ PATTERN_RUNS_HOLIDAY = {"日曜・祝日": True, "土日祝": True, "毎日": Tr
 
 if "extract" in ss():
     st.header("② 路線の割り当て（どの路線・方向か）")
-    st.caption("停留所の並びが同じブロックを自動で**同じ路線**にまとめ、方向(0/1)を割り振りました（要確認）。"
-               "複数路線・往復の対応づけが違うときは表を編集してください。路線名も変更できます。")
+    st.caption("停留所の並びが同じブロックを自動で**同じ路線**にまとめ、方向（行き=0/帰り=1）を"
+               "割り振りました（要確認）。複数路線・往復の対応づけが違うときは表を編集してください。"
+               "路線名も変更できます。")
     blocks_e = ex.get("blocks", [])
     base_df = pd.DataFrame(_auto_route_rows(blocks_e))
     edited = st.data_editor(
@@ -849,7 +851,10 @@ if "extract" in ss():
             "見出し": st.column_config.TextColumn("見出し(参考)", disabled=True),
             "停留所数": st.column_config.NumberColumn("停留所数", disabled=True),
             "路線名": st.column_config.TextColumn("路線名", help="同じ路線名のブロックが1つの路線にまとまる"),
-            "方向(0/1)": st.column_config.SelectboxColumn("方向(0/1)", options=[0, 1], required=True),
+            "方向(0/1)": st.column_config.SelectboxColumn(
+                "方向（行き/帰り）", options=["0（行き）", "1（帰り）"], required=True,
+                help="同じ路線の往復を分ける番号です。行き=0／帰り=1（どちらを0にするかは決めでOK）。"
+                     "循環路線は0のまま。GTFSデータには 0/1 の数字で出力されます。"),
             "行き先表示": st.column_config.TextColumn(
                 "行き先表示", help="バス前面に出る行き先。ブロック(便のまとまり)ごとに指定できます。"
                 "空なら終点名から『○○方面』。循環は『右回り/左回り』等でもOK。"),
@@ -870,7 +875,8 @@ if "extract" in ss():
     for _, r in edited.iterrows():
         bi = int(r["ブロック"]); nm = str(r["路線名"]).strip() or f"路線{bi}"
         name_blocks.setdefault(nm, []).append(bi)
-        block_dir[str(bi)] = int(r["方向(0/1)"])
+        # 表示は「0（行き）/1（帰り）」だが、生成データは 0/1 の数字に戻す。
+        block_dir[str(bi)] = 0 if str(r["方向(0/1)"]).strip().startswith("0") else 1
         block_pattern[str(bi)] = str(r.get("運行日") or "③の曜日")
         # 行き先表示: 表で編集された値を優先。空なら方向見出し(direction_hint)を使う。
         _head = str(r.get("行き先表示") or "").strip()
