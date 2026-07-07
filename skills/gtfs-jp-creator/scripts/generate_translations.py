@@ -53,6 +53,60 @@ try:
 except ImportError:
     _PYKAKASI_AVAILABLE = False
 
+# SudachiPy（辞書付き形態素解析）。地名辞書を持つため難読地名の読みが pykakasi より正確。
+# 決定的（同じ入力→同じ読み）でオフライン・無料。未インストールなら pykakasi にフォールバック。
+try:
+    from sudachipy import dictionary as _sudachi_dict, tokenizer as _sudachi_tok
+    _SUDACHI_AVAILABLE = True
+except ImportError:
+    _SUDACHI_AVAILABLE = False
+
+_sudachi = None   # 遅延初期化した Tokenizer（辞書ロードは重いので1回だけ）
+
+
+def _get_sudachi():
+    global _sudachi
+    if not _SUDACHI_AVAILABLE:
+        return None
+    if _sudachi is None:
+        try:
+            _sudachi = _sudachi_dict.Dictionary(dict="core").create()
+        except Exception:
+            _sudachi = False   # 辞書が無い等で初期化失敗 → 以後スキップ
+    return _sudachi or None
+
+
+def _kata2hira(s: str) -> str:
+    return "".join(chr(ord(c) - 0x60) if "ァ" <= c <= "ヶ" else c for c in s)
+
+
+def _has_kanji(s: str) -> bool:
+    return any("一" <= c <= "鿿" for c in s)
+
+
+def _sudachi_hira(text: str):
+    """SudachiPy でひらがな読みを得る。読めない語が漢字で残る場合は None（→pykakasiへ）。"""
+    tk = _get_sudachi()
+    if tk is None:
+        return None
+    try:
+        mode = _sudachi_tok.Tokenizer.SplitMode.C
+        out = []
+        for m in tk.tokenize(text, mode):
+            pos = m.part_of_speech()[0] if m.part_of_speech() else ""
+            # 記号・括弧・空白（（）・- 等）は読みにすると「きごう」等になるため原文のまま残す。
+            if "記号" in pos or "空白" in pos:
+                out.append(m.surface())
+                continue
+            r = m.reading_form() or ""
+            out.append(_kata2hira(r) if r else m.surface())
+        res = "".join(out)
+        if res and res.strip() and not _has_kanji(res):
+            return res
+    except Exception:
+        return None
+    return None
+
 
 # ---------------------------------------------------------------------------
 # CSV I/O
@@ -92,9 +146,16 @@ def to_hiragana(text: str, kks) -> str:
     半角カナ(ﾌｧﾐﾘｰﾏｰﾄ 等)は pykakasi が濁点・半濁点を誤処理して「ふぁみり゜ま゜」の
     ように文字化けするため、先に NFKC で全角化してから変換する（読みの精度が上がる）。
     """
-    if not text or kks is None:
+    if not text:
         return ""
+    # 半角カナ(ﾌｧﾐﾘｰﾏｰﾄ等)は先に全角化(NFKC)して誤変換を防ぐ。
     norm = unicodedata.normalize("NFKC", text)
+    # SudachiPy(辞書付き)を優先＝難読地名に強い。読めない時だけ pykakasi にフォールバック。
+    s = _sudachi_hira(norm)
+    if s:
+        return s
+    if kks is None:
+        return ""
     result = kks.convert(norm)
     return "".join(item.get("hira", "") for item in result)
 
@@ -262,9 +323,10 @@ def main() -> int:
     hiragana_map: dict[str, str] = {}
     if not args.no_hiragana:
         kks = init_kakasi()
-        if kks is None:
-            print("Warning: pykakasi がインストールされていません。"
-                  "ja-Hrkt をスキップします（`pip install pykakasi` で導入可）。",
+        # SudachiPy か pykakasi のどちらかがあれば読みを生成できる（Sudachi優先）。
+        if _get_sudachi() is None and kks is None:
+            print("Warning: 読み生成ライブラリがありません（SudachiPy/pykakasi）。ja-Hrkt を"
+                  "スキップします（`pip install sudachipy sudachidict_core` 推奨）。",
                   file=sys.stderr)
         else:
             for _, _, value in targets:

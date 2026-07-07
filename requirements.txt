@@ -6,7 +6,9 @@
 pyshp          # 国土数値情報 P11(Shapefile) 読み込み（import shapefile）/ Step3.5b
 pdfplumber     # テキストPDFの座標方式抽出 / Step1
 openpyxl       # Excel 時刻表の直接読み込み / Step1
-pykakasi       # translations(ふりがな・ローマ字) 生成 / Step6
+sudachipy         # ふりがな(ja-Hrkt) 生成の主エンジン。辞書付きで難読地名に強い / Step6
+sudachidict_core  # SudachiPy の辞書(core)。無ければ pykakasi にフォールバック
+pykakasi       # translations(ふりがな) のフォールバック / Step6
 PyMuPDF        # PDF のレンダリング・テキスト抽出（import fitz / pymupdf）
 pymupdf4llm    # 装飾PDF → Markdown（既定エンジン）/ Step1
 

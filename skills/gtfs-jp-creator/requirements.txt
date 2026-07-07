@@ -17,7 +17,9 @@ pyshp>=2.3.0                # 国土数値情報 P11 シェープファイル読
 requests>=2.31.0            # OSRM ルート問い合わせ (generate_shapes.py)
 
 # --- Step6 翻訳 よみがな (任意: 無くても ja / en は生成可) ---
-pykakasi>=2.2.0             # 漢字→ひらがな ja-Hrkt (generate_translations.py)
+sudachipy>=0.6.8           # ja-Hrkt 生成の主エンジン(辞書付き・難読地名に強い/決定的)
+sudachidict_core>=20230927 # SudachiPy 用辞書(core)。無ければ pykakasi にフォールバック
+pykakasi>=2.2.0            # ja-Hrkt のフォールバック (generate_translations.py)
 
 # --- Step1 旧経路 pymupdf4llm (任意) ---
 # 座標方式が主経路のため通常は不要。テキスト主体PDFで使う場合のみ。
