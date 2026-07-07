@@ -349,6 +349,40 @@ def render_ocr_panel():
                 st.caption("できた out.md を①に再アップロードしてください。")
 
 
+def _open_source_new_tab_button(sp, low, where):
+    """原典(PDF/画像)を別タブで開くボタン。別ウィンドウ/別モニタに並べて見比べやすくする。
+    ファイルを Blob 化して window.open するため、ローカルファイルでもブラウザで開ける。"""
+    import base64
+    mime = ("application/pdf" if low.endswith(".pdf")
+            else "image/jpeg" if low.endswith((".jpg", ".jpeg"))
+            else "image/gif" if low.endswith(".gif")
+            else "image/webp" if low.endswith(".webp")
+            else "image/bmp" if low.endswith(".bmp") else "image/png")
+    try:
+        b64 = base64.b64encode(Path(sp).read_bytes()).decode()
+    except Exception:
+        return
+    _tmpl = """
+        <button id="op" style="width:100%;padding:9px 14px;border:1px solid #0e5c6b;
+          background:#e6f0f1;color:#0a4552;border-radius:6px;font-weight:700;font-size:14px;
+          cursor:pointer;font-family:sans-serif">📄 原典を別タブで開く（別画面に並べて見比べる）</button>
+        <script>
+        const b64=__B64__, mime=__MIME__;
+        document.getElementById("op").onclick=function(){
+          const bin=atob(b64), arr=new Uint8Array(bin.length);
+          for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+          const url=URL.createObjectURL(new Blob([arr],{type:mime}));
+          window.open(url,"_blank");
+        };
+        </script>
+        """
+    components.html(
+        _tmpl.replace("__B64__", json.dumps(b64)).replace("__MIME__", json.dumps(mime)),
+        height=46)
+    st.caption("↑ 別タブで開いて、ウィンドウを横に並べる（または別モニタに移す）と、"
+               "下の表と見比べやすくなります。")
+
+
 def render_source_panel(where=""):
     """アップロードした原本（PDF/画像）を編集画面の隣で見られる開閉パネル。
     時刻・停留所・運賃を原典と横並びで照合できるようにし、誤読・誤りの見落としを減らす。"""
@@ -356,6 +390,9 @@ def render_source_panel(where=""):
     if not sp or not Path(sp).exists():
         return
     low = sp.lower()
+    # 原典を別タブで開くボタン（別ウィンドウ/別モニタで見比べ用）。PDF・画像のみ。
+    if low.endswith((".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")):
+        _open_source_new_tab_button(sp, low, where)
     with st.expander("📄 原本（アップロードした資料）を見ながら確認する", expanded=False):
         if low.endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")):
             zoom = st.slider("拡大", 0.6, 2.5, 1.2, 0.2, key=f"imgzoom_{where}")
