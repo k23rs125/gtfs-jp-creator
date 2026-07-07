@@ -209,6 +209,15 @@ def autosave():
         return
     try:
         payload = {k: ss().get(k) for k in SAVE_KEYS if ss().get(k) is not None}
+        # ③の入力欄（事業者/運賃/曜日/有効期間 等。キーは *_<extract_token>）も保存して
+        # 再起動後に再入力せず続けられるようにする。単純値のみ（data_editor等の複雑値は除外）。
+        tk = ss().get("extract_token", "")
+        if tk:
+            forms = {k: v for k, v in ss().items()
+                     if isinstance(k, str) and k.endswith("_" + tk)
+                     and isinstance(v, (str, int, float, bool))}
+            if forms:
+                payload["form_inputs"] = forms
         AUTOSAVE_DIR.mkdir(parents=True, exist_ok=True)
         AUTOSAVE_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     except Exception:
@@ -225,13 +234,16 @@ def restore_prompt():
         mt = datetime.datetime.fromtimestamp(AUTOSAVE_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
     except Exception:
         mt = ""
-    st.info(f"💾 前回の作業（{mt}）が自動保存されています。続きから再開できます"
-            "（③の運賃・曜日・事業者などの入力欄は再入力になります）。")
+    st.info(f"💾 前回の作業（{mt}）が自動保存されています。**続きから再開**できます"
+            "（抽出・路線の割り当て・時刻表の修正・③の入力まで復元します）。")
     c1, c2, _ = st.columns([1, 1, 3])
     if c1.button("前回の続きから復元する", type="primary"):
         try:
             data = json.loads(AUTOSAVE_FILE.read_text(encoding="utf-8"))
+            forms = data.pop("form_inputs", {}) or {}
             for k, v in data.items():
+                ss()[k] = v
+            for k, v in forms.items():   # ③の入力欄も復元（ウィジェットkeyへ直接）
                 ss()[k] = v
             ss()["_restore_dismissed"] = True
             st.rerun()
@@ -816,7 +828,27 @@ if "extract" in ss():
                "表を編集してください。路線名も変更できます。"
                "（便のまとまり＝時刻表のひとかたまり／PDFなら1ページ分）")
     blocks_e = ex.get("blocks", [])
-    base_df = pd.DataFrame(_auto_route_rows(blocks_e))
+    _rows0 = _auto_route_rows(blocks_e)
+    # 復元直後（route_editor の編集stateがまだ無い時）だけ、保存済みの割り当て(decision_spec)を
+    # 初期表示に反映して「続きから」を実現する。以降はユーザーの編集が優先される。
+    _ds0 = ss().get("decision_spec")
+    if _ds0 and f"route_editor_{ss().get('extract_token','')}" not in ss():
+        _b2r = {int(b): r.get("route_long_name", "")
+                for r in _ds0.get("routes", []) for b in r.get("blocks", [])}
+        _bd0 = _ds0.get("block_direction", {})
+        _bh0 = _ds0.get("block_headsign", {})
+        _bp0 = _ds0.get("block_pattern", {})
+        for _row in _rows0:
+            _bi = _row["ブロック"]
+            if _b2r.get(_bi):
+                _row["路線名"] = _b2r[_bi]
+            if str(_bi) in _bd0:
+                _row["方向(0/1)"] = "0（行き）" if int(_bd0[str(_bi)]) == 0 else "1（帰り）"
+            if _bh0.get(str(_bi)):
+                _row["行き先表示"] = _bh0[str(_bi)]
+            if _bp0.get(str(_bi)):
+                _row["運行日"] = _bp0[str(_bi)]
+    base_df = pd.DataFrame(_rows0)
     if "ブロック" in base_df.columns:      # 便のまとまりの番号順に並べて表示
         base_df = base_df.sort_values("ブロック").reset_index(drop=True)
     edited = st.data_editor(
