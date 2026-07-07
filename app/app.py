@@ -393,35 +393,7 @@ def render_source_panel(where=""):
     # 原典を別タブで開くボタン（別ウィンドウ/別モニタで見比べ用）。PDF・画像のみ。
     if low.endswith((".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")):
         _open_source_new_tab_button(sp, low, where)
-    with st.expander("📄 原本（アップロードした資料）を見ながら確認する", expanded=False):
-        if low.endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")):
-            zoom = st.slider("拡大", 0.6, 2.5, 1.2, 0.2, key=f"imgzoom_{where}")
-            st.image(sp, width=int(760 * zoom))
-            return
-        if not low.endswith(".pdf"):
-            st.caption("原本プレビューはPDF・画像のみ対応です（Excel/md は元ファイルを直接ご参照ください）。")
-            return
-        try:
-            import pymupdf
-            doc = pymupdf.open(sp)
-            npages = doc.page_count
-        except Exception as e:
-            st.caption("PDFを開けませんでした: " + str(e))
-            return
-        cc = st.columns([1, 2])
-        page = int(cc[0].number_input("ページ", 1, npages, 1, key=f"srcpage_{where}")) if npages > 1 else 1
-        zoom = cc[1].slider("拡大", 0.6, 2.5, 1.2, 0.2, key=f"srczoom_{where}")
-        cache = WORK / f"srcpage_{page}.png"
-        if not cache.exists():
-            try:
-                pix = doc[page - 1].get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0))
-                pix.save(str(cache))
-            except Exception as e:
-                st.caption("ページを描画できませんでした: " + str(e))
-                return
-        st.image(str(cache), width=int(760 * zoom))
-        st.caption("原典と**時刻・停留所名・運賃**を見比べてください。OCRは誤読があります。"
-                   "違う所は上の表で直せます。")
+    # インラインのプレビュー枠は廃止（別タブで開いて見比べる方式に統一＝画面をすっきり）。
 
 
 def _pdf_time_pages(src):
@@ -845,6 +817,8 @@ if "extract" in ss():
                "（便のまとまり＝時刻表のひとかたまり／PDFなら1ページ分）")
     blocks_e = ex.get("blocks", [])
     base_df = pd.DataFrame(_auto_route_rows(blocks_e))
+    if "ブロック" in base_df.columns:      # 便のまとまりの番号順に並べて表示
+        base_df = base_df.sort_values("ブロック").reset_index(drop=True)
     edited = st.data_editor(
         base_df, hide_index=True, use_container_width=True,
         key=f"route_editor_{ss().get('extract_token', '')}",
@@ -934,11 +908,6 @@ if ss().get("decision_spec"):
             auto.append(f"循環の可能性（block {b.get('block_index')}）: 始点と終点が同じ"
                         f"「{names[0]}」→循環路線とみられます（③で確認）")
     st.success("自動で分かったこと:\n" + "\n".join("・" + a for a in auto))
-    nc = list(ss().extract.get("needs_confirmation", []))
-    nc += [{"message": w} for w in ss().extract.get("warnings", [])]
-    if nc:
-        st.warning("要確認（原典と照合してください）:\n"
-                   + "\n".join("・" + (x.get("message") if isinstance(x, dict) else str(x)) for x in nc))
     st.info("PDF/Excel に無いので③で質問します: 路線名 / 事業者名・法人番号・URL・電話 / "
             "運賃 / 運行する曜日 / 有効期間 / 対象自治体（座標補完用）")
 
@@ -965,6 +934,16 @@ if "extract" in ss():
                    "（「待機時間」「○○出発」など停留所でない行を消す／表記を直す）。"
                    + (f"OCR誤読の疑い **{n_an}件** は各表の下に列挙しています。" if n_an else "")
                    + "直したら『この時刻表で確定して反映』を押してください（自動では書き換えません）。")
+        st.markdown("<span style='color:#c62828;font-weight:700'>⚠ 時刻は必ず原典と1つずつ見比べて"
+                    "確認してください（誤りは黙って直りません）。「📄 原典を別タブで開く」で並べて照合できます。"
+                    "</span>", unsafe_allow_html=True)
+        # ⏰の見出しは②で入力した路線名で表示する（利用者は block 番号が分からないため）
+        _ds = ss().get("decision_spec", {}) or {}
+        _bi2name = {}
+        for _r in _ds.get("routes", []):
+            for _b in _r.get("blocks", []):
+                _bi2name[int(_b)] = _r.get("route_long_name", "")
+        _bdir = _ds.get("block_direction", {})
         edited_blocks = {}
         issue_tot = {"rev": 0, "inval": 0, "an": 0}
         for b in blocks_t:
@@ -1001,7 +980,10 @@ if "extract" in ss():
                 rows.append(row)
             df = pd.DataFrame(rows)
             dh = b.get("direction_hint")
-            st.markdown(f"**block {bi}**" + (f"（{dh}）" if dh else ""))
+            _rname = _bi2name.get(bi, "") or f"便のまとまり {bi}"
+            _dv = _bdir.get(str(bi))
+            _dtag = "（行き）" if _dv == 0 else ("（帰り）" if _dv == 1 else (f"（{dh}）" if dh else ""))
+            st.markdown(f"**{_rname}**{_dtag}")
             colcfg = {"停留所": st.column_config.TextColumn(
                 "停留所", help="停留所名を直接直せます。行の左端で選ぶと削除でき、"
                 "『待機時間』『渡船場出発』のような停留所でない行を消せます。")}
@@ -1287,8 +1269,7 @@ if ss().get("decision_spec"):
                                   help="始点=終点を検出すると自動でチェック。違えば外してください。")
         c3.caption("🚌 **行き先表示は②の割り当て表**で便のまとまりごとに設定できます"
                    "（複数の行き先に対応）。")
-        st.write("運行する曜日（②で『③の曜日』のままの便のまとまりに適用。土曜/日祝だけ別ダイヤにする"
-                 "便のまとまりは②の『運行日』で指定）")
+        st.write("運行する曜日")
         d = st.columns(7)
         days = [d[i].checkbox(x, value=bool(_days_def[i]), key=f"day{i}_{tk}")
                 for i, x in enumerate(["月", "火", "水", "木", "金", "土", "日"])]
