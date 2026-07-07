@@ -268,7 +268,7 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 > 💡 **こんな時は**：元の Excel が手元にあれば **Excel が最も正確**です。画像 PDF は OCR するため
 > 数字の誤読が出ることがあり、後の⏰で必ず見比べてください。
 
-**② 路線の割り当て** — どのページ（ブロック）が **どの路線・方向** かを表で確認します。
+**② 路線の割り当て** — どのページ（＝**便のまとまり**）が **どの路線・方向** かを表で確認します。
 **行き先表示** と **運行日（平日／土曜／日祝）** もこの表で直せます。
 > 💡 **こんな時は**：行きと帰りは **同じ路線名** にして方向を 0／1 に。平日と土日で時刻が違う時刻表は、
 > そのページの『運行日』を平日・土曜・日祝に分けます（別々のダイヤとして出力されます）。
@@ -742,7 +742,8 @@ if "extract" in ss():
     ex = ss().extract
     blocks = ex.get("blocks", [])
     total_trips = sum(len(b.get("trips", [])) for b in blocks)
-    st.info(f"ブロック {len(blocks)} / 便 計 {total_trips}")
+    st.info(f"便のまとまり {len(blocks)} 組 / 便 計 {total_trips}"
+            "（便のまとまり＝時刻表のひとかたまり。PDFなら1ページ分・往復なら片道分）")
     for b in blocks:
         trips = b.get("trips", [])
         # 便ごとに停留所数が異なる（循環・区間便）ため、代表は便[0]でなく全体の停留所列を使う
@@ -838,33 +839,36 @@ PATTERN_RUNS_HOLIDAY = {"日曜・祝日": True, "土日祝": True, "毎日": Tr
 
 if "extract" in ss():
     st.header("② 路線の割り当て（どの路線・方向か）")
-    st.caption("停留所の並びが同じブロックを自動で**同じ路線**にまとめ、方向（行き=0/帰り=1）を"
-               "割り振りました（要確認）。複数路線・往復の対応づけが違うときは表を編集してください。"
-               "路線名も変更できます。")
+    st.caption("停留所の並びが同じ**便のまとまり**を自動で**同じ路線**にまとめ、"
+               "方向（行き=0/帰り=1）を割り振りました（要確認）。複数路線・往復の対応づけが違うときは"
+               "表を編集してください。路線名も変更できます。"
+               "（便のまとまり＝時刻表のひとかたまり／PDFなら1ページ分）")
     blocks_e = ex.get("blocks", [])
     base_df = pd.DataFrame(_auto_route_rows(blocks_e))
     edited = st.data_editor(
         base_df, hide_index=True, use_container_width=True,
         key=f"route_editor_{ss().get('extract_token', '')}",
         column_config={
-            "ブロック": st.column_config.NumberColumn("ブロック", disabled=True),
+            "ブロック": st.column_config.NumberColumn(
+                "便のまとまり", disabled=True,
+                help="時刻表のひとかたまり（PDFなら1ページ分／往復なら片道分）。この単位で路線・方向・行き先を割り当てます。"),
             "見出し": st.column_config.TextColumn("見出し(参考)", disabled=True),
             "停留所数": st.column_config.NumberColumn("停留所数", disabled=True),
-            "路線名": st.column_config.TextColumn("路線名", help="同じ路線名のブロックが1つの路線にまとまる"),
+            "路線名": st.column_config.TextColumn("路線名", help="同じ路線名の便のまとまりが1つの路線にまとまる"),
             "方向(0/1)": st.column_config.SelectboxColumn(
                 "方向（行き/帰り）", options=["0（行き）", "1（帰り）"], required=True,
                 help="同じ路線の往復を分ける番号です。行き=0／帰り=1（どちらを0にするかは決めでOK）。"
                      "循環路線は0のまま。GTFSデータには 0/1 の数字で出力されます。"),
             "行き先表示": st.column_config.TextColumn(
-                "行き先表示", help="バス前面に出る行き先。ブロック(便のまとまり)ごとに指定できます。"
+                "行き先表示", help="バス前面に出る行き先。便のまとまりごとに指定できます。"
                 "空なら終点名から『○○方面』。循環は『右回り/左回り』等でもOK。"),
             "運行日": st.column_config.SelectboxColumn(
                 "運行日", options=["③の曜日"] + list(DAY_PATTERNS), required=True,
-                help="平日/土曜/日祝で時刻が違う時刻表は、便のブロックごとに運行日を変える（別ダイヤで出力）"),
+                help="平日/土曜/日祝で時刻が違う時刻表は、便のまとまりごとに運行日を変える（別ダイヤで出力）"),
         },
     )
-    st.caption("⚠ **平日・土曜・日祝で時刻が違う**時刻表は、該当ブロックの『運行日』を変えてください"
-               "（別カレンダーで出力）。同じなら『③の曜日』のまま。**行き先表示**もブロックごとに直せます。")
+    st.caption("⚠ **平日・土曜・日祝で時刻が違う**時刻表は、該当の便のまとまりの『運行日』を変えてください"
+               "（別カレンダーで出力）。同じなら『③の曜日』のまま。**行き先表示**も便のまとまりごとに直せます。")
     st.info("💡 **こんな時は（例）**\n\n"
             "- **往復の路線** → 行き（佐屋→駅）と帰り（駅→佐屋）を **同じ路線名** にし、方向を 0 と 1 に。\n"
             "- **平日と土日で時刻が違う** → 平日ページの『運行日』＝平日、土日ページ＝土曜／日曜・祝日 に分ける。\n"
@@ -918,7 +922,7 @@ if ss().get("decision_spec"):
     st.subheader("自動確認の結果（時刻表から読み取れたこと）")
     st.caption("システムがまず確認した内容です。ここに出ていない情報は PDF/Excel に"
                "書かれていないため、推測せず下の③で質問します。")
-    auto = [f"便・停留所: ブロック {len(blocks0)} / 便 計 {total0}（停留所順は上に表示）"]
+    auto = [f"便・停留所: 便のまとまり {len(blocks0)} 組 / 便 計 {total0}（停留所順は上に表示）"]
     for b in blocks0:
         dh = b.get("direction_hint")
         if dh:
@@ -1281,10 +1285,10 @@ if ss().get("decision_spec"):
         ag_phone = c2.text_input("電話", value=det.get("phone", ""), key=f"tel_{tk}")
         is_circular = c3.checkbox("循環路線（始点に戻る）", value=_loop,
                                   help="始点=終点を検出すると自動でチェック。違えば外してください。")
-        c3.caption("🚌 **行き先表示は②の割り当て表**でブロック（便のまとまり）ごとに設定できます"
+        c3.caption("🚌 **行き先表示は②の割り当て表**で便のまとまりごとに設定できます"
                    "（複数の行き先に対応）。")
-        st.write("運行する曜日（②で『③の曜日』のままのブロックに適用。土曜/日祝だけ別ダイヤにする"
-                 "ブロックは②の『運行日』で指定）")
+        st.write("運行する曜日（②で『③の曜日』のままの便のまとまりに適用。土曜/日祝だけ別ダイヤにする"
+                 "便のまとまりは②の『運行日』で指定）")
         d = st.columns(7)
         days = [d[i].checkbox(x, value=bool(_days_def[i]), key=f"day{i}_{tk}")
                 for i, x in enumerate(["月", "火", "水", "木", "金", "土", "日"])]
@@ -1292,7 +1296,7 @@ if ss().get("decision_spec"):
         start = c4.text_input("有効期間 開始 (YYYYMMDD)", value=det.get("start_date", ""), key=f"st_{tk}")
         end = c5.text_input("有効期間 終了 (YYYYMMDD)", value=det.get("end_date", ""), key=f"en_{tk}")
         st.write("運休日（全路線に一律で適用。該当する場合のみチェック）")
-        st.caption("運行する曜日は②の『運行日』で路線(ブロック)ごとに決めます。ここの運休日は"
+        st.caption("運行する曜日は②の『運行日』で便のまとまりごとに決めます。ここの運休日は"
                    "全ダイヤ共通の休みです。『祝日は運休』は平日/土曜ダイヤを休みにし、日祝ダイヤが"
                    "あればその日は日祝ダイヤで運行します（正しいサービスに自動割当）。")
         h1, h2, h3 = st.columns(3)
@@ -1367,12 +1371,11 @@ if ss().get("decision_spec"):
                 for r in _rts]
         if any(not e for e in _eff):
             if len(_rts) == 1:
-                st.error("路線名が空です。GTFS仕様では route_short_name / route_long_name の"
-                         "いずれかが必須で、空のまま生成すると Validator ERROR "
-                         "（route_both_short_and_long_name_missing）になります。③で路線名を入力してください。")
+                st.error("路線名が空です。GTFS仕様では路線名が必須で、空のまま生成すると"
+                         "**データ点検（Validator）でエラー**になります。③で路線名を入力してください。")
             else:
                 st.error("路線名が空の路線があります。②の割り当て表で各路線に名前を付けてください。"
-                         "空のまま生成すると Validator ERROR になります。")
+                         "空のまま生成すると**データ点検（Validator）でエラー**になります。")
             st.stop()
         # 事業者名は暫定運用を許容（＝止めない）が、空なら明示警告。
         if not ag_name.strip():
@@ -1576,8 +1579,8 @@ def render_submission_checklist(out):
     # 1) 公式Validator ERROR=0（未実行なら「OK」と誤表示しない）
     rep = out / "validation" / "report.json"
     if not rep.exists():
-        items.append(("block", False, "公式Validatorのエラーが0",
-                      "検証が未実行です（Java/Validator未設定の可能性）→ 検証を実行してください"))
+        items.append(("block", False, "データ点検（公式Validator）のエラーが0",
+                      "点検が未実行です（Java/点検ツール未設定の可能性）→ 点検を実行してください"))
     else:
         n_err = 0
         try:
@@ -1586,8 +1589,8 @@ def render_submission_checklist(out):
                         if n.get("severity") == "ERROR")
         except Exception:
             pass
-        items.append(("block", n_err == 0, "公式Validatorのエラーが0",
-                      "問題なし" if n_err == 0 else f"ERROR {n_err}件 → ④下部の内容と対処を確認"))
+        items.append(("block", n_err == 0, "データ点検（公式Validator）のエラーが0",
+                      "問題なし" if n_err == 0 else f"エラー {n_err}件 → ④下部の内容と対処を確認"))
     # 1b) GTFS-JP 拡張検証 ERROR=0（標準Validatorが見ない agency_jp/office_jp 等）
     jr = out / "jp_ext_report.json"
     if not jr.exists():
@@ -1736,7 +1739,9 @@ if ss().get("result"):
             notices = json.loads(rep.read_text(encoding="utf-8")).get("notices", [])
             err_notices = [n for n in notices if n.get("severity") == "ERROR"]
             errs = sum(n.get("totalNotices", 0) for n in err_notices)
-            st.metric("MobilityData Validator ERROR", errs)
+            st.metric("データ点検（Validator）のエラー", errs,
+                      help="GTFSが標準仕様に合っているかを自動点検した結果。0 なら仕様上の重大エラーなし。"
+                           "MobilityData の公式点検ツール（Validator）を使っています。")
             if errs:
                 lines = []
                 for n in err_notices:
@@ -1752,9 +1757,9 @@ if ss().get("result"):
                                if k in ("tripId", "stopId", "stopSequence", "csvRowNumber", "routeId")}
                         if ids:
                             lines.append("　該当例: " + ", ".join(f"{k}={v}" for k, v in ids.items()))
-                st.error("Validator ERROR の内容（このままでは公式提出に不適）:\n\n" + "\n\n".join(lines))
+                st.error("データ点検（Validator）のエラー内容（このままでは公式提出に不適）:\n\n" + "\n\n".join(lines))
             else:
-                st.success("Validator ERROR は 0 件です。")
+                st.success("データ点検（Validator）のエラーは 0 件です。")
         except Exception:
             pass
     # 座標カバレッジ
