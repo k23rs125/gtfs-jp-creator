@@ -7,9 +7,11 @@
 # =====================================================================
 [server]
 port = 8534
-address = "localhost"
-headless = false          # 起動時にブラウザを自動で開く（サーバ運用なら true）
+address = "0.0.0.0"       # 同じWiFi(LAN)の他端末からも開ける。自分だけにするなら "localhost"
+headless = false          # 自分のPCでは起動時にブラウザを自動で開く
 runOnSave = false         # 保存のたびの自動再実行を止める（不意のリセット防止）
+enableCORS = false        # 同一LAN内からの接続を許可
+enableXsrfProtection = false
 
 # 官公庁向けの信頼感ある青系テーマ（ウィジェットの基調色。詳細な装飾は app.py のCSSで付与）
 [theme]
