@@ -377,7 +377,7 @@ if (shapeIds.length > 0) {
   const sel = document.getElementById("shape-select");
   const add = (val, text) => { const o = document.createElement("option"); o.value = val; o.textContent = text; sel.appendChild(o); };
   add("__all__", "全ルートを薄く重ねる");
-  add("__none__", "ルート非表示（点だけ）");
+  add("__none__", "ルート非表示（停留場の点だけ）");
   if (TRIPS.length > 0) {
     TRIPS.forEach(t => add(t.trip_id,
       t.trip_id + "／" + (t.headsign || "(行先なし)") + "（方向" + t.direction_id + "）"));

@@ -272,8 +272,10 @@
       <select id="ttRoute"></select>
       <label>運行日：</label>
       <div class="day-pills" id="ttServicePills"></div>
-      <label>方向：</label>
-      <div class="day-pills" id="ttDirPills"></div>
+      <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">
+        <label>方向：</label>
+        <div class="day-pills" id="ttDirPills"></div>
+      </span>
     </div>
     <div id="ttSummary" style="margin: 8px 0; color: #555; font-size: 14px;"></div>
     <div class="timetable-wrap" id="ttContainer"></div>
@@ -654,7 +656,7 @@ function renderTimetable() {
   const currentDir = dirPills.dataset.current && dirsAvail.includes(dirPills.dataset.current) ? dirPills.dataset.current : dirsAvail[0];
   const dirLabels = dirLabel(routeId, trips);
   dirPills.innerHTML = dirsAvail.map(d =>
-    `<button data-dir="${d}" class="${d===currentDir?'active':''}">${dirLabels[d] || ('方向 '+d)}</button>`
+    `<button data-dir="${d}" class="${d===currentDir?'active':''}">${d}${dirLabels[d] ? '：'+dirLabels[d] : ''}</button>`
   ).join("");
   dirPills.dataset.current = currentDir;
   dirPills.querySelectorAll("button").forEach(b => b.onclick = () => {
@@ -671,7 +673,7 @@ function renderTimetable() {
     const dir = dirPills.dataset.current;
     const filtered = trips.filter(t => t.service_id===sid && (t.direction_id||"0")===dir);
     document.getElementById("ttSummary").innerHTML =
-      `<strong style="color:${routeColor(routeId)}">${routeName(routeId)}</strong>　${serviceLabelById(sid)}　${dirLabels[dir]||""}　<span style="color:#777">${filtered.length}便</span>`;
+      `<strong style="color:${routeColor(routeId)}">${routeName(routeId)}</strong>　${serviceLabelById(sid)}　方向${dir}${dirLabels[dir]?'：'+dirLabels[dir]:''}　<span style="color:#777">${filtered.length}便</span>`;
 
     if (!filtered.length) {
       document.getElementById("ttContainer").innerHTML = '<div class="empty-msg">該当する便がありません</div>';
