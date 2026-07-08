@@ -705,19 +705,37 @@ def run_generation(spec, muni, use_nom, hol, ai_read=False, ai_key="", ai_ctx=""
     st.success("完了しました。" if rc == 0 else "完了（警告/エラーあり）。")
 
 
+def _extract_with_overlay(src, msg="時刻表を読み取っています…"):
+    """抽出中は画面中央に大きなローディングを出す（右上の小さな印だと気づきにくいため）。"""
+    _ph = st.empty()
+    _ph.markdown(
+        "<div style='position:fixed;inset:0;background:rgba(246,248,252,.9);z-index:99999;"
+        "display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px'>"
+        "<div style='width:70px;height:70px;border:7px solid #cfe0e3;border-top-color:#0e5c6b;"
+        "border-radius:50%;animation:gjspin 1s linear infinite'></div>"
+        f"<div style='font-size:23px;font-weight:700;color:#0a4552'>⏳ {msg}</div>"
+        "<div style='font-size:14px;color:#4c5663'>少しお待ちください（数秒〜数分）</div></div>"
+        "<style>@keyframes gjspin{to{transform:rotate(360deg)}}</style>",
+        unsafe_allow_html=True)
+    try:
+        do_extract(src)
+    finally:
+        _ph.empty()
+
+
 SAMPLES = Path(__file__).resolve().parent / "samples"
 if st.button("抽出する", type="primary", disabled=(up is None)) and up:
     src = WORK / up.name
     src.write_bytes(up.getbuffer())
-    do_extract(src)
+    _extract_with_overlay(src)
 st.caption("サンプルで試す:")
 c_b, c_c, c_d = st.columns([1, 1, 1])
 if c_b.button("太宰府まほろば号（往復）"):
-    do_extract(SAMPLES / "sample_dazaifu_mahoroba.xlsx")
+    _extract_with_overlay(SAMPLES / "sample_dazaifu_mahoroba.xlsx")
 if c_c.button("築城巡回線（循環・変則便）"):
-    do_extract(SAMPLES / "sample_tsuiki_junkai.xlsx")
+    _extract_with_overlay(SAMPLES / "sample_tsuiki_junkai.xlsx")
 if c_d.button("こがバス（画像PDF→OCR）"):
-    do_extract(SAMPLES / "sample_koga_ocr.md")
+    _extract_with_overlay(SAMPLES / "sample_koga_ocr.md")
 
 # 画像化PDFが検出されたら、アプリ内でOCRして続行できるパネルを出す
 render_ocr_panel()
@@ -791,9 +809,26 @@ def _auto_route_rows(bs):
             grouped.append([ns, [i]])
     rows = []
     for gi, (_rep, members) in enumerate(grouped):
-        # 路線名はグループで1つ（往復は同じ路線名・方向0/1）。代表ブロックの端点から作る。
+        # 路線名はグループで1つ（往復は同じ路線名・方向0/1）。
+        # まず「○○線」「○○系統」のような路線名を、名前や方向見出しから自動で拾う（線をトリガー）。
+        # 見つからなければ代表ブロックの端点から「始点～終点」で作る（従来どおり）。
         nm0 = [s.get("name") for s in bs[members[0]].get("stops", [])]
-        rname = f"{nm0[0]}～{nm0[-1]}" if nm0 else f"路線{gi + 1}"
+        _cands = []
+        for _mbi in members:
+            _cands += [s.get("name") or "" for s in bs[_mbi].get("stops", [])]
+            if bs[_mbi].get("direction_hint"):
+                _cands.append(bs[_mbi]["direction_hint"])
+        _line = None
+        for _c in _cands:
+            _c = (_c or "").strip()
+            if not (2 <= len(_c) <= 20) or "新幹線" in _c:
+                continue
+            if _c.startswith(("JR", "ＪＲ", "Ｊ", "鉄道")) or "ゆたか線" in _c:
+                continue   # JR等の鉄道路線の言及はバス路線名ではないため除外
+            if _c.endswith("系統") or _c.endswith("線"):
+                _line = _c
+                break
+        rname = _line or (f"{nm0[0]}～{nm0[-1]}" if nm0 else f"路線{gi + 1}")
         for d, bi in enumerate(members):
             nm = [s.get("name") for s in bs[bi].get("stops", [])]
             # 行き先の既定: 方向見出し(direction_hint)があれば入れる。無ければ空にして、
@@ -1229,8 +1264,16 @@ if ss().get("decision_spec"):
                 _stops_all.append(_nm)
     if ss().get("fare_matrix_doc_msg"):
         st.info(ss()["fare_matrix_doc_msg"])
-    zone_fare = st.checkbox("区間運賃にする（停留所ごと・区間ごとに運賃が違う）", key=f"zonechk_{tk}",
-                            help="チェックすると③の中に『区間運賃の表（発×着）』が出ます。区間ごとに金額を入れます。")
+    st.markdown("**運賃の入力方法**")
+    _fcol = st.columns(2)
+    uniform_fare = False
+    if len(_routes_now) > 1:
+        uniform_fare = _fcol[0].checkbox("全路線を同じ運賃にする（一律・おすすめ）", value=True,
+                                         key=f"unifare_{tk}",
+                                         help="ON: 大人/小児/障がい者を1回入れるだけで全路線に適用（路線ごとの入力が不要）。"
+                                              "路線で運賃が違う時だけOFFにして路線ごとに入力。")
+    zone_fare = _fcol[1].checkbox("区間運賃にする（停留所・区間ごとに違う）", key=f"zonechk_{tk}",
+                                  help="チェックすると③の中に『区間運賃の表（発×着）』が出ます。区間ごとに金額を入れます。")
     with st.form("conditions"):
         c1, c2, c3 = st.columns(3)
         if len(_routes_now) == 1:
@@ -1250,7 +1293,7 @@ if ss().get("decision_spec"):
             fare_disabled = fc3.number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"fd_{tk}")
         else:
             fare_adult = fare_child = fare_disabled = 0
-            c1.caption("運賃は下の『路線ごとの運賃』で入力（路線で違う場合に対応）")
+            c1.caption("運賃は下で入力（『全路線一律』なら1回・『路線ごと』なら路線別に）")
         zone_df = None
         zone_symmetric = False
         if zone_fare and _stops_all:
@@ -1274,9 +1317,17 @@ if ss().get("decision_spec"):
             st.caption(f"{len(_stops_all)}停留所。対角（同一停留所）は空欄でOK。"
                        "**上り・下りで運賃が違う場合は上のチェックを外し、両方向のセルに入力**してください。"
                        "Excelの表をコピー＆貼り付けも可。乗れる区間だけの入力でも構いません。")
-        # 路線別運賃（多路線で運賃が違う場合）。検出が単一区分はその値を各路線の既定に。
+        # 路線別運賃（多路線）。一律ONなら1組だけ入力して全路線へ、OFFなら路線ごとに入力。
         rfares_in = {}
-        if len(_routes_now) > 1:
+        if len(_routes_now) > 1 and uniform_fare:
+            st.markdown("**運賃（全路線一律・円・0は未設定）**")
+            _uc = st.columns(3)
+            _ua = _uc[0].number_input("大人", min_value=0, value=int(det.get("fare_adult") or 0), step=10, key=f"ufa_{tk}")
+            _uch = _uc[1].number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"ufc_{tk}")
+            _ud = _uc[2].number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"ufd_{tk}")
+            for r in _routes_now:
+                rfares_in[r["route_id"]] = (_ua, _uch, _ud)
+        elif len(_routes_now) > 1:
             st.markdown("**路線ごとの運賃（円・0は未設定）**")
             for r in _routes_now:
                 rid = r["route_id"]; rnm = r.get("route_long_name", rid)
@@ -1987,12 +2038,10 @@ if ss().get("result"):
         import csv as _csv
         crows = list(_csv.DictReader(conf_csv.open(encoding="utf-8-sig")))
         # ★行き/帰りを反対側へ自動推定配置した停留所は、必ず確認してもらう（推定なので）
-        _n_est = sum(1 for r in crows if "反対側へ自動配置" in (r.get("reason") or ""))
-        if _n_est:
-            st.error(f"⚠ 行き・帰りを自動で **反対側（反対車線）に推定配置** した停留所が **{_n_est} 件** あります。"
-                     "これは経路からの**推定**であり、正しい位置とは限りません。"
-                     "**必ず地図で1件ずつ正しい位置を確認して『確定』にしてください**"
-                     "（確認が終わるまで公式提出はできません。同じ場所なら『同じ場所にする』で戻せます）。")
+        _est_names = [r["stop_name"] for r in crows if "反対側へ自動配置" in (r.get("reason") or "")]
+        if _est_names:
+            st.warning("⚠ 反対側へ**自動配置（推定）**した停留所（地図で確認してください）： "
+                       + "、".join(_est_names[:20]) + ("　…ほか" if len(_est_names) > 20 else ""))
         # stop_desc(方面) を stops.txt から補う（行き/帰りの区別表示に使う）
         _descmap = {}
         _stpath = WORK / "out" / "gtfs" / "stops.txt"
@@ -2065,11 +2114,23 @@ if ss().get("result"):
         if todo:
             st.subheader(f"要確認・未補完を確定する（残り {len(todo)} 件）")
             _todo_ids = [_sid(r) for r in todo]
-            sel = st.selectbox("停留所", _todo_ids,
+            # 地図の点をクリックしたら、その停留所を下の一覧で自動選択する
+            if obj_tip and obj_tip in tip2id and tip2id[obj_tip] in _todo_ids:
+                ss()["conf_sel"] = tip2id[obj_tip]
+            if ss().get("conf_sel") not in _todo_ids:
+                ss()["conf_sel"] = _todo_ids[0]
+            sel = st.selectbox("停留所（地図の点をクリックでも選べます）", _todo_ids, key="conf_sel",
                                format_func=lambda s: next((_label(r) for r in crows if _sid(r) == s), s))
             cur = next((r for r in crows if _sid(r) == sel), {})
-            st.write(f"現在の座標: {cur.get('stop_lat','')}, {cur.get('stop_lon','')} ／ "
-                     f"理由: {cur.get('reason','')}")
+            _cc = confirmed.get(sel)
+            if _cc:
+                _cla, _clo = f"{_cc[0]:.6f}", f"{_cc[1]:.6f}"
+            else:
+                _cla = (cur.get("stop_lat") or "").strip() or "—"
+                _clo = (cur.get("stop_lon") or "").strip() or "—"
+            st.write(f"**{_label(cur)}** の座標: 緯度 {_cla} ／ 経度 {_clo}")
+            st.caption("この停留所の**ピンを地図でドラッグして動かし→クリック**すると、その位置で確定できます"
+                       "（上に確定ボタンが出ます）。動かさず今の位置でよければ下の『現在の位置のまま確定』。")
             # 同じ場所（終点・敷地内）: 同名で反対方向の停留所と同座標にする
             _sibs = [r for r in crows if r["stop_name"] == cur.get("stop_name") and _sid(r) != sel]
             for _sb in _sibs[:1]:
@@ -2078,13 +2139,14 @@ if ss().get("result"):
                                                 if (_sb.get("stop_lat") or "").strip() else None)
                 if _sbc and st.button(f"『{_label(_sb)}』と同じ場所にする（敷地内・終点向け）"):
                     confirmed[sel] = (round(_sbc[0], 6), round(_sbc[1], 6)); st.rerun()
-            a1, a2, a3 = st.columns([1, 1, 1])
-            if a1.button("地図クリック位置を使う", disabled=not clicked):
+            b1, b2 = st.columns(2)
+            if b1.button("📍 地図クリック位置で確定", disabled=not clicked):
                 confirmed[sel] = (round(clicked["lat"], 6), round(clicked["lng"], 6)); st.rerun()
-            lat_in = a2.number_input("緯度", value=float(cur.get("stop_lat") or center[0]), format="%.6f")
-            lon_in = a3.number_input("経度", value=float(cur.get("stop_lon") or center[1]), format="%.6f")
-            if st.button("この停留所を確定にする"):
-                confirmed[sel] = (round(lat_in, 6), round(lon_in, 6)); st.rerun()
+            if b2.button("現在の位置のまま確定"):
+                if str(_cla).replace(".", "").replace("-", "").isdigit():
+                    confirmed[sel] = (round(float(_cla), 6), round(float(_clo), 6)); st.rerun()
+                else:
+                    st.warning("まだ座標がありません。地図をクリックするか、ピンをドラッグして位置を決めてください。")
         else:
             st.success("✅ すべての座標が確定しました。**公式提出可** です。")
 
