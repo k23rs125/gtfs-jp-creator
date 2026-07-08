@@ -918,7 +918,25 @@ if "extract" in ss():
 # =====================================================================
 # Step 2: 路線の割り当て（多路線対応の構造化）
 # =====================================================================
-def _auto_route_rows(bs):
+def _route_name_from(text):
+    """文字列から路線名らしい語（○○線 / ○○系統 / ○○ルート）を1つ取り出す。
+    区切りで分割し、末尾の付随語（時刻表・ダイヤ等）を落として末尾が 線/系統/ルート の語を返す。
+    JR等の鉄道路線・「系統番号」等のラベルは除外。見つからなければ None。"""
+    if not text:
+        return None
+    for tok in re.split(r"[\s　_\-\[\]【】（）()、,。/／|｜:：]+", str(text)):
+        tok = re.sub(r"(時刻表|時刻|ダイヤ|運行表|一覧表|表)$", "", tok.strip())
+        if not tok or not (2 <= len(tok) <= 20):
+            continue
+        if tok.upper().startswith(("JR", "ＪＲ", "Ｊ")) or any(
+                x in tok for x in ("新幹線", "ゆたか線", "福北", "鉄道", "番号", "種類")):
+            continue   # 鉄道路線の言及・「系統番号」等のラベルは路線名ではない
+        if tok.endswith(("線", "系統", "ルート")):
+            return tok
+    return None
+
+
+def _auto_route_rows(bs, source=""):
     """停留所集合が近いブロック＝同一路線(往復)とみなし、路線名・方向を自動割当（要確認・編集可）。
 
     OCR由来の表記ゆれ（濁点誤読など）で完全一致しないことがあるため、Jaccard類似度で判定する。
@@ -936,27 +954,27 @@ def _auto_route_rows(bs):
                 break
         if not placed:
             grouped.append([ns, [i]])
+    # ファイル名からの路線名候補（「線」等がバラバラの場所にあるため。単一路線に適用）。
+    from pathlib import Path as _P
+    _fname_route = _route_name_from(_P(str(source)).stem) if source else None
     rows = []
     for gi, (_rep, members) in enumerate(grouped):
-        # 路線名はグループで1つ（往復は同じ路線名・方向0/1）。
-        # まず「○○線」「○○系統」のような路線名を、名前や方向見出しから自動で拾う（線をトリガー）。
-        # 見つからなければ代表ブロックの端点から「始点～終点」で作る（従来どおり）。
+        # 路線名はグループで1つ（往復は同じ路線名・方向0/1）。「○○線／○○系統／○○ルート」を
+        # ①このまとまりの停留所名・方向見出し ②ファイル名 の順で自動取得（線/系統/ルートがトリガー）。
+        # どれも無ければ端点「始点～終点」で作る（従来どおり）。
         nm0 = [s.get("name") for s in bs[members[0]].get("stops", [])]
-        _cands = []
-        for _mbi in members:
-            _cands += [s.get("name") or "" for s in bs[_mbi].get("stops", [])]
-            if bs[_mbi].get("direction_hint"):
-                _cands.append(bs[_mbi]["direction_hint"])
         _line = None
-        for _c in _cands:
-            _c = (_c or "").strip()
-            if not (2 <= len(_c) <= 20) or "新幹線" in _c:
-                continue
-            if _c.startswith(("JR", "ＪＲ", "Ｊ", "鉄道")) or "ゆたか線" in _c:
-                continue   # JR等の鉄道路線の言及はバス路線名ではないため除外
-            if _c.endswith("系統") or _c.endswith("線"):
-                _line = _c
+        for _mbi in members:
+            for _s in bs[_mbi].get("stops", []):
+                _line = _route_name_from(_s.get("name"))
+                if _line:
+                    break
+            if not _line and bs[_mbi].get("direction_hint"):
+                _line = _route_name_from(bs[_mbi]["direction_hint"])
+            if _line:
                 break
+        if not _line:
+            _line = _fname_route   # まとまりで見つからなければファイル名の候補
         rname = _line or (f"{nm0[0]}～{nm0[-1]}" if nm0 else f"路線{gi + 1}")
         for d, bi in enumerate(members):
             nm = [s.get("name") for s in bs[bi].get("stops", [])]
@@ -993,7 +1011,7 @@ if "extract" in ss():
                "（便のまとまり＝時刻表のひとかたまり／PDFなら1ページ分）")
     st.caption("✏️ **表のセルはクリック（ダブルクリック）で編集できます**（路線名・方向・行き先・運行日）。")
     blocks_e = ex.get("blocks", [])
-    _rows0 = _auto_route_rows(blocks_e)
+    _rows0 = _auto_route_rows(blocks_e, ex.get("source", ""))
     # 復元直後（route_editor の編集stateがまだ無い時）だけ、保存済みの割り当て(decision_spec)を
     # 初期表示に反映して「続きから」を実現する。以降はユーザーの編集が優先される。
     _ds0 = ss().get("decision_spec")
