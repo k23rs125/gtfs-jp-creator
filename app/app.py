@@ -1434,25 +1434,35 @@ if ss().get("decision_spec"):
     zone_fare = _fcol[1].checkbox("区間運賃にする（停留所・区間ごとに違う）", key=f"zonechk_{tk}",
                                   help="チェックすると③の中に『区間運賃の表（発×着）』が出ます。区間ごとに金額を入れます。")
     with st.form("conditions"):
-        c1, c2, c3 = st.columns(3)
+        # 運賃（入力方法は上の「運賃の入力方法」で選択済み）。金額をここ＝方法選択の直後に入力する。
         if len(_routes_now) == 1:
-            route_name = c1.text_input("路線名", value=_routes_now[0].get("route_long_name", ""))
-        else:
-            route_name = ""  # 多路線は②の割り当てで路線名を設定
-            c1.caption("路線名は②で設定済み: " + " / ".join(r["route_long_name"] for r in _routes_now))
-        muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県",
-                             help="P11の都道府県/市域制約に使用。市区町村まで入れると同名停留所の精度が大きく上がります")
-        c1.caption("⚠ **市区町村まで**入れてください（例: 福岡県築上町）。"
-                   "都道府県だけだと同名のバス停を県内の別の場所に誤って合わせる恐れがあります。")
-        if len(_routes_now) == 1:
-            c1.write("運賃（区分別・円。0は未設定。PDF記載は検出して初期入力）")
-            fc1, fc2, fc3 = c1.columns(3)
+            st.markdown("**運賃（区分別・円。0は未設定。PDF記載は検出して初期入力）**")
+            fc1, fc2, fc3 = st.columns(3)
             fare_adult = fc1.number_input("大人", min_value=0, value=int(det.get("fare_adult") or 0), step=10, key=f"fa_{tk}")
             fare_child = fc2.number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"fc_{tk}")
             fare_disabled = fc3.number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"fd_{tk}")
         else:
             fare_adult = fare_child = fare_disabled = 0
-            c1.caption("運賃は下で入力（『全路線一律』なら1回・『路線ごと』なら路線別に）")
+        # 路線別運賃（多路線）。一律ONなら1組だけ入力して全路線へ、OFFなら路線ごとに入力。
+        rfares_in = {}
+        if len(_routes_now) > 1 and uniform_fare:
+            st.markdown("**運賃（全路線一律・円・0は未設定）**")
+            _uc = st.columns(3)
+            _ua = _uc[0].number_input("大人", min_value=0, value=int(det.get("fare_adult") or 0), step=10, key=f"ufa_{tk}")
+            _uch = _uc[1].number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"ufc_{tk}")
+            _ud = _uc[2].number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"ufd_{tk}")
+            for r in _routes_now:
+                rfares_in[r["route_id"]] = (_ua, _uch, _ud)
+        elif len(_routes_now) > 1:
+            st.markdown("**路線ごとの運賃（円・0は未設定）**")
+            for r in _routes_now:
+                rid = r["route_id"]; rnm = r.get("route_long_name", rid)
+                pcols = st.columns([3, 1, 1, 1])
+                pcols[0].markdown(f"<div style='padding-top:8px'>{rnm}</div>", unsafe_allow_html=True)
+                ra = pcols[1].number_input("大人", min_value=0, value=int(det.get("fare_adult") or 0), step=10, key=f"rfa_{rid}_{tk}")
+                rch = pcols[2].number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"rfc_{rid}_{tk}")
+                rdi = pcols[3].number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"rfd_{rid}_{tk}")
+                rfares_in[rid] = (ra, rch, rdi)
         zone_df = None
         zone_symmetric = False
         if zone_fare and _stops_all:
@@ -1476,26 +1486,17 @@ if ss().get("decision_spec"):
             st.caption(f"{len(_stops_all)}停留所。対角（同一停留所）は空欄でOK。"
                        "**上り・下りで運賃が違う場合は上のチェックを外し、両方向のセルに入力**してください。"
                        "Excelの表をコピー＆貼り付けも可。乗れる区間だけの入力でも構いません。")
-        # 路線別運賃（多路線）。一律ONなら1組だけ入力して全路線へ、OFFなら路線ごとに入力。
-        rfares_in = {}
-        if len(_routes_now) > 1 and uniform_fare:
-            st.markdown("**運賃（全路線一律・円・0は未設定）**")
-            _uc = st.columns(3)
-            _ua = _uc[0].number_input("大人", min_value=0, value=int(det.get("fare_adult") or 0), step=10, key=f"ufa_{tk}")
-            _uch = _uc[1].number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"ufc_{tk}")
-            _ud = _uc[2].number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"ufd_{tk}")
-            for r in _routes_now:
-                rfares_in[r["route_id"]] = (_ua, _uch, _ud)
-        elif len(_routes_now) > 1:
-            st.markdown("**路線ごとの運賃（円・0は未設定）**")
-            for r in _routes_now:
-                rid = r["route_id"]; rnm = r.get("route_long_name", rid)
-                pcols = st.columns([3, 1, 1, 1])
-                pcols[0].markdown(f"<div style='padding-top:8px'>{rnm}</div>", unsafe_allow_html=True)
-                ra = pcols[1].number_input("大人", min_value=0, value=int(det.get("fare_adult") or 0), step=10, key=f"rfa_{rid}_{tk}")
-                rch = pcols[2].number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"rfc_{rid}_{tk}")
-                rdi = pcols[3].number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"rfd_{rid}_{tk}")
-                rfares_in[rid] = (ra, rch, rdi)
+        # 運賃の下: 路線名・対象自治体・事業者情報
+        c1, c2, c3 = st.columns(3)
+        if len(_routes_now) == 1:
+            route_name = c1.text_input("路線名", value=_routes_now[0].get("route_long_name", ""))
+        else:
+            route_name = ""  # 多路線は②の割り当てで路線名を設定
+            c1.caption("路線名は②で設定済み: " + " / ".join(r["route_long_name"] for r in _routes_now))
+        muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県",
+                             help="P11の都道府県/市域制約に使用。市区町村まで入れると同名停留所の精度が大きく上がります")
+        c1.caption("⚠ **市区町村まで**入れてください（例: 福岡県築上町）。"
+                   "都道府県だけだと同名のバス停を県内の別の場所に誤って合わせる恐れがあります。")
         c2.caption("**事業者情報**（正式提出に必要。自治体はご自身の情報を入力）")
         ag_name = c2.text_input("事業者名", value="", key=f"agn_{tk}")
         ag_official = c2.text_input("正式名称（登記名。空なら事業者名を使用）", value="", key=f"agof_{tk}")
