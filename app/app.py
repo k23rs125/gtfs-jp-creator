@@ -101,6 +101,13 @@ def _write_shape(shp_path, shape_id, coords):
         h = sin((la2 - la1) / 2) ** 2 + cos(la1) * cos(la2) * sin((lo2 - lo1) / 2) ** 2
         return 2 * 6371000 * asin(sqrt(h))
 
+    # 連続する重複点を除去（区間差し替えの継ぎ目で同一座標が並ぶと距離が増えず、
+    # shape_dist_traveled が単調増加にならない＝検証で警告になるため）。
+    _cc = []
+    for c in coords:
+        if not _cc or abs(_cc[-1][0] - c[0]) > 1e-7 or abs(_cc[-1][1] - c[1]) > 1e-7:
+            _cc.append(c)
+    coords = _cc
     fns = ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence", "shape_dist_traveled"]
     rows = []
     if p.exists():
@@ -2364,7 +2371,8 @@ if ss().get("result"):
     if all(p.exists() for p in (_trp, _stp, _stt)):
         with st.expander("🖊 路線図を手で描き直す（経路 shapes を作り直す・任意）"):
             st.caption("自動生成の経路が実際と違う時、地図に点を打って正しい経路に描き直せます。"
-                       "路線・方向を選び、地図左上の**ペン（ポリライン）**で ①②③… の停留所を順につないで"
+                       "路線・方向を選び、**『区間だけ直す』**（停留所を選び、その前後どちらかの区間だけ描き直す）か "
+                       "**『全体を描き直す』**を選択。地図左上の**ペン（ポリライン）**で道に沿って点を打ち"
                        "→ダブルクリックで確定 → 下のボタンで反映。描いた線で shapes を上書きします（推定より優先）。")
             import csv as _c5
             _trips5 = list(_c5.DictReader(_trp.open(encoding="utf-8-sig")))
@@ -2392,55 +2400,137 @@ if ss().get("result"):
             if len(_spts) < 2:
                 st.warning("この路線・方向は停留所座標が足りません。先に⑤で座標を確定してください。")
             else:
-                _octr = [sum(p[1] for p in _spts) / len(_spts), sum(p[2] for p in _spts) / len(_spts)]
-                _em = folium.Map(location=_octr, zoom_start=13)
                 from folium.plugins import Draw
-                Draw(export=False, edit_options={"edit": True},
-                     draw_options={"polyline": True, "polygon": False, "rectangle": False,
-                                   "circle": False, "marker": False, "circlemarker": False}).add_to(_em)
-                for i, (nm, la, lo) in enumerate(_spts, 1):
-                    folium.Marker(
-                        [la, lo], tooltip=f"{i}. {nm}",
-                        icon=folium.DivIcon(html=(
-                            "<div style='background:#0e5c6b;color:#fff;border-radius:50%;width:22px;"
-                            "height:22px;line-height:22px;text-align:center;font-size:11px;font-weight:700'>"
-                            f"{i}</div>"))).add_to(_em)
-                _curpts = []
+                # 現在の経路点(shapes)を seq 順に。無ければ「停留所を直線で結んだ線」を土台にする。
+                _cur_latlon = []
                 if _shid and _shp.exists():
+                    _tmp = []
                     for r in _c5.DictReader(_shp.open(encoding="utf-8-sig")):
                         if r.get("shape_id") == _shid:
-                            _curpts.append((int(r["shape_pt_sequence"]), float(r["shape_pt_lat"]), float(r["shape_pt_lon"])))
-                    _curpts.sort()
-                    if _curpts:
-                        folium.PolyLine([(p[1], p[2]) for p in _curpts], color="#999", weight=3,
-                                        opacity=0.6, tooltip="現在の経路（自動）").add_to(_em)
-                _emst = st_folium(_em, width=900, height=460, key="shpeditmap",
-                                  returned_objects=["last_active_drawing", "all_drawings"])
-                _draw = None
-                if _emst:
-                    _draw = _emst.get("last_active_drawing") or (
-                        (_emst.get("all_drawings") or [None])[-1])
-                _coords5 = []
-                if _draw and (_draw.get("geometry") or {}).get("type") == "LineString":
-                    _coords5 = [(c[1], c[0]) for c in _draw["geometry"]["coordinates"]]  # [lng,lat]→(lat,lon)
-                if _coords5:
-                    st.info(f"描いた線：{len(_coords5)} 点。この線で経路(shapes)を更新できます。")
-                    if st.button("この線で経路(shapes)を更新する", type="primary", key="shpeditsave"):
-                        if not _shid:
-                            _shid = f"shape_{_rid5}_{_dir5}_manual"
-                            _assign_trip_shape(_trp, _rid5, _dir5, _shid)
-                        _write_shape(_shp, _shid, _coords5)
-                        _zz = list((WORK / "out").glob("*_gtfs-jp.zip"))
-                        if _zz:
-                            run([SCRIPTS / "package_gtfs_zip.py", _gd, "-o", _zz[0],
-                                 "--substitute", "trips.with_shapes.txt=trips.txt"])
-                        run([SCRIPTS / "make_map_view.py", _stp, "--out", WORK / "out" / "map_view.html",
-                             "--title", "app_feed"])
-                        run([SCRIPTS / "make_gtfs_viewer.py", "--feed", _gd,
-                             "-o", WORK / "out" / "gtfs_viewer.html"])
-                        ss()["_out_dirty"] = True
-                        st.success("経路(shapes)を更新しました。地図・ビューア・zip を更新しました。")
-                        st.rerun()
+                            _tmp.append((int(r["shape_pt_sequence"]),
+                                         float(r["shape_pt_lat"]), float(r["shape_pt_lon"])))
+                    _tmp.sort()
+                    _cur_latlon = [(la, lo) for _, la, lo in _tmp]
+                if not _cur_latlon:
+                    _cur_latlon = [(p[1], p[2]) for p in _spts]   # 土台＝停留所直結
+                _octr = [sum(p[1] for p in _spts) / len(_spts),
+                         sum(p[2] for p in _spts) / len(_spts)]
+
+                def _num_icon(i, bg="#0e5c6b"):
+                    return folium.DivIcon(html=(
+                        f"<div style='background:{bg};color:#fff;border-radius:50%;width:22px;"
+                        "height:22px;line-height:22px;text-align:center;font-size:11px;font-weight:700'>"
+                        f"{i}</div>"))
+
+                def _draw_opts(m):
+                    Draw(export=False, edit_options={"edit": True},
+                         draw_options={"polyline": True, "polygon": False, "rectangle": False,
+                                       "circle": False, "marker": False, "circlemarker": False}).add_to(m)
+
+                def _drawn_line(state):
+                    """st_folium の戻りから描画ポリラインを (lat,lon) 列で取り出す。"""
+                    d = None
+                    if state:
+                        d = state.get("last_active_drawing") or ((state.get("all_drawings") or [None])[-1])
+                    if d and (d.get("geometry") or {}).get("type") == "LineString":
+                        return [(c[1], c[0]) for c in d["geometry"]["coordinates"]]  # [lng,lat]→(lat,lon)
+                    return []
+
+                def _regen_after_shape():
+                    _zz = list((WORK / "out").glob("*_gtfs-jp.zip"))
+                    if _zz:
+                        run([SCRIPTS / "package_gtfs_zip.py", _gd, "-o", _zz[0],
+                             "--substitute", "trips.with_shapes.txt=trips.txt"])
+                    run([SCRIPTS / "make_map_view.py", _stp, "--out", WORK / "out" / "map_view.html",
+                         "--title", "app_feed"])
+                    run([SCRIPTS / "make_gtfs_viewer.py", "--feed", _gd,
+                         "-o", WORK / "out" / "gtfs_viewer.html"])
+                    ss()["_out_dirty"] = True
+
+                _mode5 = st.radio(
+                    "編集のしかた", ["区間だけ直す（一部を修正）", "全体を描き直す"],
+                    horizontal=True, key="shpedit_mode",
+                    help="『区間だけ直す』＝停留所を選び、その前後どちらかの区間だけを描き直して差し替え。"
+                         "『全体を描き直す』＝始点から終点まで一気に描き直し（従来）。")
+
+                if _mode5 == "全体を描き直す":
+                    _em = folium.Map(location=_octr, zoom_start=13)
+                    _draw_opts(_em)
+                    for i, (nm, la, lo) in enumerate(_spts, 1):
+                        folium.Marker([la, lo], tooltip=f"{i}. {nm}", icon=_num_icon(i)).add_to(_em)
+                    folium.PolyLine(_cur_latlon, color="#999", weight=3, opacity=0.6,
+                                    tooltip="現在の経路").add_to(_em)
+                    _emst = st_folium(_em, width=900, height=460, key="shpeditmap",
+                                      returned_objects=["last_active_drawing", "all_drawings"])
+                    _coords5 = _drawn_line(_emst)
+                    if _coords5:
+                        st.info(f"描いた線：{len(_coords5)} 点。この線で経路(shapes)を更新できます。")
+                        if st.button("この線で経路(shapes)を更新する", type="primary", key="shpeditsave"):
+                            if not _shid:
+                                _shid = f"shape_{_rid5}_{_dir5}_manual"
+                                _assign_trip_shape(_trp, _rid5, _dir5, _shid)
+                            _write_shape(_shp, _shid, _coords5)
+                            _regen_after_shape()
+                            st.success("経路(shapes)を更新しました。地図・ビューア・zip を更新しました。")
+                            st.rerun()
+                else:
+                    # 停留所番号を選び、その「前の区間(n-1→n)」か「次の区間(n→n+1)」だけ描き直す。
+                    _N = len(_spts)
+                    _pick = st.selectbox(
+                        "基準にする停留所（番号）", list(range(1, _N + 1)),
+                        format_func=lambda k: f"{k}. {_spts[k - 1][0]}", key="shpedit_pick")
+                    _side_opts = []
+                    if _pick > 1:
+                        _side_opts.append((f"前の区間（{_pick - 1}→{_pick}）", _pick - 1, _pick))
+                    if _pick < _N:
+                        _side_opts.append((f"次の区間（{_pick}→{_pick + 1}）", _pick, _pick + 1))
+                    _side = st.radio("直す区間（この区間を消して描き直す）", _side_opts,
+                                     format_func=lambda o: o[0], key="shpedit_side")
+                    _si, _sj = _side[1], _side[2]           # 1始まりの連続する2停留所
+                    _a, _b = _spts[_si - 1], _spts[_sj - 1]
+
+                    def _nrst(pt):   # 現在経路の中でこの座標に最も近い点の index
+                        return min(range(len(_cur_latlon)),
+                                   key=lambda k: (_cur_latlon[k][0] - pt[0]) ** 2
+                                   + (_cur_latlon[k][1] - pt[1]) ** 2)
+                    _ia, _ib = _nrst((_a[1], _a[2])), _nrst((_b[1], _b[2]))
+                    _lo, _hi = (_ia, _ib) if _ia <= _ib else (_ib, _ia)
+                    _em = folium.Map(location=[(_a[1] + _b[1]) / 2, (_a[2] + _b[2]) / 2], zoom_start=15)
+                    _draw_opts(_em)
+                    folium.PolyLine(_cur_latlon, color="#999", weight=3, opacity=0.5,
+                                    tooltip="現在の経路").add_to(_em)
+                    if _hi > _lo:
+                        folium.PolyLine(_cur_latlon[_lo:_hi + 1], color="#c62828", weight=6,
+                                        opacity=0.9, tooltip="直す区間（この部分を差し替え）").add_to(_em)
+                    for i, (nm, la, lo) in enumerate(_spts, 1):
+                        folium.Marker([la, lo], tooltip=f"{i}. {nm}",
+                                      icon=_num_icon(i, "#c62828" if i in (_si, _sj) else "#0e5c6b")).add_to(_em)
+                    st.caption(f"赤の区間『{_a[0]}』→『{_b[0]}』だけを描き直します。地図左上の**ペン**で、"
+                               "この2つの停留所の間の道に沿って点を打ち→ダブルクリックで確定。"
+                               "赤い区間が描いた線に置き換わり、他の区間はそのまま残ります。")
+                    _emst = st_folium(_em, width=900, height=460, key="shpeditmap_seg",
+                                      returned_objects=["last_active_drawing", "all_drawings"])
+                    _seg = _drawn_line(_emst)
+                    if _seg:
+                        _plo, _phi = _cur_latlon[_lo], _cur_latlon[_hi]
+
+                        def _d2(u, v):
+                            return (u[0] - v[0]) ** 2 + (u[1] - v[1]) ** 2
+                        # 描いた線の向きを、置き換える両端に合わせる（逆向きに描いても正しくつなぐ）
+                        if _d2(_seg[0], _plo) + _d2(_seg[-1], _phi) > _d2(_seg[0], _phi) + _d2(_seg[-1], _plo):
+                            _seg = list(reversed(_seg))
+                        _new_pts = _cur_latlon[:_lo + 1] + _seg + _cur_latlon[_hi:]
+                        st.info(f"描いた線：{len(_seg)} 点。『{_a[0]}』〜『{_b[0]}』の区間を差し替えます"
+                                f"（経路は全体で {len(_new_pts)} 点になります）。")
+                        if st.button("この区間を差し替える", type="primary", key="shpeditsave_seg"):
+                            if not _shid:
+                                _shid = f"shape_{_rid5}_{_dir5}_manual"
+                                _assign_trip_shape(_trp, _rid5, _dir5, _shid)
+                            _write_shape(_shp, _shid, _new_pts)
+                            _regen_after_shape()
+                            st.success(f"『{_a[0]}』〜『{_b[0]}』の区間を差し替えました。"
+                                       "地図・ビューア・zip を更新しました。")
+                            st.rerun()
 
 # =====================================================================
 # Step 6: GTFSビューア（作成した feed を 7タブで閲覧）
