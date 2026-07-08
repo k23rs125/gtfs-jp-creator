@@ -476,9 +476,8 @@ def main():
             _t = re.sub(r"(時刻表|時刻|ダイヤ|運行表|一覧表|表)$", "", _t)
             if not (2 <= len(_t) <= 20):
                 continue
-            if _t.upper().startswith(("JR", "ＪＲ", "Ｊ")) or any(
-                    x in _t for x in ("新幹線", "ゆたか線", "福北", "鉄道", "番号", "種類")):
-                continue
+            if any(x in _t for x in ("新幹線", "ゆたか線", "福北", "鉄道", "番号", "種類")):
+                continue   # 鉄道路線・「系統番号」等は除外（JR古賀線等のバス路線名は許可）
             if _t.endswith(("線", "系統", "ルート")):
                 _titles.append((w.get("x0", 0), _t))
     if _titles:

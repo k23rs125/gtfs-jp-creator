@@ -54,6 +54,26 @@ def normalize_name(s: str) -> str:
     return s
 
 
+def route_title_from_texts(texts):
+    """文字列群（タイトル行など）から路線名「○○線/系統/ルート」を1つ返す。
+    曜日付記・付随語を落とし、全文字二重描画を畳む。JR等の鉄道路線・「系統番号」は除外。"""
+    for text in texts:
+        if not text:
+            continue
+        for tok in re.split(r"[\s　（）()【】\[\]／/｜|,、。「」]+", str(text)):
+            tok = tok.strip()
+            if len(tok) >= 4 and len(tok) % 2 == 0 and tok[0::2] == tok[1::2]:
+                tok = tok[0::2]
+            tok = re.sub(r"(時刻表|時刻|ダイヤ|運行表|一覧表|表)$", "", tok)
+            if not (2 <= len(tok) <= 20):
+                continue
+            if any(x in tok for x in ("新幹線", "ゆたか線", "福北", "鉄道", "番号", "種類")):
+                continue   # 鉄道路線・「系統番号」等は除外（JR古賀線等のバス路線名は許可）
+            if tok.endswith(("線", "系統", "ルート")):
+                return tok
+    return None
+
+
 def cell_time(v):
     """セル値を 'H:MM:00' に正規化。時刻でなければ None。"""
     if isinstance(v, datetime.datetime):
@@ -312,6 +332,17 @@ def main() -> int:
                                              "要予約への寄り道や折り返しの可能性。原典で確認してください。"})
     needs.append({"type": "assign_required",
                   "message": "便名・方向(direction_id)・循環の展開は表構造から確定できません。原典と照合して割り当ててください(Step2)。"})
+
+    # 先頭のタイトル行から路線名（○○線/系統/ルート）を拾って各ブロックに付ける
+    # （例:「まほろば号 湯の谷地域線」時刻表 → 湯の谷地域線）。停留所名・ファイル名で拾えない補完。
+    _maxr = min([b.get("section_row", 6) for b in blocks], default=6)
+    _title_texts = [ws.cell(r, c).value
+                    for r in range(1, max(2, _maxr))
+                    for c in range(1, ws.max_column + 1) if ws.cell(r, c).value]
+    _rt = route_title_from_texts(_title_texts)
+    if _rt:
+        for b in blocks:
+            b["route_title"] = _rt
 
     result = {"source": str(in_path), "sheet": ws.title,
               "blocks": blocks, "warnings": warnings_list,

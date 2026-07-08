@@ -928,9 +928,8 @@ def _route_name_from(text):
         tok = re.sub(r"(時刻表|時刻|ダイヤ|運行表|一覧表|表)$", "", tok.strip())
         if not tok or not (2 <= len(tok) <= 20):
             continue
-        if tok.upper().startswith(("JR", "ＪＲ", "Ｊ")) or any(
-                x in tok for x in ("新幹線", "ゆたか線", "福北", "鉄道", "番号", "種類")):
-            continue   # 鉄道路線の言及・「系統番号」等のラベルは路線名ではない
+        if any(x in tok for x in ("新幹線", "ゆたか線", "福北", "鉄道", "番号", "種類")):
+            continue   # 鉄道の路線・「系統番号」等のラベルは除外（JR古賀線等のバス路線名は許可）
         if tok.endswith(("線", "系統", "ルート")):
             return tok
     return None

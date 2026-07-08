@@ -104,7 +104,28 @@ def _trip_number(label: str):
     return int(m.group(1)) if m else None
 
 
+def route_title_from_texts(texts):
+    """文字列群（見出し行など）から路線名「○○線/系統/ルート」を1つ返す。
+    曜日付記・付随語を落とし、全文字二重描画を畳む。JR等の鉄道路線・「系統番号」は除外。"""
+    for text in texts:
+        if not text:
+            continue
+        for tok in re.split(r"[\s　（）()【】\[\]／/｜|,、。「」#*>]+", str(text)):
+            tok = tok.strip()
+            if len(tok) >= 4 and len(tok) % 2 == 0 and tok[0::2] == tok[1::2]:
+                tok = tok[0::2]
+            tok = re.sub(r"(時刻表|時刻|ダイヤ|運行表|一覧表|表)$", "", tok)
+            if not (2 <= len(tok) <= 20):
+                continue
+            if any(x in tok for x in ("新幹線", "ゆたか線", "福北", "鉄道", "番号", "種類")):
+                continue   # 鉄道路線・「系統番号」等は除外（JR古賀線等のバス路線名は許可）
+            if tok.endswith(("線", "系統", "ルート")):
+                return tok
+    return None
+
+
 def md_to_extract(md: str, source: str = "") -> dict:
+    _doc_rt = route_title_from_texts(md.splitlines()[:15])   # 文書上部の見出しから路線名
     blocks = []
     for bi, (head, rows) in enumerate(t for t in _parse_tables(md) if _is_timetable(t[1])):
         header = rows[0]
@@ -137,8 +158,12 @@ def md_to_extract(md: str, source: str = "") -> dict:
         dh = head if (head and ("⇒" in head or "→" in head or head.startswith("■") or "行" in head)) else None
         if dh:
             dh = dh.lstrip("■").strip()
-        blocks.append({"block_index": len(blocks), "name_col": 0, "section_row": 0,
-                       "direction_hint": dh, "stops": stops, "trips": trips, "warnings": []})
+        _rt = route_title_from_texts([head]) or _doc_rt   # 表の見出し→無ければ文書上部
+        _blk = {"block_index": len(blocks), "name_col": 0, "section_row": 0,
+                "direction_hint": dh, "stops": stops, "trips": trips, "warnings": []}
+        if _rt:
+            _blk["route_title"] = _rt
+        blocks.append(_blk)
 
     needs = [{"type": "ocr_review",
               "message": "OCR(画像PDF)からの抽出です。停留所名・時刻・通過(||)に誤読の可能性があるため、"
