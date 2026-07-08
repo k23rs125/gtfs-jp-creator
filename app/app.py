@@ -1131,7 +1131,7 @@ if ss().get("decision_spec"):
                         f"「{names[0]}」→循環路線とみられます（③で確認）")
     st.success("自動で分かったこと:\n" + "\n".join("・" + a for a in auto))
     st.info("PDF/Excel に無いので③で質問します: 路線名 / 事業者名・法人番号・URL・電話 / "
-            "運賃 / 運行する曜日 / 有効期間 / 対象自治体（座標補完用）")
+            "運賃 / 有効期間 / 対象自治体（座標補完用）　※運行する曜日は②の『運行日』で設定")
 
 # =====================================================================
 # 時刻表の確認・修正: 全便・全停留所の時刻を表で出し、原典と目視照合して直接編集する。
@@ -1508,10 +1508,8 @@ if ss().get("decision_spec"):
                                   help="始点=終点を検出すると自動でチェック。違えば外してください。")
         c3.caption("🚌 **行き先表示は②の割り当て表**で便のまとまりごとに設定できます"
                    "（複数の行き先に対応）。")
-        st.write("運行する曜日")
-        d = st.columns(7)
-        days = [d[i].checkbox(x, value=bool(_days_def[i]), key=f"day{i}_{tk}")
-                for i, x in enumerate(["月", "火", "水", "木", "金", "土", "日"])]
+        # 運行する曜日は②の『運行日』で便のまとまりごとに決めるため、ここでは入力しない。
+        # ②でパターン未割当の便が万一残った場合の予備サービス(SVC)にだけ既定曜日を使う。
         c4, c5 = st.columns(2)
         start = c4.text_input("有効期間 開始 (YYYYMMDD)", value=det.get("start_date", ""), key=f"st_{tk}")
         end = c5.text_input("有効期間 終了 (YYYYMMDD)", value=det.get("end_date", ""), key=f"en_{tk}")
@@ -1611,8 +1609,11 @@ if ss().get("decision_spec"):
         for r in spec.get("routes", []):
             r["circular"] = bool(is_circular)
         period = {"start_date": start or "20250401", "end_date": end or "20271231"}
-        form_days = {"mon": int(days[0]), "tue": int(days[1]), "wed": int(days[2]),
-                     "thu": int(days[3]), "fri": int(days[4]), "sat": int(days[5]), "sun": int(days[6])}
+        # 予備サービスSVCの曜日: ②でパターン未割当の便が残ったときの保険。
+        # 運行曜日は②で決めるので、ここは検出/既定値(_days_def=平日)をそのまま使う。
+        _dd = _days_def if (isinstance(_days_def, (list, tuple)) and len(_days_def) == 7) else [1, 1, 1, 1, 1, 0, 0]
+        form_days = {"mon": int(_dd[0]), "tue": int(_dd[1]), "wed": int(_dd[2]),
+                     "thu": int(_dd[3]), "fri": int(_dd[4]), "sat": int(_dd[5]), "sun": int(_dd[6])}
         spec["service"] = {"service_id": "SVC", **form_days, **period}
         # 複数ダイヤ: ②の運行日割当(block_pattern)から services と block_service を構築。
         bpat = ss()["decision_spec"].get("block_pattern", {})
