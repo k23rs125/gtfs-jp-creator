@@ -1025,7 +1025,9 @@ if "extract" in ss():
                "方向（行き=0/帰り=1）を割り振りました（要確認）。複数路線・往復の対応づけが違うときは"
                "表を編集してください。路線名も変更できます。"
                "（便のまとまり＝時刻表のひとかたまり／PDFなら1ページ分）")
-    st.caption("✏️ **表のセルはクリック（ダブルクリック）で編集できます**（路線名・方向・行き先・運行日）。")
+    st.markdown("<span style='color:#16202B;font-weight:700'>✏️ 表のセルはクリック（ダブルクリック）で"
+                "編集できます</span><span style='color:#16202B'>（路線名・方向・行き先・運行日）。</span>",
+                unsafe_allow_html=True)
     blocks_e = ex.get("blocks", [])
     _rows0 = _auto_route_rows(blocks_e, ex.get("source", ""))
     # 復元直後（route_editor の編集stateがまだ無い時）だけ、保存済みの割り当て(decision_spec)を
@@ -1163,8 +1165,9 @@ if "extract" in ss():
         st.subheader("⏰ 時刻表の確認・修正（全便・全停留所）")
         render_source_panel("tt")   # 原本（PDF/画像）を並べて照合できるパネル
         n_an = len(anomalies)
-        st.caption("✏️ **時刻・停留所名のセルはクリック（ダブルクリック）で編集**できます。"
-                   "抽出した**全時刻**です。原典（紙やPDF）と見比べて、違うセルを直接直してください。"
+        st.markdown("<span style='color:#16202B;font-weight:700'>✏️ 時刻・停留所名のセルはクリック"
+                    "（ダブルクリック）で編集できます。</span>", unsafe_allow_html=True)
+        st.caption("抽出した**全時刻**です。原典（紙やPDF）と見比べて、違うセルを直接直してください。"
                    "空欄＝通過。**停留所名も直接編集**でき、**行を選んで削除**もできます"
                    "（「待機時間」「○○出発」など停留所でない行を消す／表記を直す）。"
                    + (f"OCR誤読の疑い **{n_an}件** は各表の下に列挙しています。" if n_an else "")
