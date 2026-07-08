@@ -89,6 +89,53 @@ def _rewrite_csv_field(path, field, rename_map, only_table=None):
         for r in rows:
             w.writerow({k: r.get(k, "") for k in fns})
 
+
+def _write_shape(shp_path, shape_id, coords):
+    """shapes.txt の shape_id の点を coords[(lat,lon)] で置き換える（他shapeは保持）。距離も再計算。"""
+    import csv as _c
+    from math import radians, sin, cos, asin, sqrt
+    p = Path(shp_path)
+
+    def _hav(a, b):
+        la1, lo1, la2, lo2 = map(radians, [a[0], a[1], b[0], b[1]])
+        h = sin((la2 - la1) / 2) ** 2 + cos(la1) * cos(la2) * sin((lo2 - lo1) / 2) ** 2
+        return 2 * 6371000 * asin(sqrt(h))
+
+    fns = ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence", "shape_dist_traveled"]
+    rows = []
+    if p.exists():
+        rows = [r for r in _c.DictReader(p.open(encoding="utf-8-sig")) if r.get("shape_id") != shape_id]
+    d = 0.0
+    for i, (la, lo) in enumerate(coords):
+        if i > 0:
+            d += _hav(coords[i - 1], coords[i])
+        rows.append({"shape_id": shape_id, "shape_pt_lat": f"{la:.6f}", "shape_pt_lon": f"{lo:.6f}",
+                     "shape_pt_sequence": str(i), "shape_dist_traveled": f"{d:.2f}"})
+    with p.open("w", encoding="utf-8", newline="") as f:
+        w = _c.DictWriter(f, fieldnames=fns, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k, "") for k in fns})
+
+
+def _assign_trip_shape(trp_path, rid, did, shape_id):
+    """trips(.with_shapes).txt の route+direction の行に shape_id を割り当てる。"""
+    import csv as _c
+    p = Path(trp_path)
+    rd = _c.DictReader(p.open(encoding="utf-8-sig"))
+    fns = rd.fieldnames or []
+    rows = list(rd)
+    if "shape_id" not in fns:
+        fns = fns + ["shape_id"]
+    for r in rows:
+        if r.get("route_id") == rid and (r.get("direction_id") or "0") == did:
+            r["shape_id"] = shape_id
+    with p.open("w", encoding="utf-8", newline="") as f:
+        w = _c.DictWriter(f, fieldnames=fns, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k, "") for k in fns})
+
 st.set_page_config(page_title="GTFS-JP メーカー", page_icon="🚌", layout="wide")
 
 # --- 見た目（官公庁向けの信頼感ある青系テーマ。CSS注入なのでサーバ/ローカル問わず効く） ---
@@ -2169,6 +2216,96 @@ if ss().get("result"):
                     rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
                 ss().result = {"rc": rc, "log": se}
                 st.success("再生成しました（確定座標を反映）。"); st.rerun()
+
+# =====================================================================
+# Step 5b: 路線図を手で描き直す（shapes 編集）— 地図に点を打って正しい経路にする
+# =====================================================================
+if ss().get("result"):
+    _gd = WORK / "out" / "gtfs"
+    _shp = _gd / "shapes.txt"
+    _trp = _gd / "trips.with_shapes.txt"
+    _trp = _trp if _trp.exists() else (_gd / "trips.txt")
+    _stp = _gd / "stops.txt"
+    _stt = _gd / "stop_times.txt"
+    if all(p.exists() for p in (_trp, _stp, _stt)):
+        with st.expander("🖊 路線図を手で描き直す（経路 shapes を作り直す・任意）"):
+            st.caption("自動生成の経路が実際と違う時、地図に点を打って正しい経路に描き直せます。"
+                       "路線・方向を選び、地図左上の**ペン（ポリライン）**で ①②③… の停留所を順につないで"
+                       "→ダブルクリックで確定 → 下のボタンで反映。描いた線で shapes を上書きします（推定より優先）。")
+            import csv as _c5
+            _trips5 = list(_c5.DictReader(_trp.open(encoding="utf-8-sig")))
+            _stops5 = {r["stop_id"]: r for r in _c5.DictReader(_stp.open(encoding="utf-8-sig"))}
+            _sts5 = list(_c5.DictReader(_stt.open(encoding="utf-8-sig")))
+            _rmeta = {r["route_id"]: r for r in _c5.DictReader((_gd / "routes.txt").open(encoding="utf-8-sig"))} \
+                if (_gd / "routes.txt").exists() else {}
+            _rd5 = sorted({(t["route_id"], (t.get("direction_id") or "0")) for t in _trips5})
+
+            def _rdlab(rd):
+                rid, dv = rd
+                return f"{_rmeta.get(rid, {}).get('route_long_name', rid)}（方向{dv}）"
+
+            _sel5 = st.selectbox("路線・方向", _rd5, format_func=_rdlab, key="shpedit_rd")
+            _rid5, _dir5 = _sel5
+            _rt5 = [t for t in _trips5 if t["route_id"] == _rid5 and (t.get("direction_id") or "0") == _dir5]
+            _shid = next((t.get("shape_id") for t in _rt5 if t.get("shape_id")), None)
+            _rep = _rt5[0]["trip_id"] if _rt5 else None
+            _seq5 = sorted([r for r in _sts5 if r["trip_id"] == _rep], key=lambda r: int(r["stop_sequence"]))
+            _spts = []
+            for r in _seq5:
+                s = _stops5.get(r["stop_id"], {})
+                if (s.get("stop_lat") or "").strip():
+                    _spts.append((s.get("stop_name", ""), float(s["stop_lat"]), float(s["stop_lon"])))
+            if len(_spts) < 2:
+                st.warning("この路線・方向は停留所座標が足りません。先に⑤で座標を確定してください。")
+            else:
+                _octr = [sum(p[1] for p in _spts) / len(_spts), sum(p[2] for p in _spts) / len(_spts)]
+                _em = folium.Map(location=_octr, zoom_start=13)
+                from folium.plugins import Draw
+                Draw(export=False, edit_options={"edit": True},
+                     draw_options={"polyline": True, "polygon": False, "rectangle": False,
+                                   "circle": False, "marker": False, "circlemarker": False}).add_to(_em)
+                for i, (nm, la, lo) in enumerate(_spts, 1):
+                    folium.Marker(
+                        [la, lo], tooltip=f"{i}. {nm}",
+                        icon=folium.DivIcon(html=(
+                            "<div style='background:#0e5c6b;color:#fff;border-radius:50%;width:22px;"
+                            "height:22px;line-height:22px;text-align:center;font-size:11px;font-weight:700'>"
+                            f"{i}</div>"))).add_to(_em)
+                _curpts = []
+                if _shid and _shp.exists():
+                    for r in _c5.DictReader(_shp.open(encoding="utf-8-sig")):
+                        if r.get("shape_id") == _shid:
+                            _curpts.append((int(r["shape_pt_sequence"]), float(r["shape_pt_lat"]), float(r["shape_pt_lon"])))
+                    _curpts.sort()
+                    if _curpts:
+                        folium.PolyLine([(p[1], p[2]) for p in _curpts], color="#999", weight=3,
+                                        opacity=0.6, tooltip="現在の経路（自動）").add_to(_em)
+                _emst = st_folium(_em, width=900, height=460, key="shpeditmap",
+                                  returned_objects=["last_active_drawing", "all_drawings"])
+                _draw = None
+                if _emst:
+                    _draw = _emst.get("last_active_drawing") or (
+                        (_emst.get("all_drawings") or [None])[-1])
+                _coords5 = []
+                if _draw and (_draw.get("geometry") or {}).get("type") == "LineString":
+                    _coords5 = [(c[1], c[0]) for c in _draw["geometry"]["coordinates"]]  # [lng,lat]→(lat,lon)
+                if _coords5:
+                    st.info(f"描いた線：{len(_coords5)} 点。この線で経路(shapes)を更新できます。")
+                    if st.button("この線で経路(shapes)を更新する", type="primary", key="shpeditsave"):
+                        if not _shid:
+                            _shid = f"shape_{_rid5}_{_dir5}_manual"
+                            _assign_trip_shape(_trp, _rid5, _dir5, _shid)
+                        _write_shape(_shp, _shid, _coords5)
+                        _zz = list((WORK / "out").glob("*_gtfs-jp.zip"))
+                        if _zz:
+                            run([SCRIPTS / "package_gtfs_zip.py", _gd, "-o", _zz[0],
+                                 "--substitute", "trips.with_shapes.txt=trips.txt"])
+                        run([SCRIPTS / "make_map_view.py", _stp, "--out", WORK / "out" / "map_view.html",
+                             "--title", "app_feed"])
+                        run([SCRIPTS / "make_gtfs_viewer.py", "--feed", _gd,
+                             "-o", WORK / "out" / "gtfs_viewer.html"])
+                        st.success("経路(shapes)を更新しました。地図・ビューア・zip を更新しました。")
+                        st.rerun()
 
 # =====================================================================
 # Step 6: GTFSビューア（作成した feed を 7タブで閲覧）
