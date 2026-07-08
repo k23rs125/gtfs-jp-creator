@@ -207,6 +207,15 @@ st.markdown("""
   .stTextInput input, .stNumberInput input, .stDateInput input, .stTextArea textarea { background:transparent; }
   .stNumberInput button { background:#E9F0FB; border-color:#B7C9E2; }
   .stDateInput div[data-baseweb="input"] { background:#F5F9FF !important; }
+  /* 時刻表(編集グリッド key=tt_*)の右下角に「クリックで編集できる」鉛筆ヒントを浮かせる。
+     ②路線表(route_editor)・③区間運賃表(zonedf)には付けない（キーで限定）。 */
+  [class*="st-key-tt_"] { position:relative; }
+  [class*="st-key-tt_"]::after {
+    content:"✏️ クリックで編集";
+    position:absolute; right:10px; bottom:8px; z-index:5; pointer-events:none;
+    font-size:.72rem; color:#5B6B7C; background:rgba(255,255,255,.9);
+    border:1px solid var(--border); border-radius:999px; padding:.06rem .55rem;
+    box-shadow:0 1px 3px rgba(20,50,90,.12); }
 </style>
 """, unsafe_allow_html=True)
 ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
