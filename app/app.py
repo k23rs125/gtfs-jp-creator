@@ -294,20 +294,22 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 **③ PDF/Excel に無い項目を入力** — 時刻表に **書かれていない** 情報
 （事業者名・運賃・運行曜日・有効期間・運休日など）を入れます。
 **分からない項目は空欄のままで OK**（推測で埋めない＝誤りを作らない）。
-> 💡 **こんな時は**：運賃が区間で違うなら「均一」のチェックを外して表に入力、均一なら金額を1つ入れるだけ。
-> 事業者名や法人番号が不明なら空欄のままで進められます（後から直せます）。
+> 💡 **こんな時は**：運賃がどの路線も同じなら **「全路線を同じ運賃にする」** で1回入力。
+> 区間で違うなら **「区間運賃にする」** で表に入力。事業者名や法人番号が不明なら空欄のままで進められます。
 
 **生成** — 「GTFS-JP を生成する」を押すと、座標補完・路線図・翻訳・検証まで **自動で** 走ります。
 
 **④ 結果（ふりがな・停留所名の確認）** — 読み（ふりがな）や英語、停留所名の誤りを直します。
 **⚠印** が付いた行（漢字が残る等）は特に確認してください。
 > 💡 **こんな時は**：難読地名（例：相島＝あいのしま）は自動では誤読しがちです。原典を見て正しい読みに直すと、
-> zip と地図が更新されます。
+> zip と地図が更新されます。**「🔎 AIで読みをチェック（任意・要確認）」** を押すと、自動読みと違う所を
+> AIが洗い出します（採用は自分で選ぶ。APIキーが要ります）。
 
-**⑤ 座標の確認（地図）** — 地図で停留所の位置を確認します。**<span style="color:#e08a1e">橙＝要確認</span>** は
-地図クリックか座標入力で正しい位置を確定します。
-> 💡 **こんな時は**：同じ名前のバス停が県内に複数あると位置を誤ることがあります。橙が残っている間は
-> 「公式提出可」にせず、必ず地図で確認してください。
+**⑤ 座標の確認（地図）** — 地図で停留所の位置を確認します。**<span style="color:#e08a1e">橙＝要確認</span>** の停留所を、
+**地図の点をクリックして選び**、**ピンをドラッグして正しい位置へ動かして**確定します（動かした先の緯度経度が入ります）。
+> 💡 **こんな時は**：地図の点を押すと、下の一覧でその停留所が自動で選ばれ、緯度・経度が表示されます。
+> ピンをドラッグ→クリックでその位置に確定。同じ名前のバス停が県内に複数あると位置を誤ることがあるので、
+> 橙が残っている間は「公式提出可」にせず、必ず地図で確認してください。
 
 **⑥ ビューアで確認 → ダウンロード** — 完成した内容をブラウザで確認し、
 **ビューアの下にある大きなボタンから GTFS-JP 一式（zip）をダウンロード** します。
@@ -1503,11 +1505,16 @@ if ss().get("decision_spec"):
                     _cur += datetime.timedelta(days=1)
             except Exception:
                 pass
-        # 祝日: パターン別に正しいサービスへ割り当てる（平日/土曜=運休2、日祝/土日祝/毎日=運行1、
-        # 既に走る曜日はスキップ）。run_pipeline の一律運休は複数ダイヤで日祝サービスの日曜まで
-        # 消してしまうため、祝日はここで決定的に展開する。年末年始/お盆(全休)は従来どおり後段で。
+        # 祝日: 「日曜・祝日／土日祝／毎日」ダイヤは“祝日も運行”がパターンの意味なので、
+        # 祝日運休チェックの有無に関わらず、その祝日に運行(1)を追加する（＝一般的な祝日を反映）。
+        # 平日/土曜ダイヤを祝日に運休(2)にするのは「祝日は運休」チェックON時だけ（利用者の選択）。
+        # run_pipeline の一律運休は複数ダイヤで日祝サービスの日曜まで消すため、ここで決定的に展開。
+        _sid_pat = {v: k for k, v in PATTERN_SID.items()}   # WD→平日(月〜金) 等
+        _has_hol_pattern = any(
+            PATTERN_RUNS_HOLIDAY.get(_sid_pat.get(s["service_id"], ""), False)
+            for s in spec["services"])
         _syuku_inapp_ok = False
-        if hol_syuku:
+        if hol_syuku or _has_hol_pattern:
             try:
                 from generate_calendar_dates import load_syukujitsu
                 _holidays = load_syukujitsu(
@@ -1515,7 +1522,6 @@ if ss().get("decision_spec"):
                 _p0 = datetime.datetime.strptime(period["start_date"], "%Y%m%d").date()
                 _p1 = datetime.datetime.strptime(period["end_date"], "%Y%m%d").date()
                 _daykeys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-                _sid_pat = {v: k for k, v in PATTERN_SID.items()}   # WD→平日(月〜金) 等
                 for _d in _holidays:
                     if not (_p0 <= _d <= _p1):
                         continue
@@ -1525,10 +1531,10 @@ if ss().get("decision_spec"):
                         _runs_hol = PATTERN_RUNS_HOLIDAY.get(_sid_pat.get(_sid, ""), False)
                         _covers = int(_s.get(_dk, 0)) == 1
                         if _runs_hol and not _covers:
-                            _add_cd(_ymd, 1, [_sid])   # 祝日はこのダイヤで運行(追加)
-                        elif (not _runs_hol) and _covers:
-                            _add_cd(_ymd, 2, [_sid])   # 平日/土曜は祝日運休
-                _syuku_inapp_ok = True
+                            _add_cd(_ymd, 1, [_sid])   # 祝日はこのダイヤで運行（常に）
+                        elif (not _runs_hol) and _covers and hol_syuku:
+                            _add_cd(_ymd, 2, [_sid])   # 平日/土曜は祝日運休（チェックON時のみ）
+                _syuku_inapp_ok = hol_syuku   # 一律運休の抑制は祝日運休ON時のみ意味を持つ
             except Exception:
                 _syuku_inapp_ok = False   # 失敗時は後段の一律運休へフォールバック
         if _cal_dates:
