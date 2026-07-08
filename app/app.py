@@ -245,10 +245,55 @@ SID = ss()["sid"]
 # かつ sid ごとに分離。復元は「開いたとき1クリック」で事故を防ぐ（折衷案）。
 AUTOSAVE_DIR = Path.home() / ".gtfs_jp_app"
 AUTOSAVE_FILE = AUTOSAVE_DIR / f"session_{SID}.json"
-# 保存する作業一式（費用の高い手作業＝抽出・時刻修正・路線割当・確定座標・検出・原本）。
-# ③の入力欄(事業者/運賃/曜日)はウィジェット値なので復元対象外＝再入力（軽い）。
+# 保存する作業一式（費用の高い手作業＝抽出・時刻修正・路線割当・確定座標・検出・原本・生成結果）。
 SAVE_KEYS = ["extract", "extract_token", "decision_spec", "detected", "confirmed",
-             "source_display", "fare_matrix_doc"]
+             "source_display", "fare_matrix_doc", "result"]
+
+
+def _out_persist_dir(sid):
+    return AUTOSAVE_DIR / f"out_{sid}"
+
+
+_WORK_FILES = ["config.json", "structured.json", "extract.json"]   # 再生成に要る作業ファイル
+
+
+def _persist_out():
+    """生成物 out/ と再生成用の作業ファイルを sid ごとの安定フォルダに保存
+    （再起動後も④⑤⑥・ダウンロード・再生成を復元するため）。"""
+    import shutil
+    src = WORK / "out"
+    if not src.exists():
+        return
+    dst = _out_persist_dir(SID)
+    try:
+        if dst.exists():
+            shutil.rmtree(dst, ignore_errors=True)
+        dst.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dst / "out")
+        for _wf in _WORK_FILES:
+            if (WORK / _wf).exists():
+                shutil.copy2(WORK / _wf, dst / _wf)
+    except Exception:
+        pass
+
+
+def _restore_out(sid):
+    """保存した生成物・作業ファイルを現在の作業フォルダ(WORK)へ戻す。"""
+    import shutil
+    src = _out_persist_dir(sid)
+    if not src.exists():
+        return
+    try:
+        if (src / "out").exists():
+            _dst = WORK / "out"
+            if _dst.exists():
+                shutil.rmtree(_dst, ignore_errors=True)
+            shutil.copytree(src / "out", _dst)
+        for _wf in _WORK_FILES:
+            if (src / _wf).exists():
+                shutil.copy2(src / _wf, WORK / _wf)
+    except Exception:
+        pass
 
 
 def autosave():
@@ -267,6 +312,9 @@ def autosave():
                 payload["form_inputs"] = forms
         AUTOSAVE_DIR.mkdir(parents=True, exist_ok=True)
         AUTOSAVE_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        # 生成物(out/)は変更があった時だけ保存（毎回コピーは重いのでフラグで制御）。
+        if ss().pop("_out_dirty", False):
+            _persist_out()
     except Exception:
         pass
 
@@ -290,43 +338,44 @@ def _restore_label(data, f):
 
 
 def restore_prompt():
-    """起動時、このPCの自動保存があれば新しい順に一覧し、選んで復元できるようにする
-    （extract未読込のときのみ）。複数人利用でも、自分の作業を路線名等で見分けて選べる。"""
+    """起動時、前回の作業（このPCの最新の保存）があれば『続きから復元／新規』を出す
+    （extract未読込のときのみ）。生成結果(out/)も含めて復元する。"""
     if ss().get("extract") or ss().get("_restore_dismissed"):
         return
     files = []
     if AUTOSAVE_DIR.exists():
         files = sorted((p for p in AUTOSAVE_DIR.glob("session_*.json") if p.stat().st_size > 200),
-                       key=lambda p: p.stat().st_mtime, reverse=True)[:8]
+                       key=lambda p: p.stat().st_mtime, reverse=True)
     if not files:
         return
-    st.info("💾 前回までの作業が保存されています。**自分の作業を選んで「復元」**してください"
-            "（抽出・路線の割り当て・時刻表の修正・③の入力まで戻ります）。新規なら下の『新規で始める』。")
-    for f in files:
+    f = files[0]   # 前回の作業＝このPCの最新の保存
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    st.info("💾 前回の作業が保存されています：" + _restore_label(data, f)
+            + "　**続きから再開**できます（抽出・路線の割り当て・時刻表の修正・③の入力・"
+              "生成結果まで復元）。")
+    c1, c2, _ = st.columns([1, 1, 3])
+    if c1.button("前回の続きから復元する", type="primary"):
         try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        c1, c2 = st.columns([5, 1])
-        c1.markdown("💾 " + _restore_label(data, f))
-        if c2.button("復元", key=f"restore_{f.stem}", type="primary"):
+            forms = data.pop("form_inputs", {}) or {}
+            for k, v in data.items():
+                ss()[k] = v
+            for k, v in forms.items():   # ③の入力欄も復元（ウィジェットkeyへ直接）
+                ss()[k] = v
+            _sid = f.stem.replace("session_", "")   # このファイルのsidを引き継ぐ
+            ss()["sid"] = _sid
             try:
-                forms = data.pop("form_inputs", {}) or {}
-                for k, v in data.items():
-                    ss()[k] = v
-                for k, v in forms.items():   # ③の入力欄も復元（ウィジェットkeyへ直接）
-                    ss()[k] = v
-                _sid = f.stem.replace("session_", "")   # このファイルのsidを引き継いで以降も同じ所へ保存
-                ss()["sid"] = _sid
-                try:
-                    st.query_params["sid"] = _sid
-                except Exception:
-                    pass
-                ss()["_restore_dismissed"] = True
-                st.rerun()
-            except Exception as e:
-                st.error("復元に失敗しました: " + str(e))
-    if st.button("新規で始める"):
+                st.query_params["sid"] = _sid
+            except Exception:
+                pass
+            _restore_out(_sid)   # 生成物(out/)・作業ファイルを戻す（④⑤⑥・DL・再生成を復元）
+            ss()["_restore_dismissed"] = True
+            st.rerun()
+        except Exception as e:
+            st.error("復元に失敗しました: " + str(e))
+    if c2.button("新規で始める"):
         ss()["_restore_dismissed"] = True
         st.rerun()
 
@@ -775,6 +824,7 @@ def run_generation(spec, muni, use_nom, hol, ai_read=False, ai_key="", ai_ctx=""
         (WORK / "config.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
         rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
     ss().result = {"rc": rc, "log": se}
+    ss()["_out_dirty"] = True   # 生成物(out/)を保存対象にする（再起動後に④⑤⑥を復元）
     # 生成後、任意でAIが読みを探索して既定値に反映（④で確認）。失敗しても生成物は無事。
     if rc == 0 and ai_read and ai_key:
         try:
@@ -2029,6 +2079,7 @@ if ss().get("result"):
                                  "--out", out / "map_view.html", "--title", "app_feed"])
                             run([SCRIPTS / "make_gtfs_viewer.py", "--feed", out / "gtfs",
                                  "-o", out / "gtfs_viewer.html"])
+                        ss()["_out_dirty"] = True
                         st.success(
                             f"反映しました（停留所名 {len(_renames)}件 / 読み・英語 {len(_by)}件）。"
                             "GTFS-JP(zip)と地図を更新しました。下のボタンで再ダウンロードしてください。")
@@ -2097,6 +2148,7 @@ if ss().get("result"):
                             _zz = list(out.glob("*_gtfs-jp.zip"))
                             if _zz:
                                 run([SCRIPTS / "package_gtfs_zip.py", out / "gtfs", "-o", _zz[0]])
+                            ss()["_out_dirty"] = True
                             st.success(f"{len(_byai)}件のAI候補を反映しました（要確認）。zipを更新しました。")
                             st.rerun()
     # zip ダウンロード（完成物の主ボタンは下の⑥ビューア直下。ここは修正後の再取得用）
@@ -2248,6 +2300,7 @@ if ss().get("result"):
                 with st.spinner("確定座標で再生成中..."):
                     rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
                 ss().result = {"rc": rc, "log": se}
+                ss()["_out_dirty"] = True
                 st.success("再生成しました（確定座標を反映）。"); st.rerun()
 
 # =====================================================================
@@ -2337,6 +2390,7 @@ if ss().get("result"):
                              "--title", "app_feed"])
                         run([SCRIPTS / "make_gtfs_viewer.py", "--feed", _gd,
                              "-o", WORK / "out" / "gtfs_viewer.html"])
+                        ss()["_out_dirty"] = True
                         st.success("経路(shapes)を更新しました。地図・ビューア・zip を更新しました。")
                         st.rerun()
 
