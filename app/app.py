@@ -964,17 +964,25 @@ def _auto_route_rows(bs, source=""):
         # どれも無ければ端点「始点～終点」で作る（従来どおり）。
         nm0 = [s.get("name") for s in bs[members[0]].get("stops", [])]
         _line = None
+        # ① 見出し(ページ上部のタイトル route_title)を最優先（例: 山らいず線・相らんど線）
         for _mbi in members:
-            for _s in bs[_mbi].get("stops", []):
-                _line = _route_name_from(_s.get("name"))
+            if bs[_mbi].get("route_title"):
+                _line = bs[_mbi]["route_title"]
+                break
+        # ② 停留所名・方向見出しから拾う
+        if not _line:
+            for _mbi in members:
+                for _s in bs[_mbi].get("stops", []):
+                    _line = _route_name_from(_s.get("name"))
+                    if _line:
+                        break
+                if not _line and bs[_mbi].get("direction_hint"):
+                    _line = _route_name_from(bs[_mbi]["direction_hint"])
                 if _line:
                     break
-            if not _line and bs[_mbi].get("direction_hint"):
-                _line = _route_name_from(bs[_mbi]["direction_hint"])
-            if _line:
-                break
+        # ③ ファイル名の候補
         if not _line:
-            _line = _fname_route   # まとまりで見つからなければファイル名の候補
+            _line = _fname_route
         rname = _line or (f"{nm0[0]}～{nm0[-1]}" if nm0 else f"路線{gi + 1}")
         for d, bi in enumerate(members):
             nm = [s.get("name") for s in bs[bi].get("stops", [])]

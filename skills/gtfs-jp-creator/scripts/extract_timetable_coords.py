@@ -459,6 +459,34 @@ def main():
         b["block_index"] = i
     result["blocks"] = real_blocks
 
+    # ページ上部の見出しから路線名「○○線／○○系統／○○ルート」を拾い、x位置が近いブロックへ
+    # 割り当てる（路線名が停留所名にもファイル名にも無く、見出しにだけある例＝マリンクス等に対応）。
+    # 「山らいず線（平日）」のような曜日付記は括弧分割で落ち「山らいず線」になる。線/系統を優先し、
+    # 「第１ルート」等のサブ表記は 線/系統 が無い時だけ使う。
+    _ph = page.height
+    _titles = []   # (x0, name)
+    for w in words:
+        if w.get("top", 9999) > _ph * 0.16:
+            continue
+        for _t in re.split(r"[\s　（）()【】\[\]／/｜|,、]+", w.get("text", "")):
+            _t = _t.strip()
+            # 全文字が二重描画されたPDF（「山山ららいいずず線線」）を「山らいず線」に畳む
+            if len(_t) >= 4 and len(_t) % 2 == 0 and _t[0::2] == _t[1::2]:
+                _t = _t[0::2]
+            _t = re.sub(r"(時刻表|時刻|ダイヤ|運行表|一覧表|表)$", "", _t)
+            if not (2 <= len(_t) <= 20):
+                continue
+            if _t.upper().startswith(("JR", "ＪＲ", "Ｊ")) or any(
+                    x in _t for x in ("新幹線", "ゆたか線", "福北", "鉄道", "番号", "種類")):
+                continue
+            if _t.endswith(("線", "系統", "ルート")):
+                _titles.append((w.get("x0", 0), _t))
+    if _titles:
+        _primary = [(x, t) for x, t in _titles if t.endswith(("線", "系統"))]
+        _pool = _primary if _primary else _titles
+        for b in real_blocks:
+            b["route_title"] = min(_pool, key=lambda t: abs(t[0] - b.get("name_col_x", 0)))[1]
+
     # --blocks 手動指定の充足判定（便を持つ最終ブロック数で評価）
     if args.blocks and len(real_blocks) != args.blocks:
         result["warnings"].append(
