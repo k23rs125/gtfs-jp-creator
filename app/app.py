@@ -271,32 +271,62 @@ def autosave():
         pass
 
 
-def restore_prompt():
-    """起動時、前回の自動保存があれば『続きから復元/新規』を出す（extract未読込のときのみ）。"""
-    if ss().get("extract") or ss().get("_restore_dismissed"):
-        return
-    if not AUTOSAVE_FILE.exists():
-        return
+def _restore_label(data, f):
+    """保存ファイルを利用者が識別できる見出しにする（事業者名/路線名・停留所数・保存時刻）。"""
     try:
-        mt = datetime.datetime.fromtimestamp(AUTOSAVE_FILE.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        mt = datetime.datetime.fromtimestamp(f.stat().st_mtime).strftime("%m/%d %H:%M")
     except Exception:
         mt = ""
-    st.info(f"💾 前回の作業（{mt}）が自動保存されています。**続きから再開**できます"
-            "（抽出・路線の割り当て・時刻表の修正・③の入力まで復元します）。")
-    c1, c2, _ = st.columns([1, 1, 3])
-    if c1.button("前回の続きから復元する", type="primary"):
+    ex = data.get("extract", {}) or {}
+    blocks = ex.get("blocks", []) or []
+    nstops = sum(len(b.get("stops", [])) for b in blocks)
+    fi = data.get("form_inputs", {}) or {}
+    agn = next((v for k, v in fi.items() if k.startswith("agn_") and str(v).strip()), "")
+    routes = [r.get("route_long_name", "") for r in (data.get("decision_spec", {}) or {}).get("routes", [])]
+    src = data.get("source_display", "")
+    srcname = Path(src).name if src else ""
+    title = agn or "／".join([r for r in routes if r][:2]) or srcname or "作業データ"
+    return f"**{title}**　（{len(blocks)}まとまり／停留所{nstops}／保存 {mt}）"
+
+
+def restore_prompt():
+    """起動時、このPCの自動保存があれば新しい順に一覧し、選んで復元できるようにする
+    （extract未読込のときのみ）。複数人利用でも、自分の作業を路線名等で見分けて選べる。"""
+    if ss().get("extract") or ss().get("_restore_dismissed"):
+        return
+    files = []
+    if AUTOSAVE_DIR.exists():
+        files = sorted((p for p in AUTOSAVE_DIR.glob("session_*.json") if p.stat().st_size > 200),
+                       key=lambda p: p.stat().st_mtime, reverse=True)[:8]
+    if not files:
+        return
+    st.info("💾 前回までの作業が保存されています。**自分の作業を選んで「復元」**してください"
+            "（抽出・路線の割り当て・時刻表の修正・③の入力まで戻ります）。新規なら下の『新規で始める』。")
+    for f in files:
         try:
-            data = json.loads(AUTOSAVE_FILE.read_text(encoding="utf-8"))
-            forms = data.pop("form_inputs", {}) or {}
-            for k, v in data.items():
-                ss()[k] = v
-            for k, v in forms.items():   # ③の入力欄も復元（ウィジェットkeyへ直接）
-                ss()[k] = v
-            ss()["_restore_dismissed"] = True
-            st.rerun()
-        except Exception as e:
-            st.error("復元に失敗しました: " + str(e))
-    if c2.button("新規で始める"):
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        c1, c2 = st.columns([5, 1])
+        c1.markdown("💾 " + _restore_label(data, f))
+        if c2.button("復元", key=f"restore_{f.stem}", type="primary"):
+            try:
+                forms = data.pop("form_inputs", {}) or {}
+                for k, v in data.items():
+                    ss()[k] = v
+                for k, v in forms.items():   # ③の入力欄も復元（ウィジェットkeyへ直接）
+                    ss()[k] = v
+                _sid = f.stem.replace("session_", "")   # このファイルのsidを引き継いで以降も同じ所へ保存
+                ss()["sid"] = _sid
+                try:
+                    st.query_params["sid"] = _sid
+                except Exception:
+                    pass
+                ss()["_restore_dismissed"] = True
+                st.rerun()
+            except Exception as e:
+                st.error("復元に失敗しました: " + str(e))
+    if st.button("新規で始める"):
         ss()["_restore_dismissed"] = True
         st.rerun()
 
