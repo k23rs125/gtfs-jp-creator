@@ -247,15 +247,13 @@ st.markdown("""
   .stTextInput input, .stNumberInput input, .stDateInput input, .stTextArea textarea { background:transparent; }
   .stNumberInput button { background:#E9F0FB; border-color:#B7C9E2; }
   .stDateInput div[data-baseweb="input"] { background:#F5F9FF !important; }
-  /* 編集グリッド（②路線割り当て route_editor・⏰時刻表 tt_*）の右下角に
-     「クリックで編集できる」鉛筆ヒントを浮かせる。③区間運賃表(zonedf)には付けない。 */
-  [class*="st-key-tt_"], [class*="st-key-route_editor_"] { position:relative; }
+  /* 編集グリッド（②路線割り当て route_editor・⏰時刻表 tt_*）の「クリックで編集」ヒント。
+     セル（表）に重ならないよう、グリッド下に余白を作りその中へ置く。③区間運賃表(zonedf)には付けない。 */
+  [class*="st-key-tt_"], [class*="st-key-route_editor_"] { position:relative; padding-bottom:18px; }
   [class*="st-key-tt_"]::after, [class*="st-key-route_editor_"]::after {
     content:"✏️ クリックで編集";
-    position:absolute; right:10px; bottom:8px; z-index:5; pointer-events:none;
-    font-size:.72rem; color:#5B6B7C; background:rgba(255,255,255,.9);
-    border:1px solid var(--border); border-radius:999px; padding:.06rem .55rem;
-    box-shadow:0 1px 3px rgba(20,50,90,.12); }
+    position:absolute; right:2px; bottom:1px; z-index:5; pointer-events:none;
+    font-size:.72rem; line-height:1; color:#5B6B7C; }
 </style>
 """, unsafe_allow_html=True)
 ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
