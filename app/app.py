@@ -143,6 +143,39 @@ def _assign_trip_shape(trp_path, rid, did, shape_id):
         for r in rows:
             w.writerow({k: r.get(k, "") for k in fns})
 
+
+# 地図の描画ツールバー(Leaflet.draw)の英語ラベルを日本語化する。folium はカスタムスクリプトを
+# <head>先頭に置く＝ライブラリ読込より前になり L.drawLocal を先に上書きできないため、
+# タイミングに依存しない DOM 置換（title/テキスト/操作ヒント）＋MutationObserver で行う。
+_DRAW_JP_JS = """
+<script>
+(function(){
+  var TITLE={'Draw a polyline':'線を描く（道に沿って点を打つ）','Edit layers':'線を編集（点をドラッグ）',
+    'Delete layers':'線を削除','No layers to edit':'編集できる線がありません',
+    'No layers to delete':'削除できる線がありません','Finish drawing':'この点で線を確定',
+    'Delete last point drawn':'直前の点を削除','Cancel drawing':'描画をやめる','Save changes':'変更を保存',
+    'Cancel editing, discards all changes':'編集をやめる（変更を破棄）','Clear all layers':'すべて消す'};
+  var TEXT={'Finish':'完了','Delete last point':'最後の点を削除','Cancel':'キャンセル','Save':'保存','Clear All':'全消去'};
+  var TIP=[['Click to start drawing line.','クリックで線を描き始めます。'],
+    ['Click to continue drawing line.','クリックで点を追加します。'],
+    ['Click last point to finish line.','最後の点をダブルクリックで確定します。'],
+    ['Click and drag to edit features.','点をドラッグして形を直します。'],
+    ['Click cancel to undo changes.','キャンセルで元に戻せます。'],
+    ['Click on a feature to remove.','消したい線をクリックします。']];
+  function relabel(){
+    document.querySelectorAll('.leaflet-draw a[title]').forEach(function(a){if(TITLE[a.title])a.title=TITLE[a.title];});
+    document.querySelectorAll('.leaflet-draw-actions a').forEach(function(a){
+      var t=(a.textContent||'').trim(); if(TEXT[t])a.textContent=TEXT[t]; if(TITLE[a.title])a.title=TITLE[a.title];});
+    document.querySelectorAll('.leaflet-draw-tooltip').forEach(function(el){
+      TIP.forEach(function(p){if(el.innerHTML.indexOf(p[0])>=0)el.innerHTML=el.innerHTML.split(p[0]).join(p[1]);});});
+  }
+  function boot(){if(!document.querySelector('.leaflet-draw')){setTimeout(boot,50);return;}
+    relabel(); new MutationObserver(relabel).observe(document.body,{childList:true,subtree:true,attributes:true});}
+  boot();
+})();
+</script>
+"""
+
 st.set_page_config(page_title="GTFS-JP メーカー", page_icon="🚌", layout="wide")
 
 # --- 見た目（官公庁向けの信頼感ある青系テーマ。CSS注入なのでサーバ/ローカル問わず効く） ---
@@ -2395,7 +2428,7 @@ if ss().get("result"):
         with st.expander("🖊 路線図を手で描き直す（経路 shapes を作り直す・任意）"):
             st.caption("自動生成の経路が実際と違う時、地図に点を打って正しい経路に描き直せます。"
                        "路線・方向を選び、**『区間だけ直す』**（停留所を選び、その前後どちらかの区間だけ描き直す）か "
-                       "**『全体を描き直す』**を選択。地図左上の**ペン（ポリライン）**で道に沿って点を打ち"
+                       "**『全体を描き直す』**を選択。地図左上の**ペン（『線を描く』ボタン）**で道に沿って点を打ち"
                        "→ダブルクリックで確定 → 下のボタンで反映。描いた線で shapes を上書きします（推定より優先）。")
             import csv as _c5
             _trips5 = list(_c5.DictReader(_trp.open(encoding="utf-8-sig")))
@@ -2449,6 +2482,7 @@ if ss().get("result"):
                     Draw(export=False, edit_options={"edit": True},
                          draw_options={"polyline": True, "polygon": False, "rectangle": False,
                                        "circle": False, "marker": False, "circlemarker": False}).add_to(m)
+                    m.get_root().header.add_child(folium.Element(_DRAW_JP_JS))   # ツールバーを日本語化
 
                 def _drawn_line(state):
                     """st_folium の戻りから描画ポリラインを (lat,lon) 列で取り出す。"""
