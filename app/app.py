@@ -296,7 +296,7 @@ AUTOSAVE_DIR = Path.home() / ".gtfs_jp_app"
 AUTOSAVE_FILE = AUTOSAVE_DIR / f"session_{SID}.json"
 # 保存する作業一式（費用の高い手作業＝抽出・時刻修正・路線割当・確定座標・検出・原本・生成結果）。
 SAVE_KEYS = ["extract", "extract_token", "decision_spec", "detected", "confirmed",
-             "source_display", "fare_matrix_doc", "result"]
+             "source_display", "sources_all", "fare_matrix_doc", "result"]
 
 
 def _out_persist_dir(sid):
@@ -504,9 +504,12 @@ if ss().get("extract"):
 # Step 1: アップロード → 抽出
 # =====================================================================
 st.header("① 時刻表をアップロード")
-up = st.file_uploader("バス時刻表（.xlsx / PDF / OCR後の .md）", type=["xlsx", "pdf", "md"])
+up = st.file_uploader("バス時刻表（.xlsx / PDF / OCR後の .md）— **複数選択できます**",
+                      type=["xlsx", "pdf", "md"], accept_multiple_files=True)
 st.caption("📄 文字が選べるPDF・Excelはそのまま抽出。**画像化PDF（スキャン）**は、"
-           "抽出するとアプリ内で**OCRして続行するボタン**が出ます（ターミナル不要）。")
+           "抽出するとアプリ内で**OCRして続行するボタン**が出ます（ターミナル不要）。"
+           "**複数のファイル**（路線ごとに分かれた時刻表など）を選ぶと、まとめて1つのGTFS-JPにできます"
+           "（②で全路線を割り当て）。")
 
 
 def render_ocr_panel():
@@ -538,10 +541,13 @@ def render_ocr_panel():
                 st.caption("できた out.md を①に再アップロードしてください。")
 
 
-def _open_source_new_tab_button(sp, low, where):
+def _open_source_new_tab_button(sp, low, where, label="📄 原典を別タブで開く（別画面に並べて見比べる）"):
     """原典(PDF/画像)を別タブで開くボタン。別ウィンドウ/別モニタに並べて見比べやすくする。
-    ファイルを Blob 化して window.open するため、ローカルファイルでもブラウザで開ける。"""
+    ファイルを Blob 化して window.open するため、ローカルファイルでもブラウザで開ける。
+    複数原典を並べて置けるよう、要素IDは where で一意化し、ボタン文言は label で差し替える。"""
     import base64
+    import re as _re
+    import html as _html
     mime = ("application/pdf" if low.endswith(".pdf")
             else "image/jpeg" if low.endswith((".jpg", ".jpeg"))
             else "image/gif" if low.endswith(".gif")
@@ -551,13 +557,14 @@ def _open_source_new_tab_button(sp, low, where):
         b64 = base64.b64encode(Path(sp).read_bytes()).decode()
     except Exception:
         return
+    _bid = "op_" + (_re.sub(r"[^0-9A-Za-z_]", "", str(where)) or "src")
     _tmpl = """
-        <button id="op" style="width:100%;padding:9px 14px;border:1px solid #0e5c6b;
+        <button id="__BID__" style="width:100%;padding:9px 14px;border:1px solid #0e5c6b;
           background:#e6f0f1;color:#0a4552;border-radius:6px;font-weight:700;font-size:14px;
-          cursor:pointer;font-family:sans-serif">📄 原典を別タブで開く（別画面に並べて見比べる）</button>
+          cursor:pointer;font-family:sans-serif">__LABEL__</button>
         <script>
         const b64=__B64__, mime=__MIME__;
-        document.getElementById("op").onclick=function(){
+        document.getElementById("__BID__").onclick=function(){
           const bin=atob(b64), arr=new Uint8Array(bin.length);
           for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
           const url=URL.createObjectURL(new Blob([arr],{type:mime}));
@@ -566,22 +573,27 @@ def _open_source_new_tab_button(sp, low, where):
         </script>
         """
     components.html(
-        _tmpl.replace("__B64__", json.dumps(b64)).replace("__MIME__", json.dumps(mime)),
+        _tmpl.replace("__BID__", _bid).replace("__LABEL__", _html.escape(label))
+        .replace("__B64__", json.dumps(b64)).replace("__MIME__", json.dumps(mime)),
         height=46)
-    st.caption("↑ 別タブで開いて、ウィンドウを横に並べる（または別モニタに移す）と、"
-               "下の表と見比べやすくなります。")
 
 
 def render_source_panel(where=""):
     """アップロードした原本（PDF/画像）を編集画面の隣で見られる開閉パネル。
-    時刻・停留所・運賃を原典と横並びで照合できるようにし、誤読・誤りの見落としを減らす。"""
-    sp = ss().get("source_display")
-    if not sp or not Path(sp).exists():
+    時刻・停留所・運賃を原典と横並びで照合できるようにし、誤読・誤りの見落としを減らす。
+    複数ファイルを取り込んだ時は、各原典を個別に別タブで開けるようにする。"""
+    _IMG = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")
+    srcs = ss().get("sources_all") or ([ss().get("source_display")] if ss().get("source_display") else [])
+    srcs = [s for s in srcs if s and Path(s).exists() and str(s).lower().endswith(_IMG)]
+    if not srcs:
         return
-    low = sp.lower()
-    # 原典を別タブで開くボタン（別ウィンドウ/別モニタで見比べ用）。PDF・画像のみ。
-    if low.endswith((".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")):
-        _open_source_new_tab_button(sp, low, where)
+    multi = len(srcs) > 1
+    for i, sp in enumerate(srcs):
+        _lbl = (f"📄『{Path(sp).name}』を別タブで開く" if multi
+                else "📄 原典を別タブで開く（別画面に並べて見比べる）")
+        _open_source_new_tab_button(sp, str(sp).lower(), f"{where}{i}", _lbl)
+    st.caption("↑ 別タブで開いて、ウィンドウを横に並べる（または別モニタに移す）と、下の表と見比べやすくなります。"
+               + ("（複数ファイルはそれぞれ開けます）" if multi else ""))
     # インラインのプレビュー枠は廃止（別タブで開いて見比べる方式に統一＝画面をすっきり）。
 
 
@@ -652,30 +664,39 @@ def _extract_merge_pages(src, pages, ext_out):
     return 0, "", last_se
 
 
+def _extract_one(src, ext_out):
+    """1ファイルを種別に応じて抽出し ext_out(extract.json形式)に書く。(rc,so,se)を返す。"""
+    low = str(src).lower()
+    if low.endswith(".xlsx"):
+        return run([SCRIPTS / "extract_timetable_excel.py", src, "-o", ext_out])
+    if low.endswith(".md"):
+        return run([SCRIPTS / "extract_timetable_markdown.py", src, "-o", ext_out])
+    # PDF: 路線が別ページに分かれていれば全ページ抽出して統合。1ページ/判定不可は従来抽出。
+    _pages = _pdf_time_pages(src)
+    if _pages and len(_pages) > 1:
+        return _extract_merge_pages(src, _pages, ext_out)
+    return run([SCRIPTS / "extract_timetable_coords.py", src, "-o", ext_out])
+
+
+def _is_image_pdf_result(ex):
+    """抽出結果が「画像化PDF＝OCRが必要」で0ブロックか。"""
+    return (not ex.get("blocks")) and any(
+        n.get("type") == "image_pdf_use_ocr" for n in ex.get("needs_confirmation", []))
+
+
 def do_extract(src):
     ext_out = WORK / "extract.json"
     low = str(src).lower()
     # 原本プレビュー用に元ファイルを記録（OCR後の .md では上書きせず、元のPDF/画像を保持）。
     if not low.endswith(".md"):
         ss()["source_display"] = str(src)
-    if low.endswith(".xlsx"):
-        rc, so, se = run([SCRIPTS / "extract_timetable_excel.py", src, "-o", ext_out])
-    elif low.endswith(".md"):
-        rc, so, se = run([SCRIPTS / "extract_timetable_markdown.py", src, "-o", ext_out])
-    else:
-        # 複数ページ(路線が別ページに分かれている)時刻表は全ページ抽出して統合。
-        # 1ページのみ/判定不可なら従来どおり最多時刻ページを自動抽出。
-        _pages = _pdf_time_pages(src)
-        if _pages and len(_pages) > 1:
-            rc, so, se = _extract_merge_pages(src, _pages, ext_out)
-        else:
-            rc, so, se = run([SCRIPTS / "extract_timetable_coords.py", src, "-o", ext_out])
+    ss()["sources_all"] = [str(src)]
+    rc, so, se = _extract_one(src, ext_out)
     ss().pop("ocr_pending", None)   # 新しい抽出のたびに前回のOCR待ちを消す
     if rc == 0 and ext_out.exists():
         ex = json.loads(ext_out.read_text(encoding="utf-8"))
         # 画像化PDFで0停留所 → アプリ内OCRへ誘導（空のまま進めない）
-        if not ex.get("blocks") and any(n.get("type") == "image_pdf_use_ocr"
-                                        for n in ex.get("needs_confirmation", [])):
+        if _is_image_pdf_result(ex):
             ss()["ocr_pending"] = str(src)   # 下のOCRパネルで実行する
             return
         ss().extract = ex
@@ -689,6 +710,83 @@ def do_extract(src):
         st.success("抽出しました。")
     else:
         st.error("抽出に失敗しました。\n" + se[-800:])
+
+
+def do_extract_multi(srcs):
+    """複数ファイルを個別抽出し、blocks を1つの extract.json に統合する（②でまとめて路線割当）。
+    各 block に元ファイル(source_file/source_name)を記録。block_index は全ファイル通しで振り直す。
+    画像化PDF(要OCR)や失敗ファイルはスキップして警告する（＝正しく失敗）。"""
+    if len(srcs) == 1:
+        return do_extract(srcs[0])
+    ext_out = WORK / "extract.json"
+    tmp = WORK / "extract_file.json"
+    merged = {"source": None, "sources": [str(s) for s in srcs],
+              "blocks": [], "warnings": [], "needs_confirmation": []}
+    detected_all = {}
+    img_files, fail_files = [], []
+    for src in srcs:
+        name = Path(src).name
+        rc, so, se = _extract_one(src, tmp)
+        if rc != 0 or not tmp.exists():
+            fail_files.append(name)
+            continue
+        pj = json.loads(tmp.read_text(encoding="utf-8"))
+        if _is_image_pdf_result(pj):
+            img_files.append(name)   # 画像PDFは1つずつOCRが要るのでここではスキップ
+            continue
+        off = len(merged["blocks"])
+        idx_map = {}
+        for b in pj.get("blocks", []):
+            old = b.get("block_index")
+            b["source_file"] = str(src)
+            b["source_name"] = name
+            b["block_index"] = off + (old if isinstance(old, int) else 0)
+            idx_map[old] = b["block_index"]
+            merged["blocks"].append(b)
+        for nd in pj.get("needs_confirmation", []):
+            if nd.get("type") == "image_pdf_use_ocr":
+                continue
+            nd = dict(nd)
+            if "block" in nd and nd["block"] in idx_map:
+                nd["block"] = idx_map[nd["block"]]
+            nd["file"] = name
+            merged["needs_confirmation"].append(nd)
+        for w in pj.get("warnings", []):
+            merged["warnings"].append(f"{name}: {w}")
+        # 運賃・事業者などの条件検出をマージ（先に見つかった非空値を採用）
+        cond_tmp = WORK / "conditions_file.json"
+        run([SCRIPTS / "detect_conditions.py", src, "-o", cond_tmp])
+        if cond_tmp.exists():
+            d2 = json.loads(cond_tmp.read_text(encoding="utf-8"))
+            for k, v in d2.items():
+                if k == "_evidence":
+                    detected_all.setdefault("_evidence", {}).update(v or {})
+                elif v not in (None, "", []) and k not in detected_all:
+                    detected_all[k] = v
+    if img_files:
+        merged["warnings"].append("画像化PDF（OCRが必要）はスキップ: " + "・".join(img_files)
+                                  + "。画像PDFは1つずつ取り込み→OCRしてから使ってください。")
+    if fail_files:
+        merged["warnings"].append("抽出に失敗（スキップ）: " + "・".join(fail_files))
+    ext_out.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    ss().pop("ocr_pending", None)
+    if not merged["blocks"]:
+        st.error("どのファイルからも時刻表を抽出できませんでした。"
+                 + ("画像化PDFは1つずつOCRしてから取り込んでください。" if img_files else ""))
+        return
+    ss().extract = merged
+    ss().extract_token = "+".join(Path(s).name for s in srcs)
+    ss()["sources_all"] = [str(s) for s in srcs]
+    ss()["source_display"] = next((str(s) for s in srcs if not str(s).lower().endswith(".md")),
+                                  str(srcs[0]))
+    for k in ("decision_spec", "result", "confirmed"):
+        ss().pop(k, None)
+    ss().detected = detected_all
+    _msg = (f"{len(srcs)} 個のファイルから 計 {len(merged['blocks'])} ブロックを取り込みました。"
+            "②でまとめて路線を割り当てできます。")
+    if img_files or fail_files:
+        _msg += "（一部スキップ：下の警告を確認）"
+    st.success(_msg)
 
 
 def apply_conditions_doc(path, tk, routes):
@@ -883,8 +981,8 @@ def run_generation(spec, muni, use_nom, hol, ai_read=False, ai_key="", ai_ctx=""
     st.success("完了しました。" if rc == 0 else "完了（警告/エラーあり）。")
 
 
-def _extract_with_overlay(src, msg="時刻表を読み取っています…"):
-    """抽出中は画面中央に大きなローディングを出す（右上の小さな印だと気づきにくいため）。"""
+def _with_overlay(fn, msg="時刻表を読み取っています…"):
+    """処理中は画面中央に大きなローディングを出す（右上の小さな印だと気づきにくいため）。"""
     _ph = st.empty()
     _ph.markdown(
         "<div style='position:fixed;inset:0;background:rgba(246,248,252,.9);z-index:99999;"
@@ -896,16 +994,28 @@ def _extract_with_overlay(src, msg="時刻表を読み取っています…"):
         "<style>@keyframes gjspin{to{transform:rotate(360deg)}}</style>",
         unsafe_allow_html=True)
     try:
-        do_extract(src)
+        fn()
     finally:
         _ph.empty()
 
 
+def _extract_with_overlay(src, msg="時刻表を読み取っています…"):
+    _with_overlay(lambda: do_extract(src), msg)
+
+
 SAMPLES = Path(__file__).resolve().parent / "samples"
-if st.button("抽出する", type="primary", disabled=(up is None)) and up:
-    src = WORK / up.name
-    src.write_bytes(up.getbuffer())
-    _extract_with_overlay(src)
+_ups = up if isinstance(up, list) else ([up] if up else [])   # 単一/複数どちらでもリスト化
+if st.button("抽出する", type="primary", disabled=(not _ups)) and _ups:
+    _srcs = []
+    for _f in _ups:
+        _p = WORK / _f.name
+        _p.write_bytes(_f.getbuffer())
+        _srcs.append(_p)
+    if len(_srcs) == 1:
+        _extract_with_overlay(_srcs[0])
+    else:
+        _with_overlay(lambda: do_extract_multi(_srcs),
+                      msg=f"{len(_srcs)} 個の時刻表を読み取っています…")
 st.caption("サンプルで試す:")
 c_b, c_c, c_d = st.columns([1, 1, 1])
 if c_b.button("太宰府まほろば号（往復）"):
@@ -1002,9 +1112,9 @@ def _auto_route_rows(bs, source=""):
                 break
         if not placed:
             grouped.append([ns, [i]])
-    # ファイル名からの路線名候補（「線」等がバラバラの場所にあるため。単一路線に適用）。
+    # ファイル名からの路線名候補は、まとまり(グループ)ごとに元ファイル(source_file)から拾う
+    # （複数ファイル取り込み時は各路線が別ファイル由来のため。単一時は共通の source を使う）。
     from pathlib import Path as _P
-    _fname_route = _route_name_from(_P(str(source)).stem) if source else None
     rows = []
     for gi, (_rep, members) in enumerate(grouped):
         # 路線名はグループで1つ（往復は同じ路線名・方向0/1）。「○○線／○○系統／○○ルート」を
@@ -1028,19 +1138,24 @@ def _auto_route_rows(bs, source=""):
                     _line = _route_name_from(bs[_mbi]["direction_hint"])
                 if _line:
                     break
-        # ③ ファイル名の候補
+        # ③ ファイル名の候補（このまとまりの元ファイル → 無ければ共通 source）
         if not _line:
-            _line = _fname_route
+            _grp_src = next((bs[m].get("source_file") for m in members if bs[m].get("source_file")),
+                            source)
+            _line = _route_name_from(_P(str(_grp_src)).stem) if _grp_src else None
         rname = _line or (f"{nm0[0]}～{nm0[-1]}" if nm0 else f"路線{gi + 1}")
         for d, bi in enumerate(members):
             nm = [s.get("name") for s in bs[bi].get("stops", [])]
             # 行き先の既定: 方向見出し(direction_hint)があれば入れる。無ければ空にして、
             # 生成時に終点名/循環判定から自動で「○○方面」にさせる（循環の起点手前も正しく扱う）。
             dh = bs[bi].get("direction_hint")
-            rows.append({"ブロック": bi, "見出し": dh or "",
-                         "停留所数": len(nm), "路線名": rname,
-                         "方向(0/1)": "0（行き）" if d % 2 == 0 else "1（帰り）",
-                         "行き先表示": dh or "", "運行日": "平日(月〜金)"})
+            _row = {"ブロック": bi, "見出し": dh or "",
+                    "停留所数": len(nm), "路線名": rname,
+                    "方向(0/1)": "0（行き）" if d % 2 == 0 else "1（帰り）",
+                    "行き先表示": dh or "", "運行日": "平日(月〜金)"}
+            if bs[bi].get("source_name"):        # 複数ファイル取り込み時のみ元ファイル名を表示
+                _row["ファイル"] = bs[bi]["source_name"]
+            rows.append(_row)
     return rows
 
 
@@ -1102,6 +1217,8 @@ if "extract" in ss():
                 "便のまとまり", disabled=True,
                 help="時刻表のひとかたまり（PDFなら1ページ分／往復なら片道分）。この単位で路線・方向・行き先を割り当てます。"),
             "見出し": st.column_config.TextColumn("見出し(参考)", disabled=True),
+            "ファイル": st.column_config.TextColumn(  # 複数ファイル取り込み時のみ表示（列があれば）
+                "元ファイル", disabled=True, help="この便のまとまりが、どのアップロードfile由来か"),
             "停留所数": st.column_config.NumberColumn("停留所数", disabled=True),
             "路線名": st.column_config.TextColumn("路線名", help="同じ路線名の便のまとまりが1つの路線にまとまる"),
             "方向(0/1)": st.column_config.SelectboxColumn(
