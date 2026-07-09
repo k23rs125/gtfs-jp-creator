@@ -2300,40 +2300,56 @@ if ss().get("result"):
         clicked = state.get("last_clicked") if state else None
         obj = state.get("last_object_clicked") if state else None
         obj_tip = state.get("last_object_clicked_tooltip") if state else None
-        # ドラッグ→ピンをクリック で、その移動後の位置を確定できる
-        if obj and obj_tip and obj_tip in tip2id:
-            sid = tip2id[obj_tip]
-            la2, lo2 = round(obj["lat"], 6), round(obj["lng"], 6)
-            already = confirmed.get(sid)
-            moved = (not already) or abs(already[0] - la2) > 1e-6 or abs(already[1] - lo2) > 1e-6
-            st.success(f"選択中のピン『{obj_tip}』: {la2:.6f}, {lo2:.6f}")
-            if st.button(f"『{obj_tip}』をこのピン位置で確定する", disabled=not moved):
-                confirmed[sid] = (la2, lo2); st.rerun()
+        # クリック/ドラッグされたピンの停留所と、その地図上の現在位置（ドラッグ後の座標）
+        obj_sid = tip2id.get(obj_tip) if (obj and obj_tip) else None
+        obj_pos = (round(obj["lat"], 6), round(obj["lng"], 6)) if obj else None
         if clicked:
             st.info(f"地図クリック位置: {clicked['lat']:.6f}, {clicked['lng']:.6f}"
-                    "（下で停留所を選び『地図クリック位置を使う』）")
+                    "（下で停留所を選び『地図クリック位置で確定』）")
 
         todo = [r for r in crows if eff_conf(r) != "確定"]
         if todo:
             st.subheader(f"要確認・未補完を確定する（残り {len(todo)} 件）")
             _todo_ids = [_sid(r) for r in todo]
-            # 地図の点をクリックしたら、その停留所を下の一覧で自動選択する
-            if obj_tip and obj_tip in tip2id and tip2id[obj_tip] in _todo_ids:
-                ss()["conf_sel"] = tip2id[obj_tip]
-            if ss().get("conf_sel") not in _todo_ids:
-                ss()["conf_sel"] = _todo_ids[0]
-            sel = st.selectbox("停留所（地図の点をクリックでも選べます）", _todo_ids, key="conf_sel",
-                               format_func=lambda s: next((_label(r) for r in crows if _sid(r) == s), s))
+            # 選択肢は未確定の停留所。確定済みのピンを「ドラッグして動かした」ときだけ、
+            # 再調整できるよう一時的に加える（ただ確定しただけなら加えず、次の未確定へ自動で進む）。
+            _readjust = (obj_sid in confirmed and obj_pos is not None
+                         and (abs(confirmed[obj_sid][0] - obj_pos[0]) > 1e-6
+                              or abs(confirmed[obj_sid][1] - obj_pos[1]) > 1e-6))
+            _opts = list(_todo_ids)
+            if _readjust and obj_sid not in _opts:
+                _opts.append(obj_sid)
+            # 地図の点をクリック（未確定）／確定済みをドラッグ したら、その停留所を一覧で自動選択する
+            if obj_sid in _opts:
+                ss()["conf_sel"] = obj_sid
+            if ss().get("conf_sel") not in _opts:
+                ss()["conf_sel"] = _opts[0]
+            sel = st.selectbox(
+                "停留所（地図の点をクリックでも選べます）", _opts, key="conf_sel",
+                format_func=lambda s: (next((_label(r) for r in crows if _sid(r) == s), s)
+                                       + ("（確定済み）" if s in confirmed else "")))
             cur = next((r for r in crows if _sid(r) == sel), {})
             _cc = confirmed.get(sel)
             if _cc:
-                _cla, _clo = f"{_cc[0]:.6f}", f"{_cc[1]:.6f}"
+                _sla, _slo = _cc[0], _cc[1]
+            elif (cur.get("stop_lat") or "").strip():
+                _sla, _slo = float(cur["stop_lat"]), float(cur["stop_lon"])
             else:
-                _cla = (cur.get("stop_lat") or "").strip() or "—"
-                _clo = (cur.get("stop_lon") or "").strip() or "—"
-            st.write(f"**{_label(cur)}** の座標: 緯度 {_cla} ／ 経度 {_clo}")
-            st.caption("この停留所の**ピンを地図でドラッグして動かし→クリック**すると、その位置で確定できます"
-                       "（上に確定ボタンが出ます）。動かさず今の位置でよければ下の『現在の位置のまま確定』。")
+                _sla = _slo = None
+            # 選択中の停留所のピンをドラッグしたら、その位置を採用（座標表示・確定ボタンを1か所に集約）
+            _dragged = (obj_sid == sel) and obj_pos is not None and (
+                _sla is None or abs(_sla - obj_pos[0]) > 1e-6 or abs(_slo - obj_pos[1]) > 1e-6)
+            _nla, _nlo = (obj_pos if _dragged else (_sla, _slo))
+            _ctag = "（確定済み）" if _cc else ""
+            if _nla is None:
+                st.write(f"**{_label(cur)}**{_ctag} の座標: まだありません"
+                         "（地図クリックかピンのドラッグで決めてください）")
+            else:
+                _mv = "　🟢 ドラッグで移動中（この位置で確定できます）" if _dragged else ""
+                st.write(f"**{_label(cur)}**{_ctag} の座標: 緯度 {_nla:.6f} ／ 経度 {_nlo:.6f}{_mv}")
+            st.caption("この停留所の**ピンを地図でドラッグ**すると位置が変わります。"
+                       "『この位置で確定』で確定します（動かさなければ今の位置のまま確定）。"
+                       "地図の空き場所をクリックした座標も使えます。")
             # 同じ場所（終点・敷地内）: 同名で反対方向の停留所と同座標にする
             _sibs = [r for r in crows if r["stop_name"] == cur.get("stop_name") and _sid(r) != sel]
             for _sb in _sibs[:1]:
@@ -2343,13 +2359,10 @@ if ss().get("result"):
                 if _sbc and st.button(f"『{_label(_sb)}』と同じ場所にする（敷地内・終点向け）"):
                     confirmed[sel] = (round(_sbc[0], 6), round(_sbc[1], 6)); st.rerun()
             b1, b2 = st.columns(2)
-            if b1.button("📍 地図クリック位置で確定", disabled=not clicked):
+            if b1.button("この位置で確定", type="primary", disabled=(_nla is None)):
+                confirmed[sel] = (round(_nla, 6), round(_nlo, 6)); st.rerun()
+            if b2.button("📍 地図クリック位置で確定", disabled=not clicked):
                 confirmed[sel] = (round(clicked["lat"], 6), round(clicked["lng"], 6)); st.rerun()
-            if b2.button("現在の位置のまま確定"):
-                if str(_cla).replace(".", "").replace("-", "").isdigit():
-                    confirmed[sel] = (round(float(_cla), 6), round(float(_clo), 6)); st.rerun()
-                else:
-                    st.warning("まだ座標がありません。地図をクリックするか、ピンをドラッグして位置を決めてください。")
         else:
             st.success("✅ すべての座標が確定しました。**公式提出可** です。")
 
