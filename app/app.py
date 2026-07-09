@@ -2543,8 +2543,17 @@ if ss().get("result"):
         with st.expander("🖊 路線図を手で描き直す（経路 shapes を作り直す・任意）"):
             st.caption("自動生成の経路が実際と違う時、地図に点を打って正しい経路に描き直せます。"
                        "路線・方向を選び、**『区間だけ直す』**（停留所を選び、その前後どちらかの区間だけ描き直す）か "
-                       "**『全体を描き直す』**を選択。地図左上の**ペン（『線を描く』ボタン）**で道に沿って点を打ち"
+                       "**『全体を描き直す』**を選択。地図左上の**ペン（線のアイコン）**で道に沿って点を打ち"
                        "→ダブルクリックで確定 → 下のボタンで反映。描いた線で shapes を上書きします（推定より優先）。")
+            st.markdown(
+                "<div style='background:#eef4f5;border:1px solid #cfe0e3;border-radius:8px;"
+                "padding:8px 12px;font-size:12.5px;color:#0a4552;margin:2px 0 10px'>"
+                "🌐 <b>地図左上のボタンの意味</b>（英語表示のことがあります）：<br>"
+                "✏️<b>線のアイコン</b>＝線を描く（クリックで点を打つ／ダブルクリックで確定）　｜　"
+                "<b>Finish</b>＝完了　｜　<b>Delete last point</b>＝直前の点を消す　｜　<b>Cancel</b>＝やめる<br>"
+                "<b>鉛筆＋レイヤ</b>＝線を編集（点をドラッグ）　｜　<b>ゴミ箱</b>＝線を削除　｜　"
+                "<b>Save</b>＝保存　｜　<b>Clear All</b>＝全消去</div>",
+                unsafe_allow_html=True)
             import csv as _c5
             _trips5 = list(_c5.DictReader(_trp.open(encoding="utf-8-sig")))
             _stops5 = {r["stop_id"]: r for r in _c5.DictReader(_stp.open(encoding="utf-8-sig"))}
