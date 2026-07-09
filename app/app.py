@@ -2278,10 +2278,20 @@ if ss().get("result"):
                   if pts else [35.0, 138.0])
         fmap = folium.Map(location=center, zoom_start=14)
         col = {"確定": "green", "要確認": "orange", "未補完": "red"}
+        _cbadge = {"確定": "#2e7d32", "要確認": "#e08a1e", "未補完": "#c62828"}
+        from html import escape as _esc
         for tip, la, lo, conf, reason in pts:
+            # ポップアップは幅を明示（既定だと日本語の長文が1文字ずつ改行されて読めない）。
+            _pop_html = (
+                "<div style='width:230px;white-space:normal;font-size:12px;line-height:1.55;"
+                "word-break:break-word'>"
+                f"<div style='font-weight:700;margin-bottom:3px'>{_esc(tip)}</div>"
+                f"<span style='color:{_cbadge.get(conf, '#555')};font-weight:700'>{_esc(conf)}</span>"
+                + (f"<div style='color:#333;margin-top:2px'>{_esc(reason)}</div>" if reason else "")
+                + "</div>")
             folium.Marker([la, lo], tooltip=tip, draggable=True,
                           icon=folium.Icon(color=col.get(conf, "gray")),
-                          popup=f"{tip}（{conf}）{reason}").add_to(fmap)
+                          popup=folium.Popup(_pop_html, max_width=260)).add_to(fmap)
         st.caption("📍 ピンを**ドラッグ**して正しい位置へ動かし、そのピンを**クリック**すると、"
                    "下に『この位置で確定』ボタンが出ます（地図の空き場所クリックで座標を拾うこともできます）。")
         state = st_folium(fmap, width=900, height=460, key="confmap",
