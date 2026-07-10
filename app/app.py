@@ -2654,7 +2654,7 @@ if ss().get("result"):
                     _draw_opts(_em)
                     for i, (nm, la, lo) in enumerate(_spts, 1):
                         folium.Marker([la, lo], tooltip=f"{i}. {nm}", icon=_num_icon(i)).add_to(_em)
-                    folium.PolyLine(_cur_latlon, color="#999", weight=3, opacity=0.6,
+                    folium.PolyLine(_cur_latlon, color="#1E5FA8", weight=4, opacity=0.85,
                                     tooltip="現在の経路").add_to(_em)
                     _emst = st_folium(_em, width=900, height=460, key="shpeditmap",
                                       returned_objects=["last_active_drawing", "all_drawings"])
@@ -2711,10 +2711,10 @@ if ss().get("result"):
                         # ＝利用者はこの空いた区間にペンで道を描く（第1区間①→②でも線が残らない）。
                         _before, _after = _cur_latlon[:_lo + 1], _cur_latlon[_hi:]
                         if len(_before) >= 2:
-                            folium.PolyLine(_before, color="#999", weight=3, opacity=0.6,
+                            folium.PolyLine(_before, color="#1E5FA8", weight=4, opacity=0.85,
                                             tooltip="現在の経路（ここは変えません）").add_to(_em)
                         if len(_after) >= 2:
-                            folium.PolyLine(_after, color="#999", weight=3, opacity=0.6,
+                            folium.PolyLine(_after, color="#1E5FA8", weight=4, opacity=0.85,
                                             tooltip="現在の経路（ここは変えません）").add_to(_em)
                         for i, (nm, la, lo) in enumerate(_spts, 1):
                             folium.Marker([la, lo], tooltip=f"{i}. {nm}",
