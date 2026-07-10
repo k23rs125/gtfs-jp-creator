@@ -2616,8 +2616,10 @@ if ss().get("result"):
                         f"{i}</div>"))
 
                 def _draw_opts(m):
+                    # 描く線は赤（#c62828）にする＝描いた/確定した線が赤で分かりやすい。
                     Draw(export=False, edit_options={"edit": True},
-                         draw_options={"polyline": True, "polygon": False, "rectangle": False,
+                         draw_options={"polyline": {"shapeOptions": {"color": "#c62828", "weight": 5}},
+                                       "polygon": False, "rectangle": False,
                                        "circle": False, "marker": False, "circlemarker": False}).add_to(m)
                     m.add_child(_DrawJPLabels())   # ツールバーを日本語化（実行される初期化スクリプトに載せる）
 
@@ -2687,49 +2689,61 @@ if ss().get("result"):
                         return min(range(len(_cur_latlon)),
                                    key=lambda k: (_cur_latlon[k][0] - pt[0]) ** 2
                                    + (_cur_latlon[k][1] - pt[1]) ** 2)
-                    _ia, _ib = _nrst((_a[1], _a[2])), _nrst((_b[1], _b[2]))
-                    _lo, _hi = (_ia, _ib) if _ia <= _ib else (_ib, _ia)
-                    _em = folium.Map(location=[(_a[1] + _b[1]) / 2, (_a[2] + _b[2]) / 2], zoom_start=15)
-                    _draw_opts(_em)
-                    # 直す区間は線を消して「ギャップ（線がつながっていない状態）」にする。
-                    # 区間の前後の現在経路(グレー)だけ残し、赤い2停留所の間は線を描かない
-                    # ＝利用者はこの空いた区間にペンで道を描く（第1区間①→②でも線が残らない）。
-                    _before, _after = _cur_latlon[:_lo + 1], _cur_latlon[_hi:]
-                    if len(_before) >= 2:
-                        folium.PolyLine(_before, color="#999", weight=3, opacity=0.6,
-                                        tooltip="現在の経路（ここは変えません）").add_to(_em)
-                    if len(_after) >= 2:
-                        folium.PolyLine(_after, color="#999", weight=3, opacity=0.6,
-                                        tooltip="現在の経路（ここは変えません）").add_to(_em)
-                    for i, (nm, la, lo) in enumerate(_spts, 1):
-                        folium.Marker([la, lo], tooltip=f"{i}. {nm}",
-                                      icon=_num_icon(i, "#c62828" if i in (_si, _sj) else "#0e5c6b")).add_to(_em)
-                    st.caption(f"**赤い2つの停留所『{_a[0]}』↔『{_b[0]}』の間には線がありません。**"
-                               "地図左上の**ペン**で、この区間の道に沿って点を打ち→ダブルクリックで確定してください。"
-                               "描いた線がこの区間の新しい経路になります（他の区間はそのまま残ります）。")
-                    _emst = st_folium(_em, width=900, height=460, key="shpeditmap_seg",
-                                      returned_objects=["last_active_drawing", "all_drawings"])
-                    _seg = _drawn_line(_emst)
-                    if _seg:
-                        _plo, _phi = _cur_latlon[_lo], _cur_latlon[_hi]
+                    _result = ss().pop("_seg_result", None)   # 直前に差し替えたら結果(全体)を表示
+                    if _result:
+                        st.success(f"『{_result[0]}』〜『{_result[1]}』の区間を差し替えました。"
+                                   "下が **できあがった経路（全体）** です（編集した区間以外もそのまま残っています）。")
+                        _rm = folium.Map(location=_octr, zoom_start=14)
+                        folium.PolyLine(_cur_latlon, color="#1E5FA8", weight=5, opacity=0.95,
+                                        tooltip="できあがった経路（全体）").add_to(_rm)
+                        for i, (nm, la, lo) in enumerate(_spts, 1):
+                            folium.Marker([la, lo], tooltip=f"{i}. {nm}", icon=_num_icon(i)).add_to(_rm)
+                        st_folium(_rm, width=900, height=460, key="shpeditmap_result",
+                                  returned_objects=[])
+                        st.button("続けて別の区間を直す", key="shpedit_cont")
+                    else:
+                        _ia, _ib = _nrst((_a[1], _a[2])), _nrst((_b[1], _b[2]))
+                        _lo, _hi = (_ia, _ib) if _ia <= _ib else (_ib, _ia)
+                        _em = folium.Map(location=[(_a[1] + _b[1]) / 2, (_a[2] + _b[2]) / 2], zoom_start=15)
+                        _draw_opts(_em)
+                        # 直す区間は線を消して「ギャップ（線がつながっていない状態）」にする。
+                        # 区間の前後の現在経路(グレー)だけ残し、赤い2停留所の間は線を描かない
+                        # ＝利用者はこの空いた区間にペンで道を描く（第1区間①→②でも線が残らない）。
+                        _before, _after = _cur_latlon[:_lo + 1], _cur_latlon[_hi:]
+                        if len(_before) >= 2:
+                            folium.PolyLine(_before, color="#999", weight=3, opacity=0.6,
+                                            tooltip="現在の経路（ここは変えません）").add_to(_em)
+                        if len(_after) >= 2:
+                            folium.PolyLine(_after, color="#999", weight=3, opacity=0.6,
+                                            tooltip="現在の経路（ここは変えません）").add_to(_em)
+                        for i, (nm, la, lo) in enumerate(_spts, 1):
+                            folium.Marker([la, lo], tooltip=f"{i}. {nm}",
+                                          icon=_num_icon(i, "#c62828" if i in (_si, _sj) else "#0e5c6b")).add_to(_em)
+                        st.caption(f"**赤い2つの停留所『{_a[0]}』↔『{_b[0]}』の間には線がありません。**"
+                                   "地図左上の**ペン**で、この区間の道に沿って点を打ち→ダブルクリックで確定してください。"
+                                   "**描いた線は赤**で表示され、この区間の新しい経路になります（他の区間はそのまま残ります）。")
+                        _emst = st_folium(_em, width=900, height=460, key="shpeditmap_seg",
+                                          returned_objects=["last_active_drawing", "all_drawings"])
+                        _seg = _drawn_line(_emst)
+                        if _seg:
+                            _plo, _phi = _cur_latlon[_lo], _cur_latlon[_hi]
 
-                        def _d2(u, v):
-                            return (u[0] - v[0]) ** 2 + (u[1] - v[1]) ** 2
-                        # 描いた線の向きを、置き換える両端に合わせる（逆向きに描いても正しくつなぐ）
-                        if _d2(_seg[0], _plo) + _d2(_seg[-1], _phi) > _d2(_seg[0], _phi) + _d2(_seg[-1], _plo):
-                            _seg = list(reversed(_seg))
-                        _new_pts = _cur_latlon[:_lo + 1] + _seg + _cur_latlon[_hi:]
-                        st.info(f"描いた線：{len(_seg)} 点。『{_a[0]}』〜『{_b[0]}』の区間を差し替えます"
-                                f"（経路は全体で {len(_new_pts)} 点になります）。")
-                        if st.button("この区間を差し替える", type="primary", key="shpeditsave_seg"):
-                            if not _shid:
-                                _shid = f"shape_{_rid5}_{_dir5}_manual"
-                                _assign_trip_shape(_trp, _rid5, _dir5, _shid)
-                            _write_shape(_shp, _shid, _new_pts)
-                            _regen_after_shape()
-                            st.success(f"『{_a[0]}』〜『{_b[0]}』の区間を差し替えました。"
-                                       "地図・ビューア・zip を更新しました。")
-                            st.rerun()
+                            def _d2(u, v):
+                                return (u[0] - v[0]) ** 2 + (u[1] - v[1]) ** 2
+                            # 描いた線の向きを、置き換える両端に合わせる（逆向きに描いても正しくつなぐ）
+                            if _d2(_seg[0], _plo) + _d2(_seg[-1], _phi) > _d2(_seg[0], _phi) + _d2(_seg[-1], _plo):
+                                _seg = list(reversed(_seg))
+                            _new_pts = _cur_latlon[:_lo + 1] + _seg + _cur_latlon[_hi:]
+                            st.info(f"描いた線：{len(_seg)} 点。『{_a[0]}』〜『{_b[0]}』の区間を差し替えます"
+                                    f"（経路は全体で {len(_new_pts)} 点になります）。")
+                            if st.button("この区間を差し替える", type="primary", key="shpeditsave_seg"):
+                                if not _shid:
+                                    _shid = f"shape_{_rid5}_{_dir5}_manual"
+                                    _assign_trip_shape(_trp, _rid5, _dir5, _shid)
+                                _write_shape(_shp, _shid, _new_pts)
+                                _regen_after_shape()
+                                ss()["_seg_result"] = (_a[0], _b[0])   # 差し替え結果(全体)を表示するフラグ
+                                st.rerun()
 
 # =====================================================================
 # Step 6: GTFSビューア（作成した feed を 7タブで閲覧）
