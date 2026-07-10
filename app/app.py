@@ -2716,12 +2716,17 @@ if ss().get("result"):
                         if len(_after) >= 2:
                             folium.PolyLine(_after, color="#1E5FA8", weight=4, opacity=0.85,
                                             tooltip="現在の経路（ここは変えません）").add_to(_em)
+                        # 編集前の区間（差し替え対象）をグレーの点線で参考表示＝描き直しの目安。
+                        if _hi > _lo:
+                            folium.PolyLine(_cur_latlon[_lo:_hi + 1], color="#8a949e", weight=3,
+                                            opacity=0.75, dash_array="4,10",
+                                            tooltip="編集前の経路（この区間を描き直す・参考）").add_to(_em)
                         for i, (nm, la, lo) in enumerate(_spts, 1):
                             folium.Marker([la, lo], tooltip=f"{i}. {nm}",
                                           icon=_num_icon(i, "#c62828" if i in (_si, _sj) else "#0e5c6b")).add_to(_em)
-                        st.caption(f"**赤い2つの停留所『{_a[0]}』↔『{_b[0]}』の間には線がありません。**"
-                                   "地図左上の**ペン**で、この区間の道に沿って点を打ち→ダブルクリックで確定してください。"
-                                   "**描いた線は赤**で表示され、この区間の新しい経路になります（他の区間はそのまま残ります）。")
+                        st.caption(f"**グレーの点線＝編集前の経路**（『{_a[0]}』↔『{_b[0]}』・差し替え対象）。これを目安に、"
+                                   "地図左上の**ペン**でこの区間の道に沿って点を打ち→ダブルクリックで確定してください。"
+                                   "**描いた線は赤**で表示され、この区間の新しい経路になります（青い他の区間はそのまま残ります）。")
                         _emst = st_folium(_em, width=900, height=460, key="shpeditmap_seg",
                                           returned_objects=["last_active_drawing", "all_drawings"])
                         _seg = _drawn_line(_emst)
