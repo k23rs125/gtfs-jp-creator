@@ -2691,17 +2691,22 @@ if ss().get("result"):
                     _lo, _hi = (_ia, _ib) if _ia <= _ib else (_ib, _ia)
                     _em = folium.Map(location=[(_a[1] + _b[1]) / 2, (_a[2] + _b[2]) / 2], zoom_start=15)
                     _draw_opts(_em)
-                    folium.PolyLine(_cur_latlon, color="#999", weight=3, opacity=0.5,
-                                    tooltip="現在の経路").add_to(_em)
-                    if _hi > _lo:
-                        folium.PolyLine(_cur_latlon[_lo:_hi + 1], color="#c62828", weight=6,
-                                        opacity=0.9, tooltip="直す区間（この部分を差し替え）").add_to(_em)
+                    # 直す区間は線を消して「ギャップ（線がつながっていない状態）」にする。
+                    # 区間の前後の現在経路(グレー)だけ残し、赤い2停留所の間は線を描かない
+                    # ＝利用者はこの空いた区間にペンで道を描く（第1区間①→②でも線が残らない）。
+                    _before, _after = _cur_latlon[:_lo + 1], _cur_latlon[_hi:]
+                    if len(_before) >= 2:
+                        folium.PolyLine(_before, color="#999", weight=3, opacity=0.6,
+                                        tooltip="現在の経路（ここは変えません）").add_to(_em)
+                    if len(_after) >= 2:
+                        folium.PolyLine(_after, color="#999", weight=3, opacity=0.6,
+                                        tooltip="現在の経路（ここは変えません）").add_to(_em)
                     for i, (nm, la, lo) in enumerate(_spts, 1):
                         folium.Marker([la, lo], tooltip=f"{i}. {nm}",
                                       icon=_num_icon(i, "#c62828" if i in (_si, _sj) else "#0e5c6b")).add_to(_em)
-                    st.caption(f"赤の区間『{_a[0]}』→『{_b[0]}』だけを描き直します。地図左上の**ペン**で、"
-                               "この2つの停留所の間の道に沿って点を打ち→ダブルクリックで確定。"
-                               "赤い区間が描いた線に置き換わり、他の区間はそのまま残ります。")
+                    st.caption(f"**赤い2つの停留所『{_a[0]}』↔『{_b[0]}』の間には線がありません。**"
+                               "地図左上の**ペン**で、この区間の道に沿って点を打ち→ダブルクリックで確定してください。"
+                               "描いた線がこの区間の新しい経路になります（他の区間はそのまま残ります）。")
                     _emst = st_folium(_em, width=900, height=460, key="shpeditmap_seg",
                                       returned_objects=["last_active_drawing", "all_drawings"])
                     _seg = _drawn_line(_emst)
