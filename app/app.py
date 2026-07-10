@@ -144,37 +144,50 @@ def _assign_trip_shape(trp_path, rid, did, shape_id):
             w.writerow({k: r.get(k, "") for k in fns})
 
 
-# 地図の描画ツールバー(Leaflet.draw)の英語ラベルを日本語化する。folium はカスタムスクリプトを
-# <head>先頭に置く＝ライブラリ読込より前になり L.drawLocal を先に上書きできないため、
-# タイミングに依存しない DOM 置換（title/テキスト/操作ヒント）＋MutationObserver で行う。
-_DRAW_JP_JS = """
-<script>
-(function(){
-  var TITLE={'Draw a polyline':'線を描く（道に沿って点を打つ）','Edit layers':'線を編集（点をドラッグ）',
-    'Delete layers':'線を削除','No layers to edit':'編集できる線がありません',
-    'No layers to delete':'削除できる線がありません','Finish drawing':'この点で線を確定',
-    'Delete last point drawn':'直前の点を削除','Cancel drawing':'描画をやめる','Save changes':'変更を保存',
-    'Cancel editing, discards all changes':'編集をやめる（変更を破棄）','Clear all layers':'すべて消す'};
-  var TEXT={'Finish':'完了','Delete last point':'最後の点を削除','Cancel':'キャンセル','Save':'保存','Clear All':'全消去'};
-  var TIP=[['Click to start drawing line.','クリックで線を描き始めます。'],
-    ['Click to continue drawing line.','クリックで点を追加します。'],
-    ['Click last point to finish line.','最後の点をダブルクリックで確定します。'],
-    ['Click and drag to edit features.','点をドラッグして形を直します。'],
-    ['Click cancel to undo changes.','キャンセルで元に戻せます。'],
-    ['Click on a feature to remove.','消したい線をクリックします。']];
-  function relabel(){
-    document.querySelectorAll('.leaflet-draw a[title]').forEach(function(a){if(TITLE[a.title])a.title=TITLE[a.title];});
-    document.querySelectorAll('.leaflet-draw-actions a').forEach(function(a){
-      var t=(a.textContent||'').trim(); if(TEXT[t])a.textContent=TEXT[t]; if(TITLE[a.title])a.title=TITLE[a.title];});
-    document.querySelectorAll('.leaflet-draw-tooltip').forEach(function(el){
-      TIP.forEach(function(p){if(el.innerHTML.indexOf(p[0])>=0)el.innerHTML=el.innerHTML.split(p[0]).join(p[1]);});});
-  }
-  function boot(){if(!document.querySelector('.leaflet-draw')){setTimeout(boot,50);return;}
-    relabel(); new MutationObserver(relabel).observe(document.body,{childList:true,subtree:true,attributes:true});}
-  boot();
-})();
-</script>
-"""
+# 地図の描画ツールバー(Leaflet.draw)の英語ラベルを日本語化する MacroElement。
+# ※ streamlit-folium は header の <script> を innerHTML で挿入する＝ブラウザが実行しない。
+#    そのため header ではなく「実行される地図初期化スクリプト(script macro)」に載せる。
+#    ツールバーは非同期生成＋操作で動的に増えるので、DOM置換＋MutationObserver(characterData含む)で追随。
+from jinja2 import Template as _JTemplate
+
+
+class _DrawJPLabels(folium.MacroElement):
+    _name = "DrawJPLabels"
+
+    def __init__(self):
+        super().__init__()
+        self._template = _JTemplate("""
+        {% macro script(this, kwargs) %}
+        {% raw %}
+        (function(){
+          var TITLE={'Draw a polyline':'線を描く（道に沿って点を打つ）','Edit layers':'線を編集（点をドラッグ）',
+            'Delete layers':'線を削除','No layers to edit':'編集できる線がありません',
+            'No layers to delete':'削除できる線がありません','Finish drawing':'この点で線を確定',
+            'Delete last point drawn':'直前の点を削除','Cancel drawing':'描画をやめる','Save changes':'変更を保存',
+            'Cancel editing, discards all changes':'編集をやめる（変更を破棄）','Clear all layers':'すべて消す'};
+          var TEXT={'Finish':'完了','Delete last point':'最後の点を削除','Cancel':'キャンセル','Save':'保存','Clear All':'全消去'};
+          var TIP=[['Click to start drawing line.','クリックで線を描き始めます。'],
+            ['Click to continue drawing line.','クリックで点を追加します。'],
+            ['Click last point to finish line.','最後の点をダブルクリックで確定します。'],
+            ['Click and drag to edit features.','点をドラッグして形を直します。'],
+            ['Click cancel to undo changes.','キャンセルで元に戻せます。'],
+            ['Click on a feature to remove.','消したい線をクリックします。']];
+          function relabel(){
+            document.querySelectorAll('.leaflet-draw a[title]').forEach(function(a){if(TITLE[a.title])a.title=TITLE[a.title];});
+            document.querySelectorAll('.leaflet-draw-actions a').forEach(function(a){
+              var t=(a.textContent||'').trim(); if(TEXT[t])a.textContent=TEXT[t]; if(TITLE[a.title])a.title=TITLE[a.title];});
+            document.querySelectorAll('.leaflet-draw-tooltip').forEach(function(el){
+              TIP.forEach(function(p){if(el.innerHTML.indexOf(p[0])>=0)el.innerHTML=el.innerHTML.split(p[0]).join(p[1]);});});
+          }
+          function boot(){ if(!document.querySelector('.leaflet-draw')){setTimeout(boot,60);return;}
+            relabel();
+            new MutationObserver(relabel).observe(document.body,{childList:true,subtree:true,attributes:true,characterData:true});}
+          setTimeout(boot,0);
+        })();
+        {% endraw %}
+        {% endmacro %}
+        """)
+
 
 st.set_page_config(page_title="GTFS-JP メーカー", page_icon="🚌", layout="wide")
 
@@ -2606,7 +2619,7 @@ if ss().get("result"):
                     Draw(export=False, edit_options={"edit": True},
                          draw_options={"polyline": True, "polygon": False, "rectangle": False,
                                        "circle": False, "marker": False, "circlemarker": False}).add_to(m)
-                    m.get_root().header.add_child(folium.Element(_DRAW_JP_JS))   # ツールバーを日本語化
+                    m.add_child(_DrawJPLabels())   # ツールバーを日本語化（実行される初期化スクリプトに載せる）
 
                 def _drawn_line(state):
                     """st_folium の戻りから描画ポリラインを (lat,lon) 列で取り出す。"""
