@@ -260,13 +260,16 @@ st.markdown("""
   .stTextInput input, .stNumberInput input, .stDateInput input, .stTextArea textarea { background:transparent; }
   .stNumberInput button { background:#E9F0FB; border-color:#B7C9E2; }
   .stDateInput div[data-baseweb="input"] { background:#F5F9FF !important; }
-  /* 編集グリッド（②路線割り当て route_editor・⏰時刻表 tt_*）の「クリックで編集」ヒント。
-     セル（表）に重ならないよう、グリッド下に余白を作りその中へ置く。③区間運賃表(zonedf)には付けない。 */
+  /* 「✏️ クリックで編集」ヒントは常時表示せず、表にカーソルが乗ったときだけ出す（外れると消える）。
+     ※data_editor は canvas 描画でセル単位のDOMが無いため、表単位のホバーで表示する。
+     ③区間運賃表(zonedf)には付けない。 */
   [class*="st-key-tt_"], [class*="st-key-route_editor_"] { position:relative; padding-bottom:18px; }
   [class*="st-key-tt_"]::after, [class*="st-key-route_editor_"]::after {
     content:"✏️ クリックで編集";
     position:absolute; right:2px; bottom:1px; z-index:5; pointer-events:none;
-    font-size:.72rem; line-height:1; color:#5B6B7C; }
+    font-size:.72rem; line-height:1; color:#5B6B7C;
+    opacity:0; transition:opacity .14s ease; }
+  [class*="st-key-tt_"]:hover::after, [class*="st-key-route_editor_"]:hover::after { opacity:1; }
 </style>
 """, unsafe_allow_html=True)
 ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
