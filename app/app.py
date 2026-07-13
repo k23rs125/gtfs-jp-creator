@@ -1738,7 +1738,9 @@ if ss().get("decision_spec"):
                 _zcfg[_c] = st.column_config.NumberColumn(_c, min_value=0, step=10, format="%d")
             zone_df = st.data_editor(_zbase, hide_index=True, key=f"zonedf_{tk}",
                                      column_config=_zcfg, use_container_width=False)
-            st.caption(f"{len(_stops_all)}停留所。対角（同一停留所）は空欄でOK。"
+            st.caption(f"{len(_stops_all)}停留所。対角（同一停留所）は**通常は空欄でOK**。"
+                       "ただし**循環路線で一周して同じ停留所で降りる**場合は、その**対角セルに運賃を入れてください**"
+                       "（対角に入力があればその運賃も出力します）。"
                        "**上り・下りで運賃が違う場合は上のチェックを外し、両方向のセルに入力**してください。"
                        "Excelの表をコピー＆貼り付けも可。乗れる区間だけの入力でも構いません。")
         # 運賃の下: 路線名・対象自治体・事業者情報
@@ -1945,8 +1947,8 @@ if ss().get("decision_spec"):
         if zone_fare and zone_df is not None:
             for i, orig in enumerate(_stops_all):
                 for dest in _stops_all:
-                    if dest == orig:
-                        continue
+                    # 対角(同じ停留所どうし)も、入力があれば運賃にする＝循環の一周乗車に対応。
+                    # 非循環では対角は空欄のままなので、従来どおり運賃は付かない。
                     v = zone_df.iloc[i][dest]
                     sv = str(v).strip()
                     if sv in ("", "nan", "None", "<NA>"):
