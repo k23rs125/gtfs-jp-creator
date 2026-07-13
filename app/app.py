@@ -317,7 +317,7 @@ def _out_persist_dir(sid):
     return AUTOSAVE_DIR / f"out_{sid}"
 
 
-_WORK_FILES = ["config.json", "structured.json", "extract.json"]   # 再生成に要る作業ファイル
+_WORK_FILES = ["config.json", "structured.json", "extract.json", "spec.json"]   # 再生成に要る作業ファイル
 
 
 def _persist_out():
@@ -1284,35 +1284,6 @@ if "extract" in ss():
             "- **月水金だけ運行** → 月・水・金だけチェック（祝日を休むなら下の**『祝日は運休』**）。\n"
             "- **日祝ダイヤ** → **日** にチェック（日曜と祝日に運行）。\n"
             "- **循環路線** → 方向は 0 のまま、行き先は『右回り／左回り』でもOK。")
-
-    # ── 行き↔帰りの反転：抽出で向きが逆に読めた便のまとまりを、停留所の順・時刻列ごと反転する ──
-    with st.expander("↔ 行き／帰りが逆のとき反転する（停留所の順・時刻も逆にする）"):
-        st.caption("抽出で行き・帰りが逆（終点→始点）に読めた便のまとまりを選んで反転すると、"
-                   "**停留所の並びと時刻を丸ごと逆順**にします。反転後、必要なら上の表で**方向（0/1）**も切り替えてください。")
-        _bmap = {b.get("block_index"): b for b in blocks_e}
-        _rev_opts = list(_bmap)
-        if _rev_opts:
-            _rev_bi = st.selectbox(
-                "反転する便のまとまり", _rev_opts, key="revsel",
-                format_func=lambda bi: f"便のまとまり {bi}"
-                + (f"（{_bmap[bi].get('direction_hint')}）" if _bmap[bi].get('direction_hint') else ""))
-            _rb = _bmap.get(_rev_bi, {})
-            _rnm = [s.get("name") for s in _rb.get("stops", [])]
-            if _rnm:
-                st.caption("現在の順： " + "  →  ".join(_rnm[:6]) + (" …" if len(_rnm) > 6 else ""))
-            if st.button("↔ この便のまとまりを反転する", key="revbtn"):
-                _tb = next((b for b in ss().extract.get("blocks", [])
-                            if b.get("block_index") == _rev_bi), None)
-                if _tb is not None:
-                    _tb["stops"] = list(reversed(_tb.get("stops", [])))
-                    for _t in _tb.get("trips", []):
-                        _t["cells"] = list(reversed(_t.get("cells", [])))
-                        for _i, _c in enumerate(_t["cells"], 1):
-                            _c["seq"] = _i
-                    for _k in ("result", "confirmed", "anomalies_token"):
-                        ss().pop(_k, None)
-                    st.success(f"便のまとまり {_rev_bi} を反転しました。⏰の時刻と②の方向を確認してください。")
-                    st.rerun()
 
     # ── 運休日（②の表のすぐ下に配置）：祝日・年末年始・お盆・個別の運休日をここでまとめて設定 ──
     _htk = ss().get("extract_token", "")
@@ -2488,6 +2459,52 @@ if ss().get("result"):
                    "**全部が確定になるまで「公式提出可」にしない**（＝推測座標を黙って出さない）。"
                    "**行き・帰りは別々の停留所**として表示されます（多くは反対車線＝別座標。"
                    "終点・敷地内で同じ場所なら『同じ場所にする』で揃えられます）。")
+
+        # ── 行き↔帰りの反転（地図で向きが逆と分かった便のまとまりを反転＋その場で再生成）──
+        with st.expander("↔ 行き／帰りが逆のとき反転する（停留所の順・時刻を逆にして再生成）"):
+            st.caption("地図で行き・帰りが逆（終点→始点で読まれている等）と分かった便のまとまりを選んで反転すると、"
+                       "**停留所の並びと時刻を逆順**にして、その場で**全体を再生成**します。"
+                       "行先(方面)は終点から自動で付け直され、確定済みの座標はそのまま保たれます。")
+            _rvb = {b.get("block_index"): b for b in ss().get("extract", {}).get("blocks", [])}
+            if _rvb:
+                _rvbi = st.selectbox(
+                    "反転する便のまとまり", list(_rvb), key="rev5sel",
+                    format_func=lambda bi: f"便のまとまり {bi}"
+                    + (f"（{_rvb[bi].get('direction_hint')}）" if _rvb[bi].get('direction_hint') else ""))
+                _rvnm = [s.get("name") for s in _rvb.get(_rvbi, {}).get("stops", [])]
+                if _rvnm:
+                    st.caption("現在の順： " + "  →  ".join(_rvnm[:6]) + (" …" if len(_rvnm) > 6 else ""))
+                if st.button("↔ この便のまとまりを反転して再生成する", key="rev5btn", type="primary"):
+                    if not ((WORK / "spec.json").exists() and (WORK / "config.json").exists()):
+                        st.error("再生成に必要なファイル(spec.json / config.json)が見つかりません。"
+                                 "③から一度生成し直してから使ってください。")
+                    else:
+                        _tb = next((b for b in ss().extract.get("blocks", [])
+                                    if b.get("block_index") == _rvbi), None)
+                        if _tb is not None:
+                            _tb["stops"] = list(reversed(_tb.get("stops", [])))
+                            for _t in _tb.get("trips", []):
+                                _t["cells"] = list(reversed(_t.get("cells", [])))
+                                for _i, _c in enumerate(_t["cells"], 1):
+                                    _c["seq"] = _i
+                            (WORK / "extract.json").write_text(
+                                json.dumps(ss().extract, ensure_ascii=False, indent=2), encoding="utf-8")
+                            with st.spinner("反転して再生成中…（構造化→生成→座標補完→検証）"):
+                                rc, so, se = run([APPLY_DECISIONS, "--extract", WORK / "extract.json",
+                                                  "--decisions", WORK / "spec.json",
+                                                  "--out", WORK / "structured.json"])
+                                if rc == 0:
+                                    rc, so, se = run([SCRIPTS / "run_pipeline.py",
+                                                      "--config", WORK / "config.json"], cwd=REPO)
+                            ss().result = {"rc": rc, "log": se}
+                            ss()["_out_dirty"] = True
+                            ss().pop("anomalies_token", None)
+                            if rc == 0:
+                                st.success(f"便のまとまり {_rvbi} を反転して再生成しました。地図で確認してください。")
+                            else:
+                                st.error("再生成でエラーが出ました。\n" + (se or "")[-800:])
+                            st.rerun()
+
         import csv as _csv
         crows = list(_csv.DictReader(conf_csv.open(encoding="utf-8-sig")))
         # ★行き/帰りを反対側へ自動推定配置した停留所は、必ず確認してもらう（推定なので）
