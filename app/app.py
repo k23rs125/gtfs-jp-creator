@@ -1631,13 +1631,6 @@ if ss().get("decision_spec"):
             "- **事業者名・法人番号が不明** → 空欄のままで進めてOK（後から直せます／暫定値で出ます）。\n"
             "- **祝日は運休** → 『祝日は運休』にチェック（日祝ダイヤがあればその日は日祝ダイヤで運行）。\n"
             "- **有効期間が分からない** → 空欄でも生成できます（提出前に正しい期間を入れてください）。")
-    # 循環の自動検出（既定値の提案に使う。始点=終点なら循環とみられる）
-    _loop = False
-    for b in ss().extract.get("blocks", []):
-        _n = [s.get("name") for s in b.get("stops", [])]
-        if _n and _n[0] == _n[-1]:
-            _loop = True
-            break
     _routes_now = ss()["decision_spec"]["routes"]
     det = ss().get("detected", {}) or {}
     tk = ss().get("extract_token", "")
@@ -1770,8 +1763,6 @@ if ss().get("decision_spec"):
         ag_pres_name = agp2.text_input("代表者 氏名", value="", key=f"agpn_{tk}")
         ag_url = c2.text_input("URL", value=det.get("url", ""), key=f"url_{tk}")
         ag_phone = c2.text_input("電話", value=det.get("phone", ""), key=f"tel_{tk}")
-        is_circular = c3.checkbox("循環路線（始点に戻る）", value=_loop,
-                                  help="始点=終点を検出すると自動でチェック。違えば外してください。")
         c3.caption("🚌 **行き先表示は②の割り当て表**で便のまとまりごとに設定できます"
                    "（複数の行き先に対応）。")
         # 運行する曜日は②の『運行日』で便のまとまりごとに決めるため、ここでは入力しない。
@@ -1853,9 +1844,6 @@ if ss().get("decision_spec"):
         spec = dict(ss()["decision_spec"])
         if route_name:
             spec["routes"][0]["route_long_name"] = route_name
-        # 循環フラグ（意図の記録）。行き先表示は②の割り当て表→block_headsign に反映済み。
-        for r in spec.get("routes", []):
-            r["circular"] = bool(is_circular)
         period = {"start_date": start or "20250401", "end_date": end or "20271231"}
         # 予備サービスSVCの曜日: ②でパターン未割当の便が残ったときの保険。
         # 運行曜日は②で決めるので、ここは検出/既定値(_days_def=平日)をそのまま使う。
