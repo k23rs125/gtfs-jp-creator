@@ -509,6 +509,26 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 **赤・⚠・橙（要確認）が出たら必ず確認**してから提出してください。
 """, unsafe_allow_html=True)
 
+# 用語と仕組みのヘルプ（循環路線・有効期間/運行期間・Nominatim・保存先・内部コード）
+with st.expander("❓ 用語と仕組み（ヘルプ）— 循環路線 / 有効期間と運行期間 / Nominatim / 保存先 など"):
+    st.markdown(
+        "**循環路線とは**　始点＝終点で一周して戻ってくる路線です。方向は **0 のまま**、"
+        "行き先表示は「右回り／左回り」等でOK。始点と終点が同じ停留所だと自動で検出し、③で"
+        "「循環路線」のチェックを提案します。\n\n"
+        "**有効期間と運行期間の違い**　現在アプリで入力する **有効期間（開始〜終了）** は、"
+        "そのダイヤ（サービス）が有効な期間＝カレンダーの期間です。GTFSでは本来、"
+        "**feed全体の有効期間**（データそのものの有効期限）と、**各サービスの運行期間**を別々に持てます。"
+        "多くの場合は同じでよいので1つにまとめていますが、分けたい場合は対応できます。\n\n"
+        "**Nominatim とは**　OpenStreetMap の**住所→座標**変換サービスです。"
+        "国土数値情報(P11)で座標が埋まらなかった停留所を補う時に使います（**任意ON・やや遅い・"
+        "POIの多い路線向け**）。まずP11で埋め、それでも残った所にだけ使うのがおすすめです。\n\n"
+        "**保存先はどこ？**　① 作業中のファイルはPCの一時フォルダ。"
+        "② 途中経過は自動保存され、**ホームの `.gtfs_jp_app` フォルダ**に置かれます"
+        "（このページのURLをブックマークすれば『続きから復元』できます）。"
+        "③ 完成した **GTFS-JP 一式(zip)** は、⑥のボタンからブラウザのダウンロード先に保存されます。\n\n"
+        "**内部コード（仕組み）**　抽出→構造化→座標補完→検証まで、判断が要る所だけ人に尋ね、"
+        "残りは決定的なスクリプトが自動で行う三層構成です（同じ入力なら同じ出力＝再現性あり）。")
+
 restore_prompt()   # 前回の自動保存があれば「続きから復元/新規」を提示
 if ss().get("extract"):
     st.caption("💾 作業は自動保存されています。**このページのURLをブックマーク**しておくと、"
@@ -979,9 +999,9 @@ def run_generation(spec, muni, use_nom, hol, ai_read=False, ai_key="", ai_ctx=""
         if hol.get("syuku"):
             cfg["holiday_syukujitsu"] = str(SCRIPTS.parent / "references" / "data" / "syukujitsu.csv")
         if hol.get("nenmatsu"):
-            cfg["holiday_nenmatsu"] = "12-29:01-03"
+            cfg["holiday_nenmatsu"] = hol.get("nenmatsu_range") or "12-29:01-03"
         if hol.get("obon"):
-            cfg["holiday_obon"] = "08-13:08-15"
+            cfg["holiday_obon"] = hol.get("obon_range") or "08-13:08-15"
         (WORK / "config.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
         rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
     ss().result = {"rc": rc, "log": se}
@@ -1265,6 +1285,35 @@ if "extract" in ss():
             "- **日祝ダイヤ** → **日** にチェック（日曜と祝日に運行）。\n"
             "- **循環路線** → 方向は 0 のまま、行き先は『右回り／左回り』でもOK。")
 
+    # ── 行き↔帰りの反転：抽出で向きが逆に読めた便のまとまりを、停留所の順・時刻列ごと反転する ──
+    with st.expander("↔ 行き／帰りが逆のとき反転する（停留所の順・時刻も逆にする）"):
+        st.caption("抽出で行き・帰りが逆（終点→始点）に読めた便のまとまりを選んで反転すると、"
+                   "**停留所の並びと時刻を丸ごと逆順**にします。反転後、必要なら上の表で**方向（0/1）**も切り替えてください。")
+        _bmap = {b.get("block_index"): b for b in blocks_e}
+        _rev_opts = list(_bmap)
+        if _rev_opts:
+            _rev_bi = st.selectbox(
+                "反転する便のまとまり", _rev_opts, key="revsel",
+                format_func=lambda bi: f"便のまとまり {bi}"
+                + (f"（{_bmap[bi].get('direction_hint')}）" if _bmap[bi].get('direction_hint') else ""))
+            _rb = _bmap.get(_rev_bi, {})
+            _rnm = [s.get("name") for s in _rb.get("stops", [])]
+            if _rnm:
+                st.caption("現在の順： " + "  →  ".join(_rnm[:6]) + (" …" if len(_rnm) > 6 else ""))
+            if st.button("↔ この便のまとまりを反転する", key="revbtn"):
+                _tb = next((b for b in ss().extract.get("blocks", [])
+                            if b.get("block_index") == _rev_bi), None)
+                if _tb is not None:
+                    _tb["stops"] = list(reversed(_tb.get("stops", [])))
+                    for _t in _tb.get("trips", []):
+                        _t["cells"] = list(reversed(_t.get("cells", [])))
+                        for _i, _c in enumerate(_t["cells"], 1):
+                            _c["seq"] = _i
+                    for _k in ("result", "confirmed", "anomalies_token"):
+                        ss().pop(_k, None)
+                    st.success(f"便のまとまり {_rev_bi} を反転しました。⏰の時刻と②の方向を確認してください。")
+                    st.rerun()
+
     # ── 運休日（②の表のすぐ下に配置）：祝日・年末年始・お盆・個別の運休日をここでまとめて設定 ──
     _htk = ss().get("extract_token", "")
     _hdet = ss().get("detected", {}) or {}
@@ -1275,9 +1324,22 @@ if "extract" in ss():
     hol_syuku = _h1.checkbox("祝日は運休", value=bool(_hdet.get("holiday_syukujitsu")), key=f"hs_{_htk}",
                              help="内閣府の祝日データ（同梱・〜2027年）で祝日を運休に展開")
     hol_nenmatsu = _h2.checkbox("年末年始運休", value=bool(_hdet.get("holiday_nenmatsu")), key=f"hn_{_htk}",
-                                help="12/29〜1/3 を運休に展開")
+                                help="年末年始を運休に展開（下で期間を変えられます）")
     hol_obon = _h3.checkbox("お盆運休", value=bool(_hdet.get("holiday_obon")), key=f"ho_{_htk}",
-                            help="8/13〜8/15 を運休に展開")
+                            help="お盆を運休に展開（下で期間を変えられます）")
+    # 年末年始・お盆は「どこまでか」を可変に（既定＝12/29〜1/3、8/13〜8/15）。MM-DD で入力。
+    nenmatsu_range, obon_range = "12-29:01-03", "08-13:08-15"
+    if hol_nenmatsu:
+        _n1, _n2 = st.columns(2)
+        _ns = _n1.text_input("年末年始 開始 (MM-DD)", value="12-29", key=f"nns_{_htk}")
+        _ne = _n2.text_input("年末年始 終了 (MM-DD)", value="01-03", key=f"nne_{_htk}",
+                             help="年をまたぐ場合も、開始＞終了の表記でOK（例 12-29〜01-03）")
+        nenmatsu_range = f"{_ns.strip() or '12-29'}:{_ne.strip() or '01-03'}"
+    if hol_obon:
+        _o1, _o2 = st.columns(2)
+        _os = _o1.text_input("お盆 開始 (MM-DD)", value="08-13", key=f"obs_{_htk}")
+        _oe = _o2.text_input("お盆 終了 (MM-DD)", value="08-15", key=f"obe_{_htk}")
+        obon_range = f"{_os.strip() or '08-13'}:{_oe.strip() or '08-15'}"
     st.caption("個別の運行日・運休日（臨時運休・特別運行がある日。無ければ空でOK）")
     _cd_base = pd.DataFrame({"日付": pd.Series([], dtype="datetime64[ns]"),
                              "種別": pd.Series([], dtype="object")})
@@ -1967,7 +2029,8 @@ if ss().get("decision_spec"):
                              "agency_president_name": ag_pres_name.strip() or None}
         # 祝日をアプリ側で正しく展開できたら後段の一律運休は使わない（二重・誤運休を防ぐ）。
         hol = {"syuku": hol_syuku and not _syuku_inapp_ok,
-               "nenmatsu": hol_nenmatsu, "obon": hol_obon}
+               "nenmatsu": hol_nenmatsu, "obon": hol_obon,
+               "nenmatsu_range": nenmatsu_range, "obon_range": obon_range}
         # 路線名以外がほぼ未入力なら、暫定の既定値（捏造なし）で生成してよいか確認してから生成。
         minimal = (not ag_name.strip() and not ag_id.strip() and not ag_url.strip()
                    and not ag_phone.strip() and not ag_official.strip() and not ag_zip.strip()
