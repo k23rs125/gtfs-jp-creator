@@ -1381,7 +1381,8 @@ if "extract" in ss():
                    "空欄＝通過。**停留所名も直接編集**でき、**行を選んで削除**もできます"
                    "（「待機時間」「○○出発」など停留所でない行を消す／表記を直す）。"
                    + (f"OCR誤読の疑い **{n_an}件** は各表の下に列挙しています。" if n_an else "")
-                   + "直したら『この時刻表で確定して反映』を押してください（自動では書き換えません）。")
+                   + "直したら**修正欄で Enter**（または『この時刻表で確定して反映』ボタン）で反映します"
+                     "（自動では書き換えません）。")
         st.markdown("<span style='color:#c62828;font-weight:700'>⚠ 時刻は必ず原典と1つずつ見比べて"
                     "確認してください（誤りは黙って直りません）。「📄 原典を別タブで開く」で並べて照合できます。"
                     "</span>", unsafe_allow_html=True)
@@ -1535,9 +1536,10 @@ if "extract" in ss():
                                             unsafe_allow_html=True)
                                 cB.text_input("正しい時刻", value="", placeholder=tm,
                                               key=f"fix_{tok}_{bi}_{ci}_{lab_raw}",
-                                              label_visibility="collapsed")
-                            st.caption("例）7:30 と入力。停留所（行）ごと消したい待機時間は上の表の"
-                                       "左端で行を削除してください。")
+                                              label_visibility="collapsed",
+                                              on_change=lambda: ss().__setitem__("_tt_apply_req", True))
+                            st.caption("例）7:30 と入力し **Enter** で確定・反映（下のボタンでもOK）。"
+                                       "停留所（行）ごと消したい待機時間は上の表の左端で行を削除してください。")
             else:
                 st.caption("✅ 逆行なし・全セルが妥当な時刻です。")
         if issue_tot["rev"] or issue_tot["inval"] or issue_tot["an"]:
@@ -1546,7 +1548,9 @@ if "extract" in ss():
                 f"⚠ 非時刻 {issue_tot['inval']}件" if issue_tot["inval"] else "",
                 f"🟠 OCR疑い {issue_tot['an']}件" if issue_tot["an"] else ""]))
                 + " が残っています。直してから反映するのがおすすめです（このまま反映も可）。")
-        if st.button("この時刻表で確定して反映", type="primary"):
+        # 修正欄で Enter を押すと on_change で _tt_apply_req が立つ → ボタンと同じ反映を実行。
+        _apply_req = ss().pop("_tt_apply_req", False)
+        if st.button("この時刻表で確定して反映", type="primary") or _apply_req:
             for b in blocks_t:
                 bi = b.get("block_index")
                 if bi not in edited_blocks:
