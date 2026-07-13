@@ -1053,8 +1053,8 @@ if "extract" in ss():
             full = max(([c["name"] for c in t["cells"]] for t in trips), key=len, default=[])
         loop = bool(full) and full[0] == full[-1]
         tag = f"（始点=終点「{full[0]}」→循環とみられます）" if loop else ""
-        st.write(f"- block {b.get('block_index')}（{b.get('direction_hint') or '方向見出しなし'}）"
-                 f": 便 {len(trips)} / 停留所 {len(full)}{tag}")
+        st.write(f"- 便のまとまり {b.get('block_index')}（{b.get('direction_hint') or '方向見出しなし'}）"
+                 f": 便 {len(trips)} 本 / 停留所 {len(full)} 個{tag}")
         st.caption("　順: " + " → ".join(full))
 
     # ---- 停留所の名寄せ（表記ゆれの統合）----
@@ -1737,7 +1737,7 @@ if ss().get("decision_spec"):
                         "※原典に「降車専用区間」等の記載あり。**範囲は自動判定していません**——"
                         "どの停留所が乗車不可かを確認して選んでください。")
             for bi, dirh, names, hint in _bhints:
-                sel = st.multiselect(f"block{bi}（{dirh or '方向なし'}）の降車専用停留所",
+                sel = st.multiselect(f"便のまとまり{bi}（{dirh or '方向なし'}）の降車専用停留所",
                                      options=names, default=hint, key=f"board_{bi}_{tk}")
                 if sel:
                     board_sel[bi] = sel
