@@ -90,6 +90,45 @@ def _rewrite_csv_field(path, field, rename_map, only_table=None):
             w.writerow({k: r.get(k, "") for k in fns})
 
 
+def _update_translations_rows(trans_path, updates):
+    """translations.txt の (table,field,value) 行の言語別 translation を更新/追加/削除する。
+    updates: [(table_name, field_name, field_value, {"ja-Hrkt":..,"en":..}), ...]
+    翻訳が空文字ならその言語行を削除、値があれば無ければ新規追加する。"""
+    import csv as _c
+    p = Path(trans_path)
+    if not p.exists() or not updates:
+        return
+    with p.open(encoding="utf-8-sig", newline="") as f:
+        rd = _c.DictReader(f)
+        fns = rd.fieldnames or ["table_name", "field_name", "language", "translation", "field_value"]
+        rows = list(rd)
+    idx = {}   # (table,field,value,lang) -> row index
+    for i, r in enumerate(rows):
+        k = ((r.get("table_name") or "").strip(), (r.get("field_name") or "").strip(),
+             (r.get("field_value") or "").strip(), (r.get("language") or "").strip())
+        idx[k] = i
+    _drop = set()
+    for tb, fd, val, chg in updates:
+        for lang, tr in chg.items():
+            k = (tb, fd, val, lang)
+            if k in idx:
+                if tr:
+                    rows[idx[k]]["translation"] = tr
+                else:
+                    _drop.add(idx[k])   # 空＝その言語行を削除
+            elif tr:
+                nr = {c: "" for c in fns}
+                nr["table_name"], nr["field_name"] = tb, fd
+                nr["language"], nr["field_value"], nr["translation"] = lang, val, tr
+                rows.append(nr); idx[k] = len(rows) - 1
+    rows = [r for i, r in enumerate(rows) if i not in _drop]
+    with p.open("w", encoding="utf-8", newline="") as f:
+        w = _c.DictWriter(f, fieldnames=fns, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            w.writerow({c: r.get(c, "") for c in fns})
+
+
 def _write_shape(shp_path, shape_id, coords):
     """shapes.txt の shape_id の点を coords[(lat,lon)] で置き換える（他shapeは保持）。距離も再計算。"""
     import csv as _c
@@ -2339,9 +2378,8 @@ if ss().get("result"):
                 _mk = "⚠" if _reading_suspicious(_h) else ""
                 if _nm in _aiap:
                     _mk = (_mk + " 🔎AI").strip()
-                _row = {"要確認": _mk, "停留所名": _nm, "ふりがな(ja-Hrkt)": _h}
-                if _has_en:
-                    _row["英語(en)"] = _cur[_nm].get("en", "")
+                _row = {"要確認": _mk, "停留所名": _nm, "ふりがな(ja-Hrkt)": _h,
+                        "英語(en)": _cur[_nm].get("en", "")}   # 英語は常に編集可（空でOK）
                 _rows.append(_row)
             with st.form("readings_form"):
                 _cfg = {
@@ -2351,6 +2389,8 @@ if ss().get("result"):
                         "停留所名", help="停留所名そのものを直せます（OCR誤りの修正など）。"
                         "変更すると stops.txt と読みが更新されます。"),
                     "ふりがな(ja-Hrkt)": st.column_config.TextColumn("ふりがな(ja-Hrkt)"),
+                    "英語(en)": st.column_config.TextColumn(
+                        "英語(en)", help="英語名（任意）。空でもOK。入れると translations に en として出力されます。"),
                 }
                 _edited = st.data_editor(pd.DataFrame(_rows), hide_index=True,
                                          key="readings_editor", column_config=_cfg,
@@ -2360,7 +2400,7 @@ if ss().get("result"):
                     for _i, _nm in enumerate(_order):
                         _new = str(_edited.iloc[_i]["停留所名"]).strip()
                         _nh = str(_edited.iloc[_i]["ふりがな(ja-Hrkt)"]).strip()
-                        _ne = str(_edited.iloc[_i].get("英語(en)", "")).strip() if _has_en else ""
+                        _ne = str(_edited.iloc[_i].get("英語(en)", "")).strip()
                         _read_edited = bool(_nh) and _nh != _cur[_nm].get("ja-Hrkt", "")
                         _en_edited = bool(_ne) and _ne != _cur[_nm].get("en", "")
                         _key = _new or _nm
@@ -2403,6 +2443,65 @@ if ss().get("result"):
                             f"反映しました（停留所名 {len(_renames)}件 / 読み・英語 {len(_by)}件）。"
                             "GTFS-JP(zip)と地図を更新しました。下のボタンで再ダウンロードしてください。")
                         st.rerun()
+
+            # ---- 路線名・事業者名・行き先表示 の 読み(ja-Hrkt)・英語(en) ----
+            _TBL_LABEL = {"routes": "路線", "agency": "事業者", "trips": "行き先"}
+            _FLD_LABEL = {"route_long_name": "路線名", "route_short_name": "路線略称",
+                          "agency_name": "事業者名", "trip_headsign": "行き先表示"}
+            _other, _oorder = {}, []
+            for _r in _trows:
+                _tb = (_r.get("table_name") or "").strip()
+                if _tb not in _TBL_LABEL:
+                    continue
+                _kk = (_tb, (_r.get("field_name") or "").strip(), (_r.get("field_value") or "").strip())
+                _lg = (_r.get("language") or "").strip()
+                if _kk[2] and _kk not in _other:
+                    _other[_kk] = {}; _oorder.append(_kk)
+                if _lg in ("ja-Hrkt", "en"):
+                    _other[_kk][_lg] = _r.get("translation", "")
+            if _oorder:
+                st.markdown("---")
+                st.markdown("**路線名・事業者名・行き先表示の 読み・英語**")
+                st.caption("停留所以外（路線・事業者・行き先）の**読み(ja-Hrkt)と英語**もここで直せます。"
+                           "読みは辞書解析(SudachiPy)で自動生成。**名前そのものは②③で**直してください。")
+                _orows = [{"種類": _TBL_LABEL.get(_k[0], _k[0]), "項目": _FLD_LABEL.get(_k[1], _k[1]),
+                           "名前": _k[2], "ふりがな(ja-Hrkt)": _other[_k].get("ja-Hrkt", ""),
+                           "英語(en)": _other[_k].get("en", "")} for _k in _oorder]
+                with st.form("readings_other_form"):
+                    _oed = st.data_editor(
+                        pd.DataFrame(_orows), hide_index=True, key="readings_other_editor",
+                        use_container_width=True,
+                        column_config={
+                            "種類": st.column_config.TextColumn("種類", disabled=True, width="small"),
+                            "項目": st.column_config.TextColumn("項目", disabled=True, width="small"),
+                            "名前": st.column_config.TextColumn("名前", disabled=True),
+                            "ふりがな(ja-Hrkt)": st.column_config.TextColumn("ふりがな(ja-Hrkt)"),
+                            "英語(en)": st.column_config.TextColumn(
+                                "英語(en)", help="英語名（任意・空でOK）")})
+                    if st.form_submit_button("この内容で反映（読み・英語）"):
+                        _updates = []
+                        for _i, _k in enumerate(_oorder):
+                            _nh = str(_oed.iloc[_i]["ふりがな(ja-Hrkt)"]).strip()
+                            _ne = str(_oed.iloc[_i]["英語(en)"]).strip()
+                            _chg = {}
+                            if _nh != (_other[_k].get("ja-Hrkt", "") or ""):
+                                _chg["ja-Hrkt"] = _nh
+                            if _ne != (_other[_k].get("en", "") or ""):
+                                _chg["en"] = _ne
+                            if _chg:
+                                _updates.append((_k[0], _k[1], _k[2], _chg))
+                        if not _updates:
+                            st.info("変更がありませんでした。")
+                        else:
+                            _update_translations_rows(_trans, _updates)
+                            _zz2 = list(out.glob("*_gtfs-jp.zip"))
+                            if _zz2:
+                                run([SCRIPTS / "package_gtfs_zip.py", out / "gtfs", "-o", _zz2[0]])
+                            run([SCRIPTS / "make_gtfs_viewer.py", "--feed", out / "gtfs",
+                                 "-o", out / "gtfs_viewer.html"])
+                            ss()["_out_dirty"] = True
+                            st.success(f"路線・事業者・行き先の読み・英語を {len(_updates)}件 反映しました。")
+                            st.rerun()
 
             # ---- 🔎 AIで読みをチェック（任意・要確認）----
             # 難読地名は自動読み(pykakasi)が“静かに”誤ることがある(⚠も付かない)。

@@ -558,6 +558,8 @@ def main() -> int:
     cmd = [PYTHON, script("generate_translations.py"),
            "--stops", str(gtfs_dir / "stops.txt"),
            "--routes", str(gtfs_dir / "routes.txt"),
+           "--agency", str(gtfs_dir / "agency.txt"),   # 事業者名の読み
+           "--trips", str(gtfs_dir / "trips.txt"),     # 行き先表示の読み
            "-o", str(gtfs_dir / "translations.txt"),
            "--report", str(work_dir / "translations_report.json")]
     if translations_en_json:

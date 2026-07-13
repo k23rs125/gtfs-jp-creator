@@ -242,27 +242,32 @@ def build_en_prompt(items: list[tuple[str, str]]) -> str:
 # 入力 stops / routes から (table_name, field_name, field_value) のリストを抽出
 # ---------------------------------------------------------------------------
 
-def collect_translation_targets(stops_rows: list[dict], routes_rows: list[dict]
+def collect_translation_targets(stops_rows: list[dict], routes_rows: list[dict],
+                                 agency_rows: list[dict] | None = None,
+                                 trips_rows: list[dict] | None = None
                                  ) -> list[tuple[str, str, str]]:
-    """翻訳対象のリストを返す。
+    """翻訳対象のリストを返す（stops / routes / agency / trips をカバー）。
 
     Returns: list of (table_name, field_name, field_value)
     """
     targets: list[tuple[str, str, str]] = []
-    # stops
-    seen_stop_names = set()
+    seen: set[tuple[str, str, str]] = set()
+
+    def _add(table: str, field: str, value: str) -> None:
+        v = (value or "").strip()
+        if v and (table, field, v) not in seen:
+            seen.add((table, field, v))
+            targets.append((table, field, v))
+
     for s in stops_rows:
-        name = (s.get("stop_name") or "").strip()
-        if name and name not in seen_stop_names:
-            seen_stop_names.add(name)
-            targets.append(("stops", "stop_name", name))
-    # routes
-    seen_route_names = set()
-    for r in routes_rows:
-        name = (r.get("route_long_name") or "").strip()
-        if name and name not in seen_route_names:
-            seen_route_names.add(name)
-            targets.append(("routes", "route_long_name", name))
+        _add("stops", "stop_name", s.get("stop_name") or "")
+    for r in routes_rows:                       # 路線名（長・短の両方）
+        _add("routes", "route_long_name", r.get("route_long_name") or "")
+        _add("routes", "route_short_name", r.get("route_short_name") or "")
+    for a in (agency_rows or []):               # 事業者名
+        _add("agency", "agency_name", a.get("agency_name") or "")
+    for t in (trips_rows or []):                # 行き先表示（trip_headsign）
+        _add("trips", "trip_headsign", t.get("trip_headsign") or "")
     return targets
 
 
@@ -276,6 +281,8 @@ def main() -> int:
     )
     parser.add_argument("--stops", required=True, help="入力 stops.txt")
     parser.add_argument("--routes", required=True, help="入力 routes.txt")
+    parser.add_argument("--agency", default=None, help="入力 agency.txt（任意・事業者名の読み用）")
+    parser.add_argument("--trips", default=None, help="入力 trips.txt（任意・行き先表示の読み用）")
     parser.add_argument("-o", "--output", default="translations.txt",
                         help="出力 translations.txt （既定: ./translations.txt）")
     parser.add_argument("--export-en-prompt", default=None,
@@ -312,7 +319,13 @@ def main() -> int:
     # --- 読み込み ---
     stops_rows, _ = read_csv(stops_path)
     routes_rows, _ = read_csv(routes_path)
-    targets = collect_translation_targets(stops_rows, routes_rows)
+    agency_rows: list[dict] = []
+    trips_rows: list[dict] = []
+    if args.agency and Path(args.agency).exists():
+        agency_rows, _ = read_csv(Path(args.agency))
+    if args.trips and Path(args.trips).exists():
+        trips_rows, _ = read_csv(Path(args.trips))
+    targets = collect_translation_targets(stops_rows, routes_rows, agency_rows, trips_rows)
     print(f"翻訳対象: {len(targets)} 件 (stops: "
           f"{sum(1 for t in targets if t[0]=='stops')}, "
           f"routes: {sum(1 for t in targets if t[0]=='routes')})")
