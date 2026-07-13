@@ -1206,6 +1206,34 @@ _OLD_PATTERN_DAYS = {
 }
 
 
+def _days_label(bits):
+    """7曜日ビット[0/1]×7 → 分かりやすいダイヤ名（例 平日(月〜金)/月・水・金/土日/毎日）。"""
+    b = [int(x) for x in bits] if (isinstance(bits, (list, tuple)) and len(bits) == 7) else [1, 1, 1, 1, 1, 0, 0]
+    if b == [1, 1, 1, 1, 1, 0, 0]:
+        return "平日(月〜金)"
+    if b == [1, 1, 1, 1, 1, 1, 1]:
+        return "毎日"
+    if b == [0, 0, 0, 0, 0, 1, 1]:
+        return "土日"
+    _n = [DAY_COLS[i] for i in range(7) if b[i]]
+    return "・".join(_n) if _n else "（曜日なし）"
+
+
+def _svc_id_from_days(bits):
+    b = [int(x) for x in bits] if (isinstance(bits, (list, tuple)) and len(bits) == 7) else [1, 1, 1, 1, 1, 0, 0]
+    if not any(b):
+        b = [1, 1, 1, 1, 1, 0, 0]
+    return "SVC_" + "".join(str(x) for x in b)
+
+
+def _service_labels_map():
+    """②の運行日(block_days)から {ダイヤ名: service_id} を作る（同一組合せは1つに集約）。"""
+    m = {}
+    for _d in (ss().get("decision_spec", {}) or {}).get("block_days", {}).values():
+        m[_days_label(_d)] = _svc_id_from_days(_d)
+    return m
+
+
 if "extract" in ss():
     st.header("② 路線の割り当て（どの路線・方向か）")
     st.caption("停留所の並びが同じ**便のまとまり**を自動で**同じ路線**にまとめ、"
@@ -1311,15 +1339,22 @@ if "extract" in ss():
         _os = _o1.text_input("お盆 開始 (MM-DD)", value="08-13", key=f"obs_{_htk}")
         _oe = _o2.text_input("お盆 終了 (MM-DD)", value="08-15", key=f"obe_{_htk}")
         obon_range = f"{_os.strip() or '08-13'}:{_oe.strip() or '08-15'}"
-    st.caption("個別の運行日・運休日（臨時運休・特別運行がある日。無ければ空でOK）")
+    st.caption("個別の運行日・運休日（臨時運休・特別運行がある日。無ければ空でOK）。"
+               "**対象ダイヤ**で、その日を『どの運行日（②の曜日）に効かせるか』を選べます"
+               "（『全ダイヤ』＝全部。特別運行はどのダイヤの便を動かすか指定できます）。")
+    _svc_opts = ["全ダイヤ"] + list(_service_labels_map())   # 全ダイヤ ＋ ②の各ダイヤ名
     _cd_base = pd.DataFrame({"日付": pd.Series([], dtype="datetime64[ns]"),
-                             "種別": pd.Series([], dtype="object")})
+                             "種別": pd.Series([], dtype="object"),
+                             "対象ダイヤ": pd.Series([], dtype="object")})
     cd_editor = st.data_editor(
-        _cd_base, num_rows="dynamic", key=f"cd_{_htk}", use_container_width=False,
+        _cd_base, num_rows="dynamic", key=f"cd_{_htk}", use_container_width=True,
         column_config={
             "日付": st.column_config.DateColumn("日付", format="YYYY-MM-DD"),
             "種別": st.column_config.SelectboxColumn("種別", options=["運休", "臨時運行"],
-                                                     default="運休", required=True)})
+                                                     default="運休", required=True),
+            "対象ダイヤ": st.column_config.SelectboxColumn(
+                "対象ダイヤ", options=_svc_opts, default="全ダイヤ",
+                help="この日を効かせる運行日（②の曜日）。全ダイヤ＝すべてのダイヤに適用")})
     _cdp1, _cdp2, _cdp3 = st.columns([1, 1.4, 1.4])
     cd_use_period = _cdp1.checkbox("期間で運休", value=False, key=f"cdp_{_htk}",
                                    help="下の開始〜終了を毎日運休に（季節運休など）")
@@ -1889,15 +1924,23 @@ if ss().get("decision_spec"):
                     _seen_cd.add(k)
                     _cal_dates.append({"service_id": sid, "date": ymd, "exception_type": etype})
         try:
+            _svc_label2sid = _service_labels_map()   # ダイヤ名 → service_id
             for _, _r in cd_editor.iterrows():
                 _dv, _kind = _r.get("日付"), _r.get("種別")
                 if pd.isna(_dv) or not _kind:
                     continue
                 _ymd = pd.Timestamp(_dv).strftime("%Y%m%d")
+                # 対象ダイヤ: 「全ダイヤ」or未指定→全service、特定ダイヤ→その1つ（無効なら全）。
+                _tgt = str(_r.get("対象ダイヤ") or "全ダイヤ").strip()
+                if _tgt in ("", "全ダイヤ"):
+                    _tsids = _svc_ids
+                else:
+                    _one = _svc_label2sid.get(_tgt)
+                    _tsids = [_one] if _one in _svc_ids else _svc_ids
                 if _kind == "運休":
-                    _add_cd(_ymd, 2, _svc_ids)
+                    _add_cd(_ymd, 2, _tsids)
                 elif _kind == "臨時運行":
-                    _add_cd(_ymd, 1, _svc_ids[:1])
+                    _add_cd(_ymd, 1, _tsids)
         except Exception:
             pass
         if cd_use_period and cd_ps.strip().isdigit() and cd_pe.strip().isdigit():
