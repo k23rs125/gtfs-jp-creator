@@ -1806,7 +1806,10 @@ if ss().get("decision_spec"):
         # 運行する曜日は②の『運行日』で便のまとまりごとに決めるため、ここでは入力しない。
         # ②でパターン未割当の便が万一残った場合の予備サービス(SVC)にだけ既定曜日を使う。
         c4, c5 = st.columns(2)
-        start = c4.text_input("有効期間 開始 (YYYYMMDD)", value=det.get("start_date", ""), key=f"st_{tk}")
+        start = c4.text_input("有効期間 開始 (YYYYMMDD)", value=det.get("start_date", ""), key=f"st_{tk}",
+                              help="このダイヤ(サービス)が有効な期間＝カレンダーの期間です。"
+                                   "GTFSでは『feed全体の有効期限』と『各サービスの運行期間』を分けられますが、"
+                                   "通常はこの1つでOK（❓用語ヘルプ参照）。")
         end = c5.text_input("有効期間 終了 (YYYYMMDD)", value=det.get("end_date", ""), key=f"en_{tk}")
         # ※運休日（祝日・年末年始・お盆・個別の運休日）は②の表の下へ移動済み。
         # 乗降制約（降車専用＝乗車不可）。抽出でマーカーを検出したブロックのみ提示。
@@ -1827,7 +1830,11 @@ if ss().get("decision_spec"):
                                      options=names, default=hint, key=f"board_{bi}_{tk}")
                 if sel:
                     board_sel[bi] = sel
-        use_nom = st.checkbox("Nominatim 補完を使う（POI多い路線向け・遅い）", value=False)
+        use_nom = st.checkbox(
+            "Nominatim 補完を使う（P11で埋まらなかった停留所だけに使う・POI多い路線向け・遅い）",
+            value=False,
+            help="まず国土数値情報(P11)で座標を埋め、それでも残った停留所だけを OpenStreetMap の"
+                 "住所→座標変換(Nominatim)で補います。任意（既定OFF）・処理は遅めです。")
         ai_read_gen = st.checkbox("🔎 生成時にAIで読み(ふりがな)を探索して既定値にする（任意・要確認）",
                                   value=False,
                                   help="生成後、Claudeが停留所名の読みを探索し、自動読み(pykakasi)と違う所だけを"
