@@ -467,9 +467,9 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 > 数字の誤読が出ることがあり、後の⏰で必ず見比べてください。
 
 **② 路線の割り当て** — どのページ（＝**便のまとまり**）が **どの路線・方向** かを表で確認します。
-**行き先表示** と **運行日（平日／土曜／日祝）** もこの表で直せます。
+**行き先表示** と **運行する曜日（月〜日のチェック）** もこの表で直せます（月水金など任意の組合せOK）。
 > 💡 **こんな時は**：行きと帰りは **同じ路線名** にして方向を 0／1 に。平日と土日で時刻が違う時刻表は、
-> そのページの『運行日』を平日・土曜・日祝に分けます（別々のダイヤとして出力されます）。
+> そのページの**曜日チェック**を 月〜金／土・日 に分けます（別々のダイヤとして出力されます）。
 
 **⏰ 時刻表の確認・修正** — 取り込んだ時刻を原典と見比べます。
 **<span style="color:#c62828">赤＝時刻の逆行（要修正）</span>**、**<span style="color:#1565c0">青＝日跨ぎ（翌日・正常）</span>**。
@@ -1163,26 +1163,24 @@ def _auto_route_rows(bs, source=""):
             _row = {"ブロック": bi, "見出し": dh or "",
                     "停留所数": len(nm), "路線名": rname,
                     "方向(0/1)": "0（行き）" if d % 2 == 0 else "1（帰り）",
-                    "行き先表示": dh or "", "運行日": "平日(月〜金)"}
+                    "行き先表示": dh or "",
+                    "月": True, "火": True, "水": True, "木": True, "金": True, "土": False, "日": False}
             if bs[bi].get("source_name"):        # 複数ファイル取り込み時のみ元ファイル名を表示
                 _row["ファイル"] = bs[bi]["source_name"]
             rows.append(_row)
     return rows
 
 
-# 運行日パターン → 曜日フラグ（平日/土日で時刻が違う時刻表は、ブロックごとに変える）
-DAY_PATTERNS = {
-    "平日(月〜金)": dict(mon=1, tue=1, wed=1, thu=1, fri=1, sat=0, sun=0),
-    "土曜": dict(mon=0, tue=0, wed=0, thu=0, fri=0, sat=1, sun=0),
-    "日曜・祝日": dict(mon=0, tue=0, wed=0, thu=0, fri=0, sat=0, sun=1),
-    "土日祝": dict(mon=0, tue=0, wed=0, thu=0, fri=0, sat=1, sun=1),
-    "毎日": dict(mon=1, tue=1, wed=1, thu=1, fri=1, sat=1, sun=1),
+# 運行する曜日は便のまとまりごとに 月〜日 の7チェックで指定する（月水金など任意の組合せ可）。
+DAY_COLS = ["月", "火", "水", "木", "金", "土", "日"]
+DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+DAY_DEFAULT = [True, True, True, True, True, False, False]   # 既定＝平日(月〜金)
+# 旧保存データ（プリセット名）→7曜日 の読み替え表（後方互換）。
+_OLD_PATTERN_DAYS = {
+    "平日(月〜金)": [1, 1, 1, 1, 1, 0, 0], "土曜": [0, 0, 0, 0, 0, 1, 0],
+    "日曜・祝日": [0, 0, 0, 0, 0, 0, 1], "土日祝": [0, 0, 0, 0, 0, 1, 1],
+    "毎日": [1, 1, 1, 1, 1, 1, 1], "平日（既定）": [1, 1, 1, 1, 1, 0, 0],
 }
-PATTERN_SID = {"平日(月〜金)": "WD", "土曜": "SAT", "日曜・祝日": "SUN",
-               "土日祝": "WE", "毎日": "ALL"}
-# 祝日に「運行する側」のパターン（=祝日はこのダイヤ）。平日系は祝日を運休にする。
-PATTERN_RUNS_HOLIDAY = {"日曜・祝日": True, "土日祝": True, "毎日": True,
-                        "平日(月〜金)": False, "土曜": False}
 
 
 if "extract" in ss():
@@ -1204,7 +1202,8 @@ if "extract" in ss():
                 for r in _ds0.get("routes", []) for b in r.get("blocks", [])}
         _bd0 = _ds0.get("block_direction", {})
         _bh0 = _ds0.get("block_headsign", {})
-        _bp0 = _ds0.get("block_pattern", {})
+        _bday0 = _ds0.get("block_days", {})     # 新仕様（7曜日）
+        _bp0 = _ds0.get("block_pattern", {})    # 旧仕様（プリセット名・後方互換）
         for _row in _rows0:
             _bi = _row["ブロック"]
             if _b2r.get(_bi):
@@ -1213,10 +1212,13 @@ if "extract" in ss():
                 _row["方向(0/1)"] = "0（行き）" if int(_bd0[str(_bi)]) == 0 else "1（帰り）"
             if _bh0.get(str(_bi)):
                 _row["行き先表示"] = _bh0[str(_bi)]
-            if _bp0.get(str(_bi)):
-                _pv = _bp0[str(_bi)]
-                # 旧仕様の「平日（既定）/③の曜日」は平日(月〜金)へ読み替え（選択肢から消えたため）
-                _row["運行日"] = _pv if _pv in DAY_PATTERNS else "平日(月〜金)"
+            # 運行日の復元: 新仕様(7曜日)を優先。無ければ旧仕様(プリセット名)を7曜日へ読み替え。
+            _days = _bday0.get(str(_bi))
+            if not _days and _bp0.get(str(_bi)):
+                _days = _OLD_PATTERN_DAYS.get(_bp0[str(_bi)])
+            if _days and len(_days) == 7:
+                for _k, _c in enumerate(DAY_COLS):
+                    _row[_c] = bool(_days[_k])
     base_df = pd.DataFrame(_rows0)
     if "ブロック" in base_df.columns:      # 便のまとまりの番号順に並べて表示
         base_df = base_df.sort_values("ブロック").reset_index(drop=True)
@@ -1239,27 +1241,39 @@ if "extract" in ss():
             "行き先表示": st.column_config.TextColumn(
                 "行き先表示", help="バス前面に出る行き先。便のまとまりごとに指定できます。"
                 "空なら終点名から『○○方面』。循環は『右回り/左回り』等でもOK。"),
-            "運行日": st.column_config.SelectboxColumn(
-                "運行日", options=list(DAY_PATTERNS), required=True, default="平日(月〜金)",
-                help="初期値は平日(月〜金)。土曜/日祝で時刻が違う時刻表は、便のまとまりごとに変える（別ダイヤで出力）"),
+            "月": st.column_config.CheckboxColumn(
+                "月", help="運行する曜日にチェック。初期値は平日(月〜金)。月水金など任意の組合せもOK"),
+            "火": st.column_config.CheckboxColumn("火"),
+            "水": st.column_config.CheckboxColumn("水"),
+            "木": st.column_config.CheckboxColumn("木"),
+            "金": st.column_config.CheckboxColumn("金"),
+            "土": st.column_config.CheckboxColumn("土"),
+            "日": st.column_config.CheckboxColumn(
+                "日", help="日曜にチェックすると祝日も運行扱い（日祝ダイヤ）になります"),
         },
     )
-    st.caption("運行日は**初期値『平日(月〜金)』**を入れてあります。**平日・土曜・日祝で時刻が違う**時刻表は、"
-               "該当の便のまとまりの『運行日』を変えてください（別カレンダーで出力）。平日運行ならそのままでOK。"
-               "**行き先表示**も便のまとまりごとに直せます。")
+    st.caption("**運行する曜日**は右側の**月〜日のチェック**で指定します（初期値＝平日：月〜金）。"
+               "**月水金**のような任意の組み合わせもOK。曜日で時刻が違う時刻表は、便のまとまりを分けて"
+               "それぞれの曜日にチェックしてください（別カレンダーで出力）。"
+               "**日曜にチェック＝祝日も運行**（日祝ダイヤ）扱いになります。**行き先表示**も直せます。")
     st.info("💡 **こんな時は（例）**\n\n"
             "- **往復の路線** → 行き（佐屋→駅）と帰り（駅→佐屋）を **同じ路線名** にし、方向を 0 と 1 に。\n"
-            "- **平日と土日で時刻が違う** → 平日ページの『運行日』＝平日、土日ページ＝土曜／日曜・祝日 に分ける。\n"
+            "- **平日と土日で時刻が違う** → 平日ページは 月〜金、土日ページは 土・日 にチェックを分ける。\n"
+            "- **月水金だけ運行** → その便のまとまりの **月・水・金だけ**チェック。\n"
             "- **行き先を変えたい** → 『行き先表示』欄に入力（空欄なら終点から自動で『○○方面』）。\n"
             "- **循環路線** → 方向は 0 のまま、行き先は『右回り／左回り』でもOK。")
     # 割り当て表から decision_spec を構築（同じ路線名のブロックを1路線にまとめる）
-    name_blocks, block_dir, headsign, block_pattern = {}, {}, {}, {}
+    name_blocks, block_dir, headsign, block_days = {}, {}, {}, {}
     for _, r in edited.iterrows():
         bi = int(r["ブロック"]); nm = str(r["路線名"]).strip() or f"路線{bi}"
         name_blocks.setdefault(nm, []).append(bi)
         # 表示は「0（行き）/1（帰り）」だが、生成データは 0/1 の数字に戻す。
         block_dir[str(bi)] = 0 if str(r["方向(0/1)"]).strip().startswith("0") else 1
-        block_pattern[str(bi)] = str(r.get("運行日") or "平日(月〜金)")
+        # 運行する曜日: 7チェック(月〜日)を [0/1]×7 で保存。1つも選ばれてなければ既定(平日)。
+        _days = [1 if bool(r.get(_c, False)) else 0 for _c in DAY_COLS]
+        if not any(_days):
+            _days = [int(x) for x in DAY_DEFAULT]
+        block_days[str(bi)] = _days
         # 行き先表示: 表で編集された値を優先。空なら方向見出し(direction_hint)を使う。
         _head = str(r.get("行き先表示") or "").strip()
         if _head:
@@ -1269,7 +1283,7 @@ if "extract" in ss():
     routes = [{"route_id": f"R{i + 1:02d}", "route_long_name": nm, "blocks": bidx, "circular": False}
               for i, (nm, bidx) in enumerate(name_blocks.items())]
     ss().decision_spec = {"routes": routes, "block_direction": block_dir, "block_headsign": headsign,
-                          "block_pattern": block_pattern,
+                          "block_days": block_days,
                           "exclude_reserve": True, "exclude_unnumbered": False, "stop_key": "name"}
     if len(routes) > 1:
         st.info(f"{len(routes)} 路線として構成します: " + " / ".join(r["route_long_name"] for r in routes))
@@ -1799,23 +1813,28 @@ if ss().get("decision_spec"):
         form_days = {"mon": int(_dd[0]), "tue": int(_dd[1]), "wed": int(_dd[2]),
                      "thu": int(_dd[3]), "fri": int(_dd[4]), "sat": int(_dd[5]), "sun": int(_dd[6])}
         spec["service"] = {"service_id": "SVC", **form_days, **period}
-        # 複数ダイヤ: ②の運行日割当(block_pattern)から services と block_service を構築。
-        bpat = ss()["decision_spec"].get("block_pattern", {})
-        # ②の運行日は既定で「平日(月〜金)」が入っている。各便のまとまりを割当パターンの
-        # サービスに紐づける。SVCは「どのパターンにも該当しない便」が出た時だけ作る予備
-        # （未使用サービスを calendar/ calendar_dates に残さないため）。
+        # 複数ダイヤ: ②の運行日(block_days=7曜日)から services と block_service を構築。
+        # 同じ曜日組合せの便は1サービスを共有。service_idは曜日ビットで作る(例 月水金=SVC_1010100)。
+        bdays = ss()["decision_spec"].get("block_days", {})
+
+        def _svc_from_days(_d):
+            if not (isinstance(_d, (list, tuple)) and len(_d) == 7):
+                _d = [int(form_days[k]) for k in DAY_KEYS]
+            _d = [int(bool(x)) for x in _d]
+            if not any(_d):                       # 曜日未選択の保険＝平日
+                _d = [1, 1, 1, 1, 1, 0, 0]
+            sid = "SVC_" + "".join(str(x) for x in _d)
+            return sid, {"service_id": sid, **{DAY_KEYS[i]: _d[i] for i in range(7)}, **period}
+
         services = {}
         block_service = {}
-        for bi, pat in bpat.items():
-            if pat in DAY_PATTERNS:
-                sidp = PATTERN_SID[pat]
-                services[sidp] = {"service_id": sidp, **DAY_PATTERNS[pat], **period}
-                block_service[bi] = sidp
-            else:
-                services.setdefault("SVC", {"service_id": "SVC", **form_days, **period})
-                block_service[bi] = "SVC"
+        for bi, days in bdays.items():
+            sid, svc = _svc_from_days(days)
+            services.setdefault(sid, svc)
+            block_service[bi] = sid
         if not services:   # 便が無い等の保険（最低1サービスは必要）
-            services["SVC"] = {"service_id": "SVC", **form_days, **period}
+            sid, svc = _svc_from_days(None)
+            services[sid] = svc
         spec["services"] = list(services.values())
         spec["block_service"] = block_service
         # 個別の運行日・運休日 → calendar_dates。運休(2)は全service、臨時運行(1)は基本SVCに付与。
@@ -1854,10 +1873,9 @@ if ss().get("decision_spec"):
         # 祝日運休チェックの有無に関わらず、その祝日に運行(1)を追加する（＝一般的な祝日を反映）。
         # 平日/土曜ダイヤを祝日に運休(2)にするのは「祝日は運休」チェックON時だけ（利用者の選択）。
         # run_pipeline の一律運休は複数ダイヤで日祝サービスの日曜まで消すため、ここで決定的に展開。
-        _sid_pat = {v: k for k, v in PATTERN_SID.items()}   # WD→平日(月〜金) 等
-        _has_hol_pattern = any(
-            PATTERN_RUNS_HOLIDAY.get(_sid_pat.get(s["service_id"], ""), False)
-            for s in spec["services"])
+        # 「日曜にチェックがある便＝祝日も運行(日祝ダイヤ)」とみなす（sun=1 で判定）。
+        # これは従来のプリセット挙動（日祝/土日祝/毎日=祝日運行、平日/土曜=祝日運休設定に従う）と一致。
+        _has_hol_pattern = any(int(s.get("sun", 0)) == 1 for s in spec["services"])
         _syuku_inapp_ok = False
         if hol_syuku or _has_hol_pattern:
             try:
@@ -1873,7 +1891,7 @@ if ss().get("decision_spec"):
                     _ymd = _d.strftime("%Y%m%d"); _dk = _daykeys[_d.weekday()]
                     for _s in spec["services"]:
                         _sid = _s["service_id"]
-                        _runs_hol = PATTERN_RUNS_HOLIDAY.get(_sid_pat.get(_sid, ""), False)
+                        _runs_hol = int(_s.get("sun", 0)) == 1   # 日曜含む便＝祝日も運行
                         _covers = int(_s.get(_dk, 0)) == 1
                         if _runs_hol and not _covers:
                             _add_cd(_ymd, 1, [_sid])   # 祝日はこのダイヤで運行（常に）
