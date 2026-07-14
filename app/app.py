@@ -614,6 +614,7 @@ if _mode == "solo":
         if _tcols[_i].button(_lbl, key=f"soloTab_{_k}", use_container_width=True,
                              type=("primary" if _k == _active else "secondary")):
             ss()["solo_area"] = _k
+            ss()["_scroll_to_top"] = True   # タブ切替時は画面の先頭へ
             st.rerun()
     tab_tt = tab_q = tab_coord = nullcontext()
     _show_tt = (_active == "tt")
@@ -632,6 +633,27 @@ else:
     if _show_coord and not ss().get("result"):
         st.info("まだ生成されていません。「不足分の入力」で『GTFS-JP を生成する』を押すと、"
                 "ここに結果・地図（座標の確認）が表示されます。")
+
+# タブ遷移直後は画面の先頭へスクロール（前タブ下部のスクロール位置を持ち越さない）。
+if ss().pop("_scroll_to_top", False):
+    components.html(
+        """<script>
+        (function () {
+          function toTop() {
+            try {
+              var w = window.parent;
+              w.scrollTo(0, 0);
+              var c = w.document.querySelector(
+                'section.main, [data-testid="stMain"], [data-testid="stMainBlockContainer"], [data-testid="stAppViewContainer"]');
+              if (c) { c.scrollTo(0, 0); }
+            } catch (e) {}
+          }
+          toTop();
+          setTimeout(toTop, 50);
+          setTimeout(toTop, 200);
+        })();
+        </script>""",
+        height=0)
 
 if _show_tt:
     with tab_tt:
@@ -1791,8 +1813,10 @@ if _show_tt:
                     for k in ("result", "confirmed", "anomalies_token"):
                         ss().pop(k, None)
                     # 一人モードは「確定して反映」ボタンで次のタブ（不足分の入力）へ自動遷移。
+                    # 遷移先は画面の先頭から見せる（②の下＝ボタン付近のスクロール位置を持ち越さない）。
                     if _apply_btn and ss().get("work_mode") == "solo":
                         ss()["solo_area"] = "q"
+                        ss()["_scroll_to_top"] = True
                     st.success("時刻表を反映しました。③で条件を入れて生成してください。")
                     st.rerun()
 
