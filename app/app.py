@@ -577,9 +577,10 @@ if ss().get("extract"):
 # Step 1: アップロード → 抽出
 # =====================================================================
 st.header("① 時刻表をアップロード")
-up = st.file_uploader("バス時刻表（.xlsx / PDF / OCR後の .md）— **複数選択できます**",
-                      type=["xlsx", "pdf", "md"], accept_multiple_files=True)
-st.caption("📄 文字が選べるPDF・Excelはそのまま抽出。**画像化PDF（スキャン）**は、"
+up = st.file_uploader("バス時刻表（.xlsx / PDF / Word(.docx) / PowerPoint(.pptx) / OCR後の .md）— **複数選択できます**",
+                      type=["xlsx", "pdf", "docx", "pptx", "md"], accept_multiple_files=True)
+st.caption("📄 文字が選べるPDF・Excelはそのまま抽出。**Word/PowerPoint**は中の**表**をそのまま読み取り"
+           "（時刻表が画像で貼られている場合はOCRに回します）。**画像化PDF（スキャン）**は、"
            "抽出するとアプリ内で**OCRして続行するボタン**が出ます（ターミナル不要）。"
            "**複数のファイル**（路線ごとに分かれた時刻表など）を選ぶと、まとめて1つのGTFS-JPにできます"
            "（②で全路線を割り当て）。")
@@ -749,6 +750,31 @@ def _extract_one(src, ext_out):
     if _pages and len(_pages) > 1:
         return _extract_merge_pages(src, _pages, ext_out)
     return run([SCRIPTS / "extract_timetable_coords.py", src, "-o", ext_out])
+
+
+def _expand_office(src):
+    """Word(.docx)/PowerPoint(.pptx) を既存経路に乗る中間ファイルへ展開して返す。
+    ・時刻表の『表』→ .xlsx（表ごと1ファイル＝複数路線は複数ファイル統合にそのまま乗る）
+    ・表が無く画像貼付のみ → 画像を束ねた .pdf（画像PDF→OCR経路へ）
+    office 以外はそのまま [src]。取り出せなければ [] を返し警告を表示（正しく失敗）。"""
+    low = str(src).lower()
+    if not low.endswith((".docx", ".pptx")):
+        return [src]
+    outdir = WORK / ("office_" + Path(src).stem)
+    rc, so, se = run([SCRIPTS / "office_to_intermediate.py", src, "--outdir", outdir])
+    info = {}
+    try:
+        info = json.loads((so or "").strip().splitlines()[-1])
+    except Exception:
+        info = {}
+    if rc == 0 and info.get("kind") == "xlsx" and info.get("paths"):
+        return [Path(p) for p in info["paths"]]
+    if rc == 0 and info.get("kind") == "pdf" and info.get("path"):
+        return [Path(info["path"])]
+    st.warning(f"『{Path(src).name}』から時刻表を取り出せませんでした。"
+               + (info.get("message") or "")
+               + "（Word/PowerPoint内に時刻表を『表』か『画像』として入れてください）")
+    return []
 
 
 def _is_image_pdf_result(ex):
@@ -1079,11 +1105,17 @@ def _extract_with_overlay(src, msg="時刻表を読み取っています…"):
 SAMPLES = Path(__file__).resolve().parent / "samples"
 _ups = up if isinstance(up, list) else ([up] if up else [])   # 単一/複数どちらでもリスト化
 if st.button("抽出する", type="primary", disabled=(not _ups)) and _ups:
-    _srcs = []
+    _saved = []
     for _f in _ups:
         _p = WORK / _f.name
         _p.write_bytes(_f.getbuffer())
-        _srcs.append(_p)
+        _saved.append(_p)
+    # Word/PowerPoint は中間ファイル(.xlsx/.pdf)へ展開してから既存経路に乗せる。
+    _srcs = []
+    for _p in _saved:
+        _srcs.extend(_expand_office(_p))
+    if not _srcs:
+        st.stop()   # 展開できる時刻表が無い（警告は _expand_office が表示済み）
     if len(_srcs) == 1:
         _extract_with_overlay(_srcs[0])
     else:
