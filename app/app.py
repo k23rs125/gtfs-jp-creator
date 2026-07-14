@@ -599,7 +599,10 @@ if not _mode:
                "同じURLを開けば別の担当が続きから作業できます。")
     st.stop()
 
-# モード決定後：上部に「選び直す」。一人＝3タブを自動作成、複数人＝担当の作業だけ表示。
+# モード決定後：上部に「選び直す」。一人＝タブバーで切替、複数人＝担当のみ表示。
+# 重要：3エリア（時刻表/入力/座標）は常に実行する。③の生成は②で定義される DAY_KEYS や
+# 運休日ウィジェット（hol_syuku, cd_editor 等）に依存するため、②を実行しないと壊れる。
+# そこで st.tabs と同じ「全部描画して非アクティブを CSS で隠す」方式にし、切替はプログラム制御。
 _top1, _top2 = st.columns([1, 3])
 if _top1.button("◀ 選び直す"):
     ss().pop("work_mode", None); st.rerun()
@@ -616,23 +619,24 @@ if _mode == "solo":
             ss()["solo_area"] = _k
             ss()["_scroll_to_top"] = True   # タブ切替時は画面の先頭へ
             st.rerun()
-    tab_tt = tab_q = tab_coord = nullcontext()
-    _show_tt = (_active == "tt")
-    _show_q = (_active == "q")
-    _show_coord = (_active == "coord")
 else:
-    tab_tt = tab_q = tab_coord = nullcontext()
-    _show_tt = (_mode == "tt")
-    _show_q = (_mode == "q")
-    _show_coord = (_mode == "coord")
+    _active = _mode
     _top2.markdown(f"**担当：{_area_label.get(_mode, '')}**（複数人で分担）")
-    # 前工程が未完了の担当を開いたときは、空画面にせず案内を出す（分担の待ち合わせ）。
-    if _show_q and not ss().get("decision_spec"):
+    if _mode == "q" and not ss().get("decision_spec"):
         st.info("まだ「時刻表・路線の割り当て」が終わっていません。"
                 "時刻表担当が①②を終えると、ここで不足分を入力できます。")
-    if _show_coord and not ss().get("result"):
+    if _mode == "coord" and not ss().get("result"):
         st.info("まだ生成されていません。「不足分の入力」で『GTFS-JP を生成する』を押すと、"
                 "ここに結果・地図（座標の確認）が表示されます。")
+# 3エリアを常に実行するためのコンテナ。表示は _active のみ、他は CSS で隠す（実行はする）。
+tab_tt = st.container(key="area_tt")
+tab_q = st.container(key="area_q")
+tab_coord = st.container(key="area_coord")
+_show_tt = _show_q = _show_coord = True
+_hide = "".join(f".st-key-area_{_k}{{display:none !important;}}"
+                for _k in ("tt", "q", "coord") if _k != _active)
+if _hide:
+    st.markdown(f"<style>{_hide}</style>", unsafe_allow_html=True)
 
 # タブ遷移直後は画面の先頭へスクロール（前タブ下部のスクロール位置を持ち越さない）。
 if ss().pop("_scroll_to_top", False):
@@ -641,16 +645,18 @@ if ss().pop("_scroll_to_top", False):
         (function () {
           function toTop() {
             try {
-              var w = window.parent;
+              var w = window.parent, d = w.document;
               w.scrollTo(0, 0);
-              var c = w.document.querySelector(
-                'section.main, [data-testid="stMain"], [data-testid="stMainBlockContainer"], [data-testid="stAppViewContainer"]');
-              if (c) { c.scrollTo(0, 0); }
+              if (d.scrollingElement) { d.scrollingElement.scrollTop = 0; }
+              ['section.main', '[data-testid="stMain"]', '[data-testid="stAppViewContainer"]',
+               '[data-testid="stMainBlockContainer"]', '.main', '.block-container'
+              ].forEach(function (s) {
+                d.querySelectorAll(s).forEach(function (el) { el.scrollTop = 0; });
+              });
             } catch (e) {}
           }
           toTop();
-          setTimeout(toTop, 50);
-          setTimeout(toTop, 200);
+          [30, 120, 300, 600, 1000].forEach(function (t) { setTimeout(toTop, t); });
         })();
         </script>""",
         height=0)
