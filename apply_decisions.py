@@ -301,14 +301,18 @@ def main():
                 fr.append({"fare_id": fid, "route_id": rid, "origin_id": None,
                            "destination_id": None, "contains_id": None})
     elif fares:
+        seen_fid = set()
         for f in fares:
             cat = str(f.get("category") or "").strip()
             pr = f.get("price")
-            if not cat or pr in (None, ""):
+            if not cat or pr in (None, "") or cat in seen_fid:
                 continue
+            seen_fid.add(cat)
+            # payment_method: 0=車内で支払う(後払い) / 1=乗車前に支払う(前払い)。指定なければ 0。
+            pm = 1 if int(f.get("payment_method") or 0) == 1 else 0
             # fare_id に区分名を使う（GTFSは非ASCII可。運賃表で区分が見えるように）
             fa.append({"fare_id": cat, "price": int(pr), "currency_type": "JPY",
-                       "payment_method": 0, "transfers": 0, "agency_id": agency_id})
+                       "payment_method": pm, "transfers": 0, "agency_id": agency_id})
             fr += [{"fare_id": cat, "route_id": r["route_id"], "origin_id": None,
                     "destination_id": None, "contains_id": None} for r in routes]
     else:

@@ -1764,25 +1764,37 @@ if ss().get("decision_spec"):
                                   help="チェックすると③の中に『区間運賃の表（発×着）』が出ます。区間ごとに金額を入れます。")
     with st.form("conditions"):
         # 運賃（入力方法は上の「運賃の入力方法」で選択済み）。金額をここ＝方法選択の直後に入力する。
-        if len(_routes_now) == 1:
-            st.markdown("**運賃（区分別・円。0は未設定。PDF記載は検出して初期入力）**")
-            fc1, fc2, fc3 = st.columns(3)
-            fare_adult = fc1.number_input("大人", min_value=0, value=int(det.get("fare_adult") or 0), step=10, key=f"fa_{tk}")
-            fare_child = fc2.number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"fc_{tk}")
-            fare_disabled = fc3.number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"fd_{tk}")
-        else:
-            fare_adult = fare_child = fare_disabled = 0
-        # 路線別運賃（多路線）。一律ONなら1組だけ入力して全路線へ、OFFなら路線ごとに入力。
+        # 区分別テーブル（単一路線 or 全路線一律）: 区分を自由に追加・削除でき、区分ごとに金額と支払い方法を入れる。
+        fare_cat_df = None
+        _use_cat_table = (len(_routes_now) == 1) or (len(_routes_now) > 1 and uniform_fare)
+        if _use_cat_table:
+            if len(_routes_now) == 1:
+                st.markdown("**運賃（区分別・円。区分は自由に追加・削除できます）**")
+            else:
+                st.markdown("**運賃（全路線一律・区分別・円。区分は自由に追加・削除できます）**")
+            st.caption("末尾の「＋」で区分を追加、行を選んで削除できます（大人／小児のほか シルバー・学生 なども）。"
+                       "**支払い方法**は GTFS標準の「車内で支払う（後払い）」「乗車前に支払う（前払い）」です。"
+                       "**現金とICで金額が違う**ときは、GTFS標準に現金/IC別の欄がないため、"
+                       "区分名を分けて（例：大人 ／ 大人(IC)）それぞれの金額を入れてください。")
+            _fare_base = pd.DataFrame([
+                {"区分": "大人", "金額(円)": int(det.get("fare_adult") or 0), "支払い方法": "車内で支払う（後払い）"},
+                {"区分": "小児", "金額(円)": int(det.get("fare_child") or 0), "支払い方法": "車内で支払う（後払い）"},
+                {"区分": "障がい者", "金額(円)": int(det.get("fare_disabled") or 0), "支払い方法": "車内で支払う（後払い）"},
+            ])
+            fare_cat_df = st.data_editor(
+                _fare_base, hide_index=True, num_rows="dynamic", key=f"farecat_{tk}",
+                use_container_width=True,
+                column_config={
+                    "区分": st.column_config.TextColumn(
+                        "区分", help="例：大人／小児／障がい者／大人(IC)／シルバー", width="medium"),
+                    "金額(円)": st.column_config.NumberColumn("金額(円)", min_value=0, step=10, format="%d"),
+                    "支払い方法": st.column_config.SelectboxColumn(
+                        "支払い方法",
+                        options=["車内で支払う（後払い）", "乗車前に支払う（前払い）"], width="medium"),
+                })
+        # 路線別運賃（多路線・一律OFF）は路線ごとに固定区分で入力。
         rfares_in = {}
-        if len(_routes_now) > 1 and uniform_fare:
-            st.markdown("**運賃（全路線一律・円・0は未設定）**")
-            _uc = st.columns(3)
-            _ua = _uc[0].number_input("大人", min_value=0, value=int(det.get("fare_adult") or 0), step=10, key=f"ufa_{tk}")
-            _uch = _uc[1].number_input("小児", min_value=0, value=int(det.get("fare_child") or 0), step=10, key=f"ufc_{tk}")
-            _ud = _uc[2].number_input("障がい者", min_value=0, value=int(det.get("fare_disabled") or 0), step=10, key=f"ufd_{tk}")
-            for r in _routes_now:
-                rfares_in[r["route_id"]] = (_ua, _uch, _ud)
-        elif len(_routes_now) > 1:
+        if len(_routes_now) > 1 and not uniform_fare:
             st.markdown("**路線ごとの運賃（円・0は未設定）**")
             for r in _routes_now:
                 rid = r["route_id"]; rnm = r.get("route_long_name", rid)
@@ -2053,16 +2065,29 @@ if ss().get("decision_spec"):
                    (("大人", ra), ("小児", rch), ("障がい者", rdi)) if p > 0]
             if lst:
                 route_fares[rid] = lst
-        # 優先順位: 区間運賃 > 路線別運賃 > 全路線一律(区分別)
+        # 区分別運賃（単一路線 or 全路線一律）: テーブルから (区分, 金額, 支払い方法) を組む。
+        # 区分名で一意化（重複名は最初の1行を採用＝重複 fare_id を出さない＝不正GTFS防止）。
+        cat_fares = []
+        if fare_cat_df is not None:
+            _PAY = {"車内で支払う（後払い）": 0, "乗車前に支払う（前払い）": 1}
+            _seen_cat = set()
+            for _, _row in fare_cat_df.iterrows():
+                _cat = str(_row.get("区分") or "").strip()
+                try:
+                    _pr = int(float(_row.get("金額(円)") or 0))
+                except (ValueError, TypeError):
+                    _pr = 0
+                if _cat and _pr > 0 and _cat not in _seen_cat:
+                    _seen_cat.add(_cat)
+                    cat_fares.append({"category": _cat, "price": _pr,
+                                      "payment_method": _PAY.get(str(_row.get("支払い方法") or ""), 0)})
+        # 優先順位: 区間運賃 > 路線別運賃 > 区分別（単一/一律）
         if fare_matrix:
             spec["fare_matrix"] = fare_matrix
         elif route_fares:
             spec["route_fares"] = route_fares
-        else:
-            fares = [{"category": c, "price": int(p)} for c, p in
-                     (("大人", fare_adult), ("小児", fare_child), ("障がい者", fare_disabled)) if p > 0]
-            if fares:
-                spec["fares"] = fares
+        elif cat_fares:
+            spec["fares"] = cat_fares
         # 乗降制約（降車専用＝乗車不可）。ブロック単位で限定（往路は影響しない）。
         boarding = [{"type": "drop_off_only", "block": bi, "stops": sel}
                     for bi, sel in board_sel.items()]
@@ -2085,8 +2110,7 @@ if ss().get("decision_spec"):
         minimal = (not ag_name.strip() and not ag_id.strip() and not ag_url.strip()
                    and not ag_phone.strip() and not ag_official.strip() and not ag_zip.strip()
                    and not ag_addr.strip() and not ag_pres_pos.strip() and not ag_pres_name.strip()
-                   and fare_adult == 0 and fare_child == 0
-                   and fare_disabled == 0 and not route_fares
+                   and not cat_fares and not route_fares
                    and not (zone_fare and fare_matrix)
                    and not start.strip() and not end.strip()
                    and not (hol_syuku or hol_nenmatsu or hol_obon) and not _cal_dates)
