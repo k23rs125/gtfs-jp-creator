@@ -1818,13 +1818,15 @@ with tab_q:
                 else:
                     st.markdown("**運賃（全路線一律・区分別・円。区分は自由に追加・削除できます）**")
                 st.caption("末尾の「＋」で区分を追加、行を選んで削除できます（大人／小児のほか シルバー・学生 なども）。"
-                           "**支払い方法**は GTFS標準の「車内で支払う（後払い）」「乗車前に支払う（前払い）」です。"
-                           "**現金とICで金額が違う**ときは、GTFS標準に現金/IC別の欄がないため、"
-                           "区分名を分けて（例：大人 ／ 大人(IC)）それぞれの金額を入れてください。")
+                           "**支払い方法**は GTFS標準の payment_method です。"
+                           "『車内で支払う』＝乗車中に支払う（**乗車時の前払い・降車時の後払いはどちらもこちら**。"
+                           "日本のバスはほぼこれ）／『乗車前に支払う』＝改札・事前購入など乗る前に支払う場合。")
+                st.markdown(":red[**現金とICで金額が違うとき**は、GTFS標準に現金/IC別の欄がないため、"
+                            "区分名を分けて（例：大人 ／ 大人(IC)）それぞれの金額を入れてください。]")
                 _fare_base = pd.DataFrame([
-                    {"区分": "大人", "金額(円)": int(det.get("fare_adult") or 0), "支払い方法": "車内で支払う（後払い）"},
-                    {"区分": "小児", "金額(円)": int(det.get("fare_child") or 0), "支払い方法": "車内で支払う（後払い）"},
-                    {"区分": "障がい者", "金額(円)": int(det.get("fare_disabled") or 0), "支払い方法": "車内で支払う（後払い）"},
+                    {"区分": "大人", "金額(円)": int(det.get("fare_adult") or 0), "支払い方法": "車内で支払う（乗車時／降車時）"},
+                    {"区分": "小児", "金額(円)": int(det.get("fare_child") or 0), "支払い方法": "車内で支払う（乗車時／降車時）"},
+                    {"区分": "障がい者", "金額(円)": int(det.get("fare_disabled") or 0), "支払い方法": "車内で支払う（乗車時／降車時）"},
                 ])
                 fare_cat_df = st.data_editor(
                     _fare_base, hide_index=True, num_rows="dynamic", key=f"farecat_{tk}",
@@ -1835,7 +1837,7 @@ with tab_q:
                         "金額(円)": st.column_config.NumberColumn("金額(円)", min_value=0, step=10, format="%d"),
                         "支払い方法": st.column_config.SelectboxColumn(
                             "支払い方法",
-                            options=["車内で支払う（後払い）", "乗車前に支払う（前払い）"], width="medium"),
+                            options=["車内で支払う（乗車時／降車時）", "乗車前に支払う（改札・事前購入）"], width="medium"),
                     })
             # 路線別運賃（多路線・一律OFF）は路線ごとに固定区分で入力。
             rfares_in = {}
@@ -2114,7 +2116,7 @@ with tab_q:
             # 区分名で一意化（重複名は最初の1行を採用＝重複 fare_id を出さない＝不正GTFS防止）。
             cat_fares = []
             if fare_cat_df is not None:
-                _PAY = {"車内で支払う（後払い）": 0, "乗車前に支払う（前払い）": 1}
+                _PAY = {"車内で支払う（乗車時／降車時）": 0, "乗車前に支払う（改札・事前購入）": 1}
                 _seen_cat = set()
                 for _, _row in fare_cat_df.iterrows():
                     _cat = str(_row.get("区分") or "").strip()
