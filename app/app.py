@@ -1433,11 +1433,16 @@ with tab_tt:
                 "対象ダイヤ": st.column_config.SelectboxColumn(
                     "対象ダイヤ", options=_svc_opts, default="全ダイヤ",
                     help="この日を効かせる運行日（②の曜日）。全ダイヤ＝すべてのダイヤに適用")})
-        _cdp1, _cdp2, _cdp3 = st.columns([1, 1.4, 1.4])
-        cd_use_period = _cdp1.checkbox("期間で運休", value=False, key=f"cdp_{_htk}",
-                                       help="下の開始〜終了を毎日運休に（季節運休など）")
-        cd_ps = _cdp2.text_input("運休期間 開始(YYYYMMDD)", value="", key=f"cdps_{_htk}")
-        cd_pe = _cdp3.text_input("運休期間 終了(YYYYMMDD)", value="", key=f"cdpe_{_htk}")
+        cd_use_period = st.checkbox("期間で運休", value=False, key=f"cdp_{_htk}",
+                                    help="連続した期間をまるごと運休に（工事・季節運休など）。"
+                                         "チェックすると開始・終了の入力欄が出ます。")
+        cd_ps, cd_pe = "", ""
+        if cd_use_period:
+            _cdp2, _cdp3 = st.columns(2)
+            cd_ps = _cdp2.text_input("運休期間 開始(YYYYMMDD)", value="", key=f"cdps_{_htk}",
+                                     help="西暦8桁（例 20260901）")
+            cd_pe = _cdp3.text_input("運休期間 終了(YYYYMMDD)", value="", key=f"cdpe_{_htk}",
+                                     help="西暦8桁（例 20260907）")
 
         # 割り当て表から decision_spec を構築（同じ路線名のブロックを1路線にまとめる）
         name_blocks, block_dir, headsign, block_days = {}, {}, {}, {}
