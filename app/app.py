@@ -1168,6 +1168,11 @@ if _show_tt:
                 except Exception as _e:
                     st.warning(f"AI読み探索はスキップしました（{_e}）。④で個別に実行できます。")
             st.success("完了しました。" if rc == 0 else "完了（警告/エラーあり）。")
+            # 一人モードは生成が成功したら「結果・座標の確認」タブへ自動遷移（先頭から表示）。
+            if rc == 0 and ss().get("work_mode") == "solo":
+                ss()["solo_area"] = "coord"
+                ss()["_scroll_to_top"] = True
+                st.rerun()
 
 
         def _with_overlay(fn, msg="時刻表を読み取っています…"):
