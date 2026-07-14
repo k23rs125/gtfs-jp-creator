@@ -604,9 +604,21 @@ _top1, _top2 = st.columns([1, 3])
 if _top1.button("◀ 選び直す"):
     ss().pop("work_mode", None); st.rerun()
 if _mode == "solo":
-    _top2.caption("一人モード：3つのタブを順に進めてください（時刻表 → 入力 → 座標）。")
-    tab_tt, tab_q, tab_coord = st.tabs([_l for _, _l in WORK_AREAS])
-    _show_tt = _show_q = _show_coord = True
+    _top2.caption("一人モード：下のタブを順に進めてください（時刻表 → 入力 → 座標）。"
+                  "時刻表の確定や生成で、次のタブへ自動で進みます。")
+    _active = ss().get("solo_area", "tt")
+    if _active not in ("tt", "q", "coord"):
+        _active = "tt"
+    _tcols = st.columns(3)
+    for _i, (_k, _lbl) in enumerate(WORK_AREAS):
+        if _tcols[_i].button(_lbl, key=f"soloTab_{_k}", use_container_width=True,
+                             type=("primary" if _k == _active else "secondary")):
+            ss()["solo_area"] = _k
+            st.rerun()
+    tab_tt = tab_q = tab_coord = nullcontext()
+    _show_tt = (_active == "tt")
+    _show_q = (_active == "q")
+    _show_coord = (_active == "coord")
 else:
     tab_tt = tab_q = tab_coord = nullcontext()
     _show_tt = (_mode == "tt")
@@ -1747,7 +1759,8 @@ if _show_tt:
                         + " が残っています。直してから反映するのがおすすめです（このまま反映も可）。")
                 # 修正欄で Enter を押すと on_change で _tt_apply_req が立つ → ボタンと同じ反映を実行。
                 _apply_req = ss().pop("_tt_apply_req", False)
-                if st.button("この時刻表で確定して反映", type="primary") or _apply_req:
+                _apply_btn = st.button("この時刻表で確定して反映", type="primary")
+                if _apply_btn or _apply_req:
                     for b in blocks_t:
                         bi = b.get("block_index")
                         if bi not in edited_blocks:
@@ -1773,8 +1786,13 @@ if _show_tt:
                                 newcells.append({"seq": len(newcells) + 1, "num": None, "name": nm,
                                                  "time": f"{int(m.group(1)):02d}:{m.group(2)}:00", "reserve": False})
                             t["cells"] = newcells; t["n_stops"] = len(newcells)
-                    for k in ("decision_spec", "result", "confirmed", "anomalies_token"):
+                    # decision_spec は上の割り当て(現在値)から作成済みなので保持。
+                    # 生成結果・確定座標だけ無効化（時刻表が変わったので再生成が要る）。
+                    for k in ("result", "confirmed", "anomalies_token"):
                         ss().pop(k, None)
+                    # 一人モードは「確定して反映」ボタンで次のタブ（不足分の入力）へ自動遷移。
+                    if _apply_btn and ss().get("work_mode") == "solo":
+                        ss()["solo_area"] = "q"
                     st.success("時刻表を反映しました。③で条件を入れて生成してください。")
                     st.rerun()
 
