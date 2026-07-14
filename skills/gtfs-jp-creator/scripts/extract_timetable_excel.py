@@ -44,7 +44,9 @@ except ImportError:
     sys.exit(1)
 
 TIME_RE = re.compile(r'^\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*$')
-ICON_PREFIX = re.compile(r'^[店駅　\s]+')
+# 先頭の空白(全角・半角)だけを落とす。かつて 店/駅 も剥がしていたが、
+# 「駅前」「〇〇店前」等の実在停留所名を壊すため除外(正しいデータを最優先)。
+ICON_PREFIX = re.compile(r'^[　\s]+')
 DIRECTION_SUFFIX = re.compile(r'[（(](?:[東西南北]行き?|上り|下り|のりば\d*|\d+番のりば)[）)]\s*$')
 
 
