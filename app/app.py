@@ -573,13 +573,54 @@ if ss().get("extract"):
     st.caption("💾 作業は自動保存されています。**このページのURLをブックマーク**しておくと、"
                "タブを閉じても同じURLを開けば『続きから復元』できます（他の人の作業とは分離）。")
 
-st.markdown("#### 作業タブ（左から順に：時刻表・路線 → 不足分の入力 → 結果・座標の確認）")
-st.caption("一人で使うときは左のタブから順に進めてください。複数人で分担するときは、"
-           "担当のタブを開いて作業します（例：時刻表担当／事業者情報担当／座標担当）。"
-           "作業は自動保存され、同じURLを開けば続きから再開できます。")
-tab_tt, tab_q, tab_coord = st.tabs(
-    ["🕐 時刻表・路線の割り当て", "📝 不足分の入力（PDF/Excelに無い項目）", "🗺 結果・座標の確認"])
-with tab_tt:
+# ── 作業の選び方（最初に1画面で選ぶ）→ 一人は3作業を切替、複数人は担当の作業だけ表示 ──
+WORK_AREAS = [("tt", "🕐 時刻表・路線の割り当て"),
+              ("q", "📝 不足分の入力（PDF/Excelに無い項目）"),
+              ("coord", "🗺 結果・座標の確認")]
+_area_label = dict(WORK_AREAS)
+_mode = ss().get("work_mode")
+if _mode not in ("solo", "tt", "q", "coord"):
+    _mode = None
+
+if not _mode:
+    # 選択画面（1画面）。ここで進め方を選ぶまで下の作業は表示しない。
+    st.markdown("### まず、作業の進め方を選んでください")
+    st.caption("一人で全部進めるか、複数人で分担するかを選びます。あとで「◀ 選び直す」で変更できます。")
+    if st.button("🧑 一人で全部進める（時刻表 → 入力 → 座標の順）", type="primary",
+                 use_container_width=True):
+        ss()["work_mode"] = "solo"; st.rerun()
+    st.markdown("**または、複数人で分担する場合は担当を選択：**")
+    _pcols = st.columns(3)
+    for _i, (_k, _lbl) in enumerate(WORK_AREAS):
+        if _pcols[_i].button(_lbl, key=f"pick_{_k}", use_container_width=True):
+            ss()["work_mode"] = _k; st.rerun()
+    st.caption("分担のときは、選んだ担当の作業画面だけが表示されます。作業は自動保存され、"
+               "同じURLを開けば別の担当が続きから作業できます。")
+    st.stop()
+
+# モード決定後：上部に「選び直す」＋（一人のときは）作業の切り替え
+_top1, _top2 = st.columns([1, 3])
+if _top1.button("◀ 選び直す"):
+    ss().pop("work_mode", None); st.rerun()
+if _mode == "solo":
+    _sel = _top2.radio("作業を切り替え", [l for _, l in WORK_AREAS], horizontal=True,
+                       label_visibility="collapsed", key="solo_area")
+    _active = next(k for k, l in WORK_AREAS if l == _sel)
+else:
+    _active = _mode
+    _top2.markdown(f"**担当：{_area_label.get(_mode, '')}**（複数人で分担）")
+_show_tt = (_active == "tt")
+_show_q = (_active == "q")
+_show_coord = (_active == "coord")
+# 前工程が未完了の担当を開いたときは、空画面にせず案内を出す（分担の待ち合わせ）。
+if _show_q and not ss().get("decision_spec"):
+    st.info("まだ「時刻表・路線の割り当て」が終わっていません。"
+            "時刻表担当が①②を終えると、ここで不足分を入力できます。")
+if _show_coord and not ss().get("result"):
+    st.info("まだ生成されていません。「不足分の入力」で『GTFS-JP を生成する』を押すと、"
+            "ここに結果・地図（座標の確認）が表示されます。")
+
+if _show_tt:
     # =====================================================================
     # Step 1: アップロード → 抽出
     # =====================================================================
@@ -1735,7 +1776,7 @@ with tab_tt:
                 st.success("時刻表を反映しました。③で条件を入れて生成してください。")
                 st.rerun()
 
-with tab_q:
+if _show_q:
     # =====================================================================
     # Step 3: PDF/Excelに無い項目だけを後から質問（自動確認の後）
     # =====================================================================
@@ -2335,7 +2376,7 @@ with tab_q:
             st.markdown(f"{icon} **{label}** — {detail}")
 
 
-with tab_coord:
+if _show_coord:
     # =====================================================================
     # Step 4: 結果（検証・地図・ダウンロード）
     # =====================================================================
