@@ -678,11 +678,20 @@ if _mode == "solo":
 else:
     st.info(f"🔑 引き継ぎコード：:red[**{SID}**] — 自分の担当が終わったら、この8桁を次の担当に伝えてください"
             "（次の担当は最初の画面の「引き継ぎコードで続きから開く」に入力）。")
-# 複数人の時刻表担当が「確定して反映」した直後は、完了＋引き継ぎ案内を大きく出す。
-if _mode == "tt" and ss().get("_tt_confirmed"):
-    st.success(f"✅ 時刻表・路線の割り当てが完了しました。引き継ぎコード :red[**{SID}**] を"
-               "「事業者情報担当」に伝えてください（次の担当は最初の画面の"
-               "『🔑 引き継ぎコードで続きから開く』にこのコードを入力します）。")
+# 複数人の時刻表担当が「確定して反映」した直後は、引き継ぎコードを“画面（ダイアログ）”で大きく出す。
+@st.dialog("✅ 時刻表・路線の割り当てが完了しました")
+def _handoff_dialog(code):
+    st.markdown("次の担当（**事業者情報担当**）に、下の **引き継ぎコード** を伝えてください。")
+    st.markdown(f"# :red[{code}]")
+    st.caption("↓ 右のアイコン（📋）でコピーできます")
+    st.code(code, language=None)          # コピーボタン付き
+    st.markdown("次の担当は、最初の画面の **「🔑 引き継ぎコードで続きから開く」** に"
+                "このコードを入力すると、この作業を引き継げます。")
+    if st.button("閉じる", type="primary", use_container_width=True):
+        st.rerun()                        # 右上の × でも閉じられます
+
+if ss().pop("_show_handoff_dialog", False):
+    _handoff_dialog(SID)
 # 3エリアを常に実行するためのコンテナ。表示は _active のみ、他は CSS で隠す（実行はする）。
 tab_tt = st.container(key="area_tt")
 tab_q = st.container(key="area_q")
@@ -1884,8 +1893,8 @@ if _show_tt:
                         ss()["solo_area"] = "q"
                         ss()["_scroll_to_top"] = True
                     elif _apply_btn:
-                        # 複数人（時刻表担当）：確定＝自分の担当が完了。引き継ぎ案内を出す。
-                        ss()["_tt_confirmed"] = True
+                        # 複数人（時刻表担当）：確定＝自分の担当が完了。引き継ぎ画面を出す。
+                        ss()["_show_handoff_dialog"] = True
                     st.success("時刻表を反映しました。③で条件を入れて生成してください。")
                     st.rerun()
 
