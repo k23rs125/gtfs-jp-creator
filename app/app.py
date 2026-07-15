@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -427,25 +428,182 @@ def _load_by_code(code):
         return False, f"読み込みに失敗しました: {e}"
 
 
+# =====================================================================
+# 同時並行（複数人が同じプロジェクトを担当ごとに並行編集）の土台
+#   ・共有プロジェクト＝固定コード(SID)。全員が同じコードで同じ保存を共有。
+#   ・担当ごとに「自分の担当部分だけ」保存（部分マージ）＝別担当は衝突しない。
+#   ・担当は同時に一人（ソフトロック）。ロックはハートビートで生存確認、放置は自動解放。
+#   ・各自は毎回、他担当の最新を読み込む＝常に最新から作業（点3対策）。
+# =====================================================================
+# セッションごとの利用者ID（プロジェクトコードSIDとは別。ロックの持ち主判定に使う）。
+if "user_id" not in ss():
+    import secrets as _secrets
+    ss()["user_id"] = _secrets.token_hex(3)
+USER_ID = ss()["user_id"]
+
+# 担当(role)ごとに「所有する保存キー」。別担当のキーには触れない＝部分マージで衝突回避。
+SECTION_KEYS = {
+    "tt": ["extract", "extract_token", "decision_spec", "detected",
+           "source_display", "sources_all"],
+    "q": ["fare_matrix_doc"],                      # ＋ form_inputs(③入力) は別途
+    "coord": ["confirmed"],
+}
+GEN_KEYS = ["result"]           # 生成物（生成した人が書く共有物）
+LOCK_TTL = 90                   # 秒。これを超えてハートビートが無い担当ロックは解放可能。
+
+
+def _owned_keys(role):
+    if role == "solo":
+        return list(SAVE_KEYS)                       # 一人モードは全部所有
+    return SECTION_KEYS.get(role, [])
+
+
+def _shared_lock_path():
+    return AUTOSAVE_DIR / f"session_{SID}.lock"
+
+
+class _file_guard:
+    """共有保存ファイルの read-modify-write を直列化する簡易ロック（.lock を排他生成）。
+    3人程度・低頻度なら十分。取得できなくてもタイムアウトで諦めて処理は続ける。"""
+    def __init__(self, timeout=5.0):
+        self.timeout = timeout
+        self.fd = None
+
+    def __enter__(self):
+        AUTOSAVE_DIR.mkdir(parents=True, exist_ok=True)
+        p = _shared_lock_path()
+        deadline = time.time() + self.timeout
+        while True:
+            try:
+                self.fd = os.open(str(p), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                return self
+            except FileExistsError:
+                # 古いロック（>15秒）は奪う（クラッシュ残骸対策）
+                try:
+                    if time.time() - p.stat().st_mtime > 15:
+                        os.unlink(str(p)); continue
+                except OSError:
+                    pass
+                if time.time() > deadline:
+                    return self          # 諦めてロック無しで続行
+                time.sleep(0.05)
+
+    def __exit__(self, *a):
+        try:
+            if self.fd is not None:
+                os.close(self.fd)
+            os.unlink(str(_shared_lock_path()))
+        except OSError:
+            pass
+
+
+def _read_shared():
+    try:
+        return json.loads(AUTOSAVE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_shared_atomic(data):
+    tmp = AUTOSAVE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(str(tmp), str(AUTOSAVE_FILE))
+
+
+def _heartbeat_and_locks(role):
+    """自分の担当ロックを更新（ハートビート）し、現在の全ロック状況を返す。
+    role が None/solo のときはロックしない。返り値: {role: {owner,name,ts}}。"""
+    with _file_guard():
+        shared = _read_shared()
+        locks = shared.get("_locks", {})
+        now = time.time()
+        # 期限切れロックを掃除
+        for r in list(locks):
+            if now - locks[r].get("ts", 0) > LOCK_TTL:
+                del locks[r]
+        if role in ("tt", "q", "coord"):
+            cur = locks.get(role)
+            if (not cur) or cur.get("owner") == USER_ID:
+                locks[role] = {"owner": USER_ID,
+                               "name": ss().get("user_name", "") or "(名前未設定)",
+                               "ts": now}
+        shared["_locks"] = locks
+        _write_shared_atomic(shared)
+        return locks
+
+
+def _release_lock(role):
+    with _file_guard():
+        shared = _read_shared()
+        locks = shared.get("_locks", {})
+        if locks.get(role, {}).get("owner") == USER_ID:
+            del locks[role]
+            shared["_locks"] = locks
+            _write_shared_atomic(shared)
+
+
+def _reload_others(role):
+    """他担当が保存した最新データを session_state に取り込む（自分の所有キーは触らない）。
+    ＝常に最新から作業する（点3対策）。フォーム入力(form_inputs)も自分の担当以外を反映。"""
+    if not AUTOSAVE_FILE.exists():
+        return
+    shared = _read_shared()
+    owned = set(_owned_keys(role))
+    for k, v in shared.items():
+        if k in ("_locks", "form_inputs", "_out_ver"):
+            continue
+        if k in owned:
+            continue
+        # 生成物は生成した最新を全員が見る
+        if v is not None:
+            ss()[k] = v
+    # ③フォーム入力: q担当以外は反映（q担当は自分が編集中なので上書きしない）
+    if role != "q":
+        for k, v in (shared.get("form_inputs") or {}).items():
+            ss()[k] = v
+    # 生成物(out/)が他者により更新されていれば取り込む
+    _ver = shared.get("_out_ver")
+    if _ver and ss().get("_seen_out_ver") != _ver:
+        _restore_out(SID)
+        ss()["_seen_out_ver"] = _ver
+
+
 def autosave():
+    """担当ごとの部分マージ保存。自分の担当が所有するキーだけを共有ファイルへ書き込み、
+    別担当のキーは保持する＝同時並行でも別担当は衝突しない。"""
     if not ss().get("extract"):
         return
+    if ss().get("_readonly_role"):     # 他の人が編集中の担当は保存しない（上書き防止）
+        return
+    role = ss().get("work_mode") or "solo"
     try:
-        payload = {k: ss().get(k) for k in SAVE_KEYS if ss().get(k) is not None}
-        # ③の入力欄（事業者/運賃/有効期間 等。キーは *_<extract_token>）も保存して
-        # 再起動後に再入力せず続けられるようにする。単純値のみ（data_editor等の複雑値は除外）。
-        tk = ss().get("extract_token", "")
-        if tk:
-            forms = {k: v for k, v in ss().items()
-                     if isinstance(k, str) and k.endswith("_" + tk)
-                     and isinstance(v, (str, int, float, bool))}
-            if forms:
-                payload["form_inputs"] = forms
-        AUTOSAVE_DIR.mkdir(parents=True, exist_ok=True)
-        AUTOSAVE_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        # 生成物(out/)は変更があった時だけ保存（毎回コピーは重いのでフラグで制御）。
+        with _file_guard():
+            shared = _read_shared()
+            for k in _owned_keys(role):        # 自分の所有キーだけ更新
+                v = ss().get(k)
+                if v is not None:
+                    shared[k] = v
+            # ③の入力欄（キーは *_<extract_token>）は q担当 or solo が所有。単純値のみ。
+            tk = ss().get("extract_token", "")
+            if tk and role in ("q", "solo"):
+                forms = {k: v for k, v in ss().items()
+                         if isinstance(k, str) and k.endswith("_" + tk)
+                         and isinstance(v, (str, int, float, bool))}
+                base = shared.get("form_inputs") or {}
+                base.update(forms)
+                shared["form_inputs"] = base
+            # 生成物(result)は生成した人(q/coord/solo)が書く共有物。
+            if role in ("q", "coord", "solo") and ss().get("result") is not None:
+                shared["result"] = ss()["result"]
+            _write_shared_atomic(shared)
+        # 生成物ファイル(out/)は変更時だけ保存。バージョンを上げて他担当へ通知。
         if ss().pop("_out_dirty", False):
             _persist_out()
+            with _file_guard():
+                shared = _read_shared()
+                shared["_out_ver"] = time.time()
+                _write_shared_atomic(shared)
+                ss()["_seen_out_ver"] = shared["_out_ver"]
     except Exception:
         pass
 
@@ -621,11 +779,17 @@ if not _mode:
                  use_container_width=True):
         ss()["work_mode"] = "solo"; st.rerun()
     st.markdown("**または、複数人で分担する場合は担当を選択：**")
+    _nm = st.text_input("あなたのお名前（分担時に『誰が編集中か』の表示に使います）",
+                        value=ss().get("user_name", ""), key="_name_in", placeholder="例: 田中")
+    if _nm.strip():
+        ss()["user_name"] = _nm.strip()
     _pcols = st.columns(3)
     for _i, (_k, _lbl) in enumerate(WORK_AREAS):
         if _pcols[_i].button(_lbl, key=f"pick_{_k}", use_container_width=True):
             ss()["work_mode"] = _k; st.rerun()
-    st.caption("分担のときは、選んだ担当の作業画面だけが表示されます。")
+    st.caption("**別々の担当は同時に並行**できます（時刻表担当と事業者情報担当は同時進行OK）。"
+               "同じ担当は同時に一人だけ（他の人には読み取り専用と表示）。"
+               "全員が下の**同じ引き継ぎコード**を使えば、同じプロジェクトを分担できます。")
     # ── 複数人の受け渡し：前の担当から受け取った「引き継ぎコード」でそのプロジェクトを開く ──
     st.markdown("---")
     with st.expander("🔑 引き継ぎコードで続きから開く（別の担当から受け取ったコードを入力）",
@@ -649,6 +813,8 @@ if not _mode:
 # そこで st.tabs と同じ「全部描画して非アクティブを CSS で隠す」方式にし、切替はプログラム制御。
 _top1, _top2 = st.columns([1, 3])
 if _top1.button("◀ 選び直す"):
+    if _mode in ("tt", "q", "coord"):
+        _release_lock(_mode)      # 担当ロックを解放（他の人が入れるように）
     ss().pop("work_mode", None); st.rerun()
 if _mode == "solo":
     _top2.caption("一人モード：下のタブを順に進めてください（時刻表 → 入力 → 座標）。"
@@ -665,7 +831,28 @@ if _mode == "solo":
             st.rerun()
 else:
     _active = _mode
-    _top2.markdown(f"**担当：{_area_label.get(_mode, '')}**（複数人で分担）")
+    # --- 同時並行: 他担当の最新を取り込み＋自分の担当ロック（担当は同時に一人）---
+    _reload_others(_mode)
+    _locks = _heartbeat_and_locks(_mode)
+    _mylock = _locks.get(_mode, {})
+    _readonly = bool(_mylock) and _mylock.get("owner") != USER_ID
+    ss()["_readonly_role"] = _readonly
+    _who = _mylock.get("name", "")
+    if _readonly:
+        _top2.markdown(f"**担当：{_area_label.get(_mode,'')}** — 🔒 :red[**{_who} さんが編集中（読み取り専用）**]")
+    else:
+        _top2.markdown(f"**担当：{_area_label.get(_mode,'')}**（あなたが編集中）")
+    _others = [f"{_area_label[r]}：{_locks[r].get('name','?')}" for r in ("tt", "q", "coord")
+               if r in _locks and r != _mode]
+    if _others:
+        st.caption("👥 いま作業中の担当 — " + " ／ ".join(_others)
+                   + "（別々の担当なので並行して進められます）")
+    if st.button("🔄 最新の状況に更新", key="_refresh_now"):
+        st.rerun()
+    if _readonly:
+        st.warning(f"この担当は今 **{_who} さん** が編集中のため **読み取り専用**です"
+                   "（あなたの変更は保存されません）。空くまで待つか、上の『◀ 選び直す』で"
+                   "別の担当を選んでください。")
     if _mode == "q" and not ss().get("decision_spec"):
         st.info("まだ「時刻表・路線の割り当て」が終わっていません。"
                 "時刻表担当が①②を終えると、ここで不足分を入力できます。")
