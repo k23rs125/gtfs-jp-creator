@@ -595,6 +595,7 @@ def autosave():
             # 生成物(result)は生成した人(q/coord/solo)が書く共有物。
             if role in ("q", "coord", "solo") and ss().get("result") is not None:
                 shared["result"] = ss()["result"]
+            shared["_data_ver"] = time.time()      # データ版数（同期の変化検知に使う）
             _write_shared_atomic(shared)
         # 生成物ファイル(out/)は変更時だけ保存。バージョンを上げて他担当へ通知。
         if ss().pop("_out_dirty", False):
@@ -604,8 +605,18 @@ def autosave():
                 shared["_out_ver"] = time.time()
                 _write_shared_atomic(shared)
                 ss()["_seen_out_ver"] = shared["_out_ver"]
+        # 自分の保存直後は「変化なし」と記録して、ライブ同期が自分の保存で再実行しないように。
+        ss()["_last_sync_sig"] = _sync_signature(shared)
     except Exception:
         pass
+
+
+def _sync_signature(shared):
+    """同期の変化検知シグネチャ。データ版数・生成物版数・『どの担当を誰が持つか』で決まる
+    （ロックのハートビート時刻は含めない＝在席更新だけでは再同期しない）。"""
+    locks = shared.get("_locks") or {}
+    return (shared.get("_data_ver"), shared.get("_out_ver"),
+            tuple(sorted((r, l.get("owner", "")) for r, l in locks.items())))
 
 
 def _restore_label(data, f):
@@ -859,6 +870,20 @@ else:
     if _mode == "coord" and not ss().get("result"):
         st.info("まだ生成されていません。「不足分の入力」で『GTFS-JP を生成する』を押すと、"
                 "ここに結果・地図（座標の確認）が表示されます。")
+    # --- 常に同期: 他担当の保存・ロック変化を数秒ごとに検知し、変化があった時だけ自動で最新に更新 ---
+    ss()["_last_sync_sig"] = _sync_signature(_read_shared())
+    try:
+        @st.fragment(run_every=4)
+        def _live_sync():
+            r = ss().get("work_mode")
+            if r not in ("tt", "q", "coord"):
+                return
+            _heartbeat_and_locks(r)          # 自分のロックを生かし続ける／期限切れは掃除
+            if _sync_signature(_read_shared()) != ss().get("_last_sync_sig"):
+                st.rerun()                   # 変化があった時だけ全体を再実行（＝ライブ同期）
+        _live_sync()
+    except Exception:
+        pass
 # 引き継ぎコード（＝このプロジェクトのコード）。複数人の受け渡しに使う。
 if _mode == "solo":
     st.caption(f"🔑 引き継ぎコード：:red[**{SID}**]（別のPCから続きを開くときに使えます）")
