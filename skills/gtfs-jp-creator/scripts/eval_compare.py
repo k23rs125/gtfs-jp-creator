@@ -25,7 +25,9 @@ License: Apache 2.0
 import argparse
 import csv
 import json
+import math
 import re
+import statistics
 import sys
 import unicodedata
 import zipfile
@@ -122,6 +124,21 @@ def read_csv(path: Path) -> list[dict]:
         return []
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
+
+
+def resolve_gtfs_root(base: Path) -> Path:
+    """GTFSの.txtが入っている実フォルダを返す。公式zipは
+    『コミバスGTFSデータ（…）/routes.txt』のように1階層ネストしていることが多いので、
+    直下に無ければサブフォルダを1段だけ探す。"""
+    if (base / "stops.txt").exists() or (base / "routes.txt").exists():
+        return base
+    try:
+        for sub in sorted(p for p in base.iterdir() if p.is_dir()):
+            if (sub / "stops.txt").exists() or (sub / "routes.txt").exists():
+                return sub
+    except OSError:
+        pass
+    return base
 
 
 # ----------------------------------------------------------------------
@@ -288,6 +305,64 @@ def compare_stop_times(off_dir: Path, our_dir: Path) -> dict:
     }
 
 
+def _haversine_m(lat1, lon1, lat2, lon2) -> float:
+    """2点間の距離（メートル）。座標精度の核心指標に使う。"""
+    R = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    return 2 * R * math.asin(min(1.0, math.sqrt(a)))
+
+
+def compare_coords(off_dir: Path, our_dir: Path) -> dict:
+    """名前が一致する停留所どうしで、当方座標と公式座標の距離（m）を測る。
+    ＝『推測/補完した座標が公式の真値からどれだけズレているか』を定量化する（核心指標）。
+    中央値・平均・p90・最大、および 50m/100m 以内率、ワースト10を返す。"""
+    def build(stops):
+        m = {}
+        for s in stops:
+            nm = normalize_name(s.get("stop_name", ""))
+            try:
+                lat = float(s.get("stop_lat", ""))
+                lon = float(s.get("stop_lon", ""))
+            except (TypeError, ValueError):
+                continue
+            if nm and nm not in m:
+                m[nm] = (lat, lon)
+        return m
+
+    off = build(read_csv(off_dir / "stops.txt"))
+    ours = build(read_csv(our_dir / "stops.txt"))
+    common = sorted(set(off) & set(ours))
+    dists, per = [], []
+    for nm in common:
+        d = _haversine_m(off[nm][0], off[nm][1], ours[nm][0], ours[nm][1])
+        dists.append(d)
+        per.append({"stop_name": nm, "dist_m": round(d, 1)})
+    ds = sorted(dists)
+
+    def pctl(p):
+        if not ds:
+            return None
+        i = min(len(ds) - 1, int(round(p / 100 * (len(ds) - 1))))
+        return round(ds[i], 1)
+
+    n = len(dists)
+    return {
+        "matched_with_coords": n,
+        "median_m": round(statistics.median(dists), 1) if dists else None,
+        "mean_m": round(statistics.mean(dists), 1) if dists else None,
+        "p90_m": pctl(90),
+        "max_m": round(max(dists), 1) if dists else None,
+        "within_50m": sum(1 for d in dists if d <= 50),
+        "within_100m": sum(1 for d in dists if d <= 100),
+        "within_50m_rate": round(sum(1 for d in dists if d <= 50) / max(n, 1) * 100, 1),
+        "within_100m_rate": round(sum(1 for d in dists if d <= 100) / max(n, 1) * 100, 1),
+        "worst": sorted(per, key=lambda x: -x["dist_m"])[:10],
+    }
+
+
 def compare_calendar(off_dir: Path, our_dir: Path) -> dict:
     off = read_csv(off_dir / "calendar.txt")
     ours = read_csv(our_dir / "calendar.txt")
@@ -346,6 +421,20 @@ def generate_markdown_report(results: dict) -> str:
     md.append(f"| stop_times | {st['official_count']} | {st['our_count']} | {st['matched_pairs']} | **{st['match_rate_vs_official']}%** |")
     c = results["calendar"]
     md.append(f"| calendar | {c['official_count']} | {c['our_count']} | {c['matched_patterns']}パターン | ― |")
+    md.append("")
+    cd = results["coords"]
+    md.append("### 座標精度（名前一致の停留所で、当方座標 vs 公式座標の距離）")
+    md.append("")
+    if cd["matched_with_coords"]:
+        md.append(f"- **比較対象**: {cd['matched_with_coords']} 停留所（名前一致・両方に座標）")
+        md.append(f"- **中央値**: **{cd['median_m']} m** ／ 平均 {cd['mean_m']} m ／ p90 {cd['p90_m']} m ／ 最大 {cd['max_m']} m")
+        md.append(f"- **50m以内**: {cd['within_50m']}/{cd['matched_with_coords']} (**{cd['within_50m_rate']}%**) ／ "
+                  f"**100m以内**: {cd['within_100m']} (**{cd['within_100m_rate']}%**)")
+        if cd["worst"]:
+            md.append("- **ズレの大きい停留所（ワースト）**: "
+                      + " / ".join(f"{w['stop_name']}={w['dist_m']}m" for w in cd["worst"][:5]))
+    else:
+        md.append("- 座標が両方にある名前一致の停留所がありません（比較不可）。")
     md.append("")
     md.append("---")
 
@@ -473,8 +562,17 @@ def main():
         sys.exit(f"Error: --official が無効: {args.official}")
 
     our_dir = Path(args.ours)
+    if our_dir.is_file() and our_dir.suffix.lower() == ".zip":
+        _our_tmp = TemporaryDirectory()
+        with zipfile.ZipFile(our_dir) as zf:
+            zf.extractall(_our_tmp.name)
+        our_dir = Path(_our_tmp.name)
     if not our_dir.is_dir():
         sys.exit(f"Error: --ours ディレクトリがありません: {our_dir}")
+
+    # 公式zip・当方zip はトップに1階層フォルダを挟むことがあるので実GTFSルートに解決する。
+    official_dir = resolve_gtfs_root(official_dir)
+    our_dir = resolve_gtfs_root(our_dir)
 
     print(f"[INFO] 公式: {official_dir}", file=sys.stderr)
     print(f"[INFO] 当方: {our_dir}", file=sys.stderr)
@@ -485,6 +583,7 @@ def main():
         "ours": str(our_dir),
         "routes": compare_routes(official_dir, our_dir),
         "stops": compare_stops(official_dir, our_dir),
+        "coords": compare_coords(official_dir, our_dir),
         "trips": compare_trips(official_dir, our_dir),
         "stop_times": compare_stop_times(official_dir, our_dir),
         "calendar": compare_calendar(official_dir, our_dir),
@@ -503,6 +602,9 @@ def main():
     print(f"  routes:     {results['routes']['matched_count']}/{results['routes']['official_count']} = {results['routes']['match_rate']}%", file=sys.stderr)
     print(f"  stops:      {results['stops']['matched_count']}/{results['stops']['official_unique_names']} = {results['stops']['match_rate_vs_official']}%", file=sys.stderr)
     print(f"  stop_times: {results['stop_times']['matched_pairs']}/{results['stop_times']['official_unique_pairs']} = {results['stop_times']['match_rate_vs_official']}%", file=sys.stderr)
+    cd = results["coords"]
+    if cd["matched_with_coords"]:
+        print(f"  coords:     中央値 {cd['median_m']}m / 100m以内 {cd['within_100m_rate']}% ({cd['matched_with_coords']}停留所)", file=sys.stderr)
 
 
 if __name__ == "__main__":
