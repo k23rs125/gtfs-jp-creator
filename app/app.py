@@ -336,7 +336,7 @@ if "sid" not in ss():
     _sid = st.query_params.get("sid")
     if not _sid:
         import secrets
-        _sid = secrets.token_hex(6)
+        _sid = secrets.token_hex(4)   # 8桁の引き継ぎコード（複数人の受け渡しで手入力しやすい長さ）
         try:
             st.query_params["sid"] = _sid
         except Exception:
@@ -397,6 +397,34 @@ def _restore_out(sid):
                 shutil.copy2(src / _wf, WORK / _wf)
     except Exception:
         pass
+
+
+def _load_by_code(code):
+    """引き継ぎコード(sid)を指定して、そのプロジェクトの保存を現在のセッションへ読み込む。
+    『最新を拾う』復元と違い、コードで“そのプロジェクト”を確実に引き継ぐ（複数人の受け渡し用）。"""
+    code = (code or "").strip().lower()
+    if not code:
+        return False, "引き継ぎコードを入力してください。"
+    f = AUTOSAVE_DIR / f"session_{code}.json"
+    if not f.exists():
+        return False, f"コード「{code}」の保存が見つかりません。コードを確認してください。"
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        forms = data.pop("form_inputs", {}) or {}
+        for k, v in data.items():
+            ss()[k] = v
+        for k, v in forms.items():   # ③の入力欄も復元
+            ss()[k] = v
+        ss()["sid"] = code
+        try:
+            st.query_params["sid"] = code
+        except Exception:
+            pass
+        _restore_out(code)           # 生成物(out/)・作業ファイルも戻す
+        ss()["_restore_dismissed"] = True
+        return True, ""
+    except Exception as e:
+        return False, f"読み込みに失敗しました: {e}"
 
 
 def autosave():
@@ -586,6 +614,8 @@ if _mode not in ("solo", "tt", "q", "coord"):
 if not _mode:
     # 選択画面（1画面）。ここで進め方を選ぶまで下の作業は表示しない。
     st.markdown("### まず、作業の進め方を選んでください")
+    if ss().get("extract"):
+        st.success(f"✓ 引き継ぎ済み（コード **{SID}**）のデータを読み込みました。下で担当を選んでください。")
     st.caption("一人で全部進めるか、複数人で分担するかを選びます。あとで「◀ 選び直す」で変更できます。")
     if st.button("🧑 一人で全部進める（時刻表 → 入力 → 座標の順）", type="primary",
                  use_container_width=True):
@@ -595,8 +625,22 @@ if not _mode:
     for _i, (_k, _lbl) in enumerate(WORK_AREAS):
         if _pcols[_i].button(_lbl, key=f"pick_{_k}", use_container_width=True):
             ss()["work_mode"] = _k; st.rerun()
-    st.caption("分担のときは、選んだ担当の作業画面だけが表示されます。作業は自動保存され、"
-               "同じURLを開けば別の担当が続きから作業できます。")
+    st.caption("分担のときは、選んだ担当の作業画面だけが表示されます。")
+    # ── 複数人の受け渡し：前の担当から受け取った「引き継ぎコード」でそのプロジェクトを開く ──
+    st.markdown("---")
+    with st.expander("🔑 引き継ぎコードで続きから開く（別の担当から受け取ったコードを入力）",
+                     expanded=not ss().get("extract")):
+        st.caption("複数人で分担する場合、前の担当の画面に出る**引き継ぎコード**をここに入れると、"
+                   "その人の作業を**確実に**引き継げます（同じサーバに保存されています）。")
+        _hc1, _hc2 = st.columns([2, 1])
+        _code_in = _hc1.text_input("引き継ぎコード", key="_handoff_code_in",
+                                   label_visibility="collapsed", placeholder="例: 3a9f1c2b")
+        if _hc2.button("このコードで開く", use_container_width=True):
+            _ok, _msg = _load_by_code(_code_in)
+            if _ok:
+                st.rerun()
+            else:
+                st.error(_msg)
     st.stop()
 
 # モード決定後：上部に「選び直す」。一人＝タブバーで切替、複数人＝担当のみ表示。
@@ -628,6 +672,12 @@ else:
     if _mode == "coord" and not ss().get("result"):
         st.info("まだ生成されていません。「不足分の入力」で『GTFS-JP を生成する』を押すと、"
                 "ここに結果・地図（座標の確認）が表示されます。")
+# 引き継ぎコード（＝このプロジェクトのコード）。複数人の受け渡しに使う。
+if _mode == "solo":
+    st.caption(f"🔑 引き継ぎコード：**{SID}**（別のPCから続きを開くときに使えます）")
+else:
+    st.info(f"🔑 **引き継ぎコード：{SID}** — 自分の担当が終わったら、この8桁を次の担当に伝えてください"
+            "（次の担当は最初の画面の「引き継ぎコードで続きから開く」に入力）。")
 # 3エリアを常に実行するためのコンテナ。表示は _active のみ、他は CSS で隠す（実行はする）。
 tab_tt = st.container(key="area_tt")
 tab_q = st.container(key="area_q")
