@@ -1,0 +1,32 @@
+name: CI
+
+# app.py・各スクリプトの回帰チェック（run_checks.py）を push / PR で自動実行する。
+# 外部依存(P11 Shapefile / OSRM / Java Validator)が無い CI 環境では、該当チェックは
+# run_checks.py 側で SKIP される（compile・単体・AppTestスモークは実行される）。
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # run_checks / AppTest スモークに必要な最小セット（重いOCR系は入れない）
+          pip install streamlit pandas folium jinja2 streamlit-folium openpyxl pyshp \
+                      sudachipy sudachidict_core pykakasi
+
+      - name: Run regression checks
+        run: python run_checks.py
