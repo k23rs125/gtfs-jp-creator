@@ -783,8 +783,36 @@ if _mode not in ("solo", "tt", "q", "coord"):
 if not _mode:
     # 選択画面（1画面）。ここで進め方を選ぶまで下の作業は表示しない。
     st.markdown("### まず、作業の進め方を選んでください")
+
+    # ── 共有コードで参加済み：担当選択に集中させる（＝参加できたことがハッキリ分かる画面）──
+    if ss().get("_joined_code"):
+        st.success(f"✅ 共有コード :red[**{SID}**] の案件に **参加しました！**")
+        st.markdown("この案件の中で、**あなたの担当を選んでください**（別々の担当は同時に並行できます）。")
+        _nm = st.text_input("あなたのお名前（『誰が編集中か』の表示に使います）",
+                            value=ss().get("user_name", ""), key="_name_in", placeholder="例: 佐藤")
+        if _nm.strip():
+            ss()["user_name"] = _nm.strip()
+        _pcols = st.columns(3)
+        for _i, (_k, _lbl) in enumerate(WORK_AREAS):
+            if _pcols[_i].button(_lbl, key=f"pick_{_k}", use_container_width=True):
+                ss()["work_mode"] = _k; st.rerun()
+        st.caption("※ 時刻表担当がまだ作業前だと、事業者情報・座標の画面は「まだ○○が終わっていません」"
+                   "と出ます（時刻表が進むと自動で入力できるようになります）。")
+        if st.button("↩ 別の案件にする（コードを入れ直して最初から）"):
+            for _k in ("extract", "extract_token", "decision_spec", "detected", "source_display",
+                       "sources_all", "confirmed", "result", "fare_matrix_doc", "_joined_code",
+                       "solo_area", "_restore_dismissed", "_last_sync_sig", "_seen_out_ver"):
+                ss().pop(_k, None)
+            ss().pop("sid", None)                 # 新しいSIDを発行させる
+            try:
+                st.query_params.clear()
+            except Exception:
+                pass
+            st.rerun()
+        st.stop()
+
     if ss().get("extract"):
-        st.success(f"✓ 共有コード :red[**{SID}**] の案件を読み込みました。下で担当を選んでください。")
+        st.success(f"✓ 前回の作業（コード :red[**{SID}**]）を読み込みました。下で担当を選んでください。")
     st.caption("一人で全部進めるか、複数人で分担するかを選びます。あとで「◀ 選び直す」で変更できます。")
     if st.button("🧑 一人で全部進める（時刻表 → 入力 → 座標の順）", type="primary",
                  use_container_width=True):
@@ -818,6 +846,7 @@ if not _mode:
     if _hc2.button("このコードで参加", use_container_width=True):
         _ok, _msg = _load_by_code(_code_in)
         if _ok:
+            ss()["_joined_code"] = True     # 参加成功→次の画面で「参加しました！」を出す
             st.rerun()
         else:
             st.error(_msg)
