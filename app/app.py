@@ -337,7 +337,7 @@ if "sid" not in ss():
     _sid = st.query_params.get("sid")
     if not _sid:
         import secrets
-        _sid = secrets.token_hex(4)   # 8桁の引き継ぎコード（複数人の受け渡しで手入力しやすい長さ）
+        _sid = secrets.token_hex(4)   # 8桁の共有コード（複数人の受け渡しで手入力しやすい長さ）
         try:
             st.query_params["sid"] = _sid
         except Exception:
@@ -401,11 +401,11 @@ def _restore_out(sid):
 
 
 def _load_by_code(code):
-    """引き継ぎコード(sid)を指定して、そのプロジェクトの保存を現在のセッションへ読み込む。
+    """共有コード(sid)を指定して、そのプロジェクトの保存を現在のセッションへ読み込む。
     『最新を拾う』復元と違い、コードで“そのプロジェクト”を確実に引き継ぐ（複数人の受け渡し用）。"""
     code = (code or "").strip().lower()
     if not code:
-        return False, "引き継ぎコードを入力してください。"
+        return False, "共有コードを入力してください。"
     f = AUTOSAVE_DIR / f"session_{code}.json"
     if not f.exists():
         return False, f"コード「{code}」の保存が見つかりません。コードを確認してください。"
@@ -784,7 +784,7 @@ if not _mode:
     # 選択画面（1画面）。ここで進め方を選ぶまで下の作業は表示しない。
     st.markdown("### まず、作業の進め方を選んでください")
     if ss().get("extract"):
-        st.success(f"✓ 引き継ぎ済み（コード :red[**{SID}**]）のデータを読み込みました。下で担当を選んでください。")
+        st.success(f"✓ 共有コード :red[**{SID}**] のデータを読み込みました。下で担当を選んでください。")
     st.caption("一人で全部進めるか、複数人で分担するかを選びます。あとで「◀ 選び直す」で変更できます。")
     if st.button("🧑 一人で全部進める（時刻表 → 入力 → 座標の順）", type="primary",
                  use_container_width=True):
@@ -800,17 +800,17 @@ if not _mode:
             ss()["work_mode"] = _k; st.rerun()
     st.caption("**別々の担当は同時に並行**できます（時刻表担当と事業者情報担当は同時進行OK）。"
                "同じ担当は同時に一人だけ（他の人には読み取り専用と表示）。"
-               "全員が下の**同じ引き継ぎコード**を使えば、同じプロジェクトを分担できます。")
-    # ── 複数人の受け渡し：前の担当から受け取った「引き継ぎコード」でそのプロジェクトを開く ──
+               "同じ案件を分担する人は、全員が下の**同じ共有コード**を使います。")
+    # ── 複数人で同じ案件を共有：チームの誰かの画面に出る「共有コード」でそのプロジェクトに参加する ──
     st.markdown("---")
-    with st.expander("🔑 引き継ぎコードで続きから開く（別の担当から受け取ったコードを入力）",
+    with st.expander("🔑 共有コードで参加する（同じ案件を分担する人はこのコードを入力）",
                      expanded=not ss().get("extract")):
-        st.caption("複数人で分担する場合、前の担当の画面に出る**引き継ぎコード**をここに入れると、"
-                   "その人の作業を**確実に**引き継げます（同じサーバに保存されています）。")
+        st.caption("複数人で分担する場合、**チームの誰かの画面に出る共有コード**をここに入れると、"
+                   "**同じ案件に参加**して並行して作業できます（同じサーバに保存されています）。")
         _hc1, _hc2 = st.columns([2, 1])
-        _code_in = _hc1.text_input("引き継ぎコード", key="_handoff_code_in",
+        _code_in = _hc1.text_input("共有コード", key="_handoff_code_in",
                                    label_visibility="collapsed", placeholder="例: 3a9f1c2b")
-        if _hc2.button("このコードで開く", use_container_width=True):
+        if _hc2.button("このコードで参加", use_container_width=True):
             _ok, _msg = _load_by_code(_code_in)
             if _ok:
                 st.rerun()
@@ -884,21 +884,21 @@ else:
         _live_sync()
     except Exception:
         pass
-# 引き継ぎコード（＝このプロジェクトのコード）。複数人の受け渡しに使う。
+# 共有コード（＝このプロジェクトのコード）。複数人で同じ案件を共有するのに使う。
 if _mode == "solo":
-    st.caption(f"🔑 引き継ぎコード：:red[**{SID}**]（別のPCから続きを開くときに使えます）")
+    st.caption(f"🔑 共有コード：:red[**{SID}**]（別のPCから続きを開くときに使えます）")
 else:
-    st.info(f"🔑 引き継ぎコード：:red[**{SID}**] — 自分の担当が終わったら、この8桁を次の担当に伝えてください"
-            "（次の担当は最初の画面の「引き継ぎコードで続きから開く」に入力）。")
-# 複数人の時刻表担当が「確定して反映」した直後は、引き継ぎコードを“画面（ダイアログ）”で大きく出す。
+    st.info(f"🔑 共有コード：:red[**{SID}**] — 同じ案件を分担する人に、この8桁を伝えてください"
+            "（相手は最初の画面の「共有コードで参加する」に入力）。")
+# 複数人の時刻表担当が「確定して反映」した直後は、共有コードを“画面（ダイアログ）”で大きく出す。
 @st.dialog("✅ 時刻表・路線の割り当てが完了しました")
 def _handoff_dialog(code):
-    st.markdown("次の担当（**事業者情報担当**）に、下の **引き継ぎコード** を伝えてください。")
+    st.markdown("同じ案件を分担する人に、下の **共有コード** を伝えてください。")
     st.markdown(f"# :red[{code}]")
     st.caption("↓ 右のアイコン（📋）でコピーできます")
     st.code(code, language=None)          # コピーボタン付き
-    st.markdown("次の担当は、最初の画面の **「🔑 引き継ぎコードで続きから開く」** に"
-                "このコードを入力すると、この作業を引き継げます。")
+    st.markdown("相手は、最初の画面の **「🔑 共有コードで参加する」** に"
+                "このコードを入力すると、同じ案件に参加できます。")
     if st.button("閉じる", type="primary", use_container_width=True):
         st.rerun()                        # 右上の × でも閉じられます
 
@@ -2105,7 +2105,7 @@ if _show_tt:
                         ss()["solo_area"] = "q"
                         ss()["_scroll_to_top"] = True
                     elif _apply_btn:
-                        # 複数人（時刻表担当）：確定＝自分の担当が完了。引き継ぎ画面を出す。
+                        # 複数人（時刻表担当）：確定＝自分の担当が完了。共有コードの案内画面を出す。
                         ss()["_show_handoff_dialog"] = True
                     st.success("時刻表を反映しました。③で条件を入れて生成してください。")
                     st.rerun()
