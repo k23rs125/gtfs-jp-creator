@@ -240,10 +240,17 @@ def coords_for_stop_ids(stop_ids: list[str], stop_coord_map: dict[str, tuple[flo
 
 
 def make_shape_rows(shape_id: str, points: list[tuple[float, float]]) -> list[dict]:
-    """shape の点列から shapes.txt の行を生成する。"""
-    dists = cumulative_distances(points)
+    """shape の点列から shapes.txt の行を生成する。
+    出力精度(小数6桁)で連続同一座標を1点に畳む＝zero長セグメント
+    (Validator の equal_shape_distance_same_coordinates 警告の原因)を除去する。"""
+    deduped: list[tuple[float, float]] = []
+    for lat, lon in points:
+        key = (round(lat, 6), round(lon, 6))
+        if not deduped or key != (round(deduped[-1][0], 6), round(deduped[-1][1], 6)):
+            deduped.append((lat, lon))
+    dists = cumulative_distances(deduped)
     rows: list[dict] = []
-    for i, (lat, lon) in enumerate(points):
+    for i, (lat, lon) in enumerate(deduped):
         rows.append({
             "shape_id": shape_id,
             "shape_pt_lat": f"{lat:.6f}",

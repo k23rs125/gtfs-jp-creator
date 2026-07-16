@@ -505,7 +505,9 @@ def generate_feed_info(data: dict, output_dir: Path) -> None:
     # 連絡先（GTFS/GTFS-JP 推奨。feed_info か agency.email から補完して出力する。
     # 無いと Validator が missing_feed_contact_email_and_url を出すため）。
     contact_email = fi.get("feed_contact_email") or agency.get("agency_email") or ""
-    contact_url = fi.get("feed_contact_url") or ""
+    # 連絡URLは feed_info → 事業者URL(agency_url) → 公表サイト(feed_publisher_url) の順で補完。
+    contact_url = (fi.get("feed_contact_url") or agency.get("agency_url")
+                   or fi.get("feed_publisher_url") or "")
     if contact_email:
         row["feed_contact_email"] = contact_email
         fieldnames.append("feed_contact_email")
