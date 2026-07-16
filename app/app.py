@@ -619,6 +619,39 @@ def _sync_signature(shared):
             tuple(sorted((r, l.get("owner", "")) for r, l in locks.items())))
 
 
+def _render_progress(locks, mode):
+    """作業の進み具合（3ステージ）を見える化する。待っている担当が『今どこまで進んだか／
+    自分は何ができるか』を分かるようにする。ライブ同期で数秒ごとに自動更新される。"""
+    ex = bool(ss().get("extract"))
+    ds = bool(ss().get("decision_spec"))
+    rz = bool(ss().get("result"))
+
+    def _who(role):
+        n = (locks.get(role) or {}).get("name")
+        return f"　🖊 {n} さん" if n else ""
+
+    s1 = ("🟢 路線を割り当て済み" if ds else "🔵 取り込み済み" if ex
+          else "⬜ まだ（時刻表のアップロード待ち）")
+    s2 = ("🟢 生成済み" if rz else "🔵 入力できます" if ds else "⬜ 時刻表の取り込み待ち")
+    s3 = "🟢 生成済み・確認できます" if rz else "⬜ 生成待ち"
+    with st.container(border=True):
+        st.markdown("**📊 作業の進み具合**（数秒ごとに自動更新）")
+        st.markdown(f"　① 🕐 時刻表・路線：{s1}{_who('tt')}")
+        st.markdown(f"　② 📝 不足分の入力：{s2}{_who('q')}")
+        st.markdown(f"　③ 🗺 結果・座標：{s3}{_who('coord')}")
+        if mode == "tt":
+            hint = "→ あなたは**今すぐ**、時刻表の取り込み・路線の割り当て・時刻の修正ができます。"
+        elif mode == "q":
+            hint = ("→ あなたは**今すぐ**、事業者名・運賃・有効期間などを入力できます。"
+                    if ds else
+                    "→ 時刻表が取り込まれると入力できます。**少しお待ちください**（自動で切り替わります）。")
+        else:  # coord
+            hint = ("→ あなたは**今すぐ**、座標を地図で確認できます。"
+                    if rz else
+                    "→ 「不足分の入力」で**生成**されると、ここで座標を確認できます。**少しお待ちください**。")
+        st.markdown(f":blue[**{hint}**]")
+
+
 def _restore_label(data, f):
     """保存ファイルを利用者が識別できる見出しにする（事業者名/路線名・停留所数・保存時刻）。"""
     try:
@@ -887,23 +920,13 @@ else:
         _top2.markdown(f"**担当：{_area_label.get(_mode,'')}** — 🔒 :red[**{_who} さんが編集中（読み取り専用）**]")
     else:
         _top2.markdown(f"**担当：{_area_label.get(_mode,'')}**（あなたが編集中）")
-    _others = [f"{_area_label[r]}：{_locks[r].get('name','?')}" for r in ("tt", "q", "coord")
-               if r in _locks and r != _mode]
-    if _others:
-        st.caption("👥 いま作業中の担当 — " + " ／ ".join(_others)
-                   + "（別々の担当なので並行して進められます）")
+    _render_progress(_locks, _mode)          # ← 作業の進み具合を見える化（待ち時間の体感を改善）
     if st.button("🔄 最新の状況に更新", key="_refresh_now"):
         st.rerun()
     if _readonly:
         st.warning(f"この担当は今 **{_who} さん** が編集中のため **読み取り専用**です"
                    "（あなたの変更は保存されません）。空くまで待つか、上の『◀ 選び直す』で"
                    "別の担当を選んでください。空いたら上の『🔄 最新の状況に更新』で入れます。")
-    if _mode == "q" and not ss().get("decision_spec"):
-        st.info("まだ「時刻表・路線の割り当て」が終わっていません。"
-                "時刻表担当が①②を終えると、ここで不足分を入力できます。")
-    if _mode == "coord" and not ss().get("result"):
-        st.info("まだ生成されていません。「不足分の入力」で『GTFS-JP を生成する』を押すと、"
-                "ここに結果・地図（座標の確認）が表示されます。")
     # --- 常に同期: 他担当の保存・ロック変化を数秒ごとに検知し、変化があった時だけ自動で最新に更新 ---
     ss()["_last_sync_sig"] = _sync_signature(_read_shared())
     try:
