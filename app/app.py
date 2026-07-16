@@ -784,39 +784,43 @@ if not _mode:
     # 選択画面（1画面）。ここで進め方を選ぶまで下の作業は表示しない。
     st.markdown("### まず、作業の進め方を選んでください")
     if ss().get("extract"):
-        st.success(f"✓ 共有コード :red[**{SID}**] のデータを読み込みました。下で担当を選んでください。")
+        st.success(f"✓ 共有コード :red[**{SID}**] の案件を読み込みました。下で担当を選んでください。")
     st.caption("一人で全部進めるか、複数人で分担するかを選びます。あとで「◀ 選び直す」で変更できます。")
     if st.button("🧑 一人で全部進める（時刻表 → 入力 → 座標の順）", type="primary",
                  use_container_width=True):
         ss()["work_mode"] = "solo"; st.rerun()
-    st.markdown("**または、複数人で分担する場合は担当を選択：**")
+
+    st.markdown("---")
+    st.markdown("#### 👥 複数人で分担する場合")
+    st.markdown("📌 :red[**別々の担当は同時に並行できます**]"
+                "（時刻表担当と事業者情報担当は同時進行OK。同じ担当は同時に一人だけ＝"
+                "他の人には「読み取り専用」と表示）。")
+    st.markdown("🔑 :red[**同じ案件を分担する人は、全員が「同じ共有コード」を使います。**]")
     _nm = st.text_input("あなたのお名前（分担時に『誰が編集中か』の表示に使います）",
                         value=ss().get("user_name", ""), key="_name_in", placeholder="例: 田中")
     if _nm.strip():
         ss()["user_name"] = _nm.strip()
+
+    # ── ① 新しくこの案件を始める人：担当を選ぶ→共有コードが自動で発行される ──
+    st.markdown("**🆕 新しくこの案件を始める人** … 担当を選んでください。"
+                ":red[**共有コードが自動で発行**]され画面上部に出ます（それをチームに伝えます）。")
     _pcols = st.columns(3)
     for _i, (_k, _lbl) in enumerate(WORK_AREAS):
         if _pcols[_i].button(_lbl, key=f"pick_{_k}", use_container_width=True):
             ss()["work_mode"] = _k; st.rerun()
-    st.markdown("📌 :red[**別々の担当は同時に並行できます**]"
-                "（時刻表担当と事業者情報担当は同時進行OK。同じ担当は同時に一人だけ＝"
-                "他の人には「読み取り専用」と表示）。")
-    st.markdown("🔑 :red[**同じ案件を分担する人は、全員が下の「同じ共有コード」を使います。**]")
-    # ── 複数人で同じ案件を共有：チームの誰かの画面に出る「共有コード」でそのプロジェクトに参加する ──
-    st.markdown("---")
-    with st.expander("🔑 共有コードで参加する（同じ案件を分担する人はこのコードを入力）",
-                     expanded=not ss().get("extract")):
-        st.caption("複数人で分担する場合、**チームの誰かの画面に出る共有コード**をここに入れると、"
-                   "**同じ案件に参加**して並行して作業できます（同じサーバに保存されています）。")
-        _hc1, _hc2 = st.columns([2, 1])
-        _code_in = _hc1.text_input("共有コード", key="_handoff_code_in",
-                                   label_visibility="collapsed", placeholder="例: 3a9f1c2b")
-        if _hc2.button("このコードで参加", use_container_width=True):
-            _ok, _msg = _load_by_code(_code_in)
-            if _ok:
-                st.rerun()
-            else:
-                st.error(_msg)
+
+    # ── ② チームから共有コードを受け取った人：コードを入力して参加 ──
+    st.markdown("**🔑 チームから共有コードを受け取った人** … コードを入力して参加してください"
+                "（参加後、上の担当ボタンで自分の担当を選びます）。")
+    _hc1, _hc2 = st.columns([2, 1])
+    _code_in = _hc1.text_input("共有コード", key="_handoff_code_in",
+                               label_visibility="collapsed", placeholder="例: 3a9f1c2b（チームから受け取ったコード）")
+    if _hc2.button("このコードで参加", use_container_width=True):
+        _ok, _msg = _load_by_code(_code_in)
+        if _ok:
+            st.rerun()
+        else:
+            st.error(_msg)
     st.stop()
 
 # モード決定後：上部に「選び直す」。一人＝タブバーで切替、複数人＝担当のみ表示。
