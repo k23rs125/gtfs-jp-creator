@@ -827,7 +827,7 @@ if not _mode:
             ss()["user_name"] = _nm.strip()
         _pcols = st.columns(3)
         for _i, (_k, _lbl) in enumerate(WORK_AREAS):
-            if _pcols[_i].button(_lbl, key=f"pick_{_k}", use_container_width=True):
+            if _pcols[_i].button(_lbl, key=f"pick_{_k}", width='stretch'):
                 ss()["work_mode"] = _k; st.rerun()
         st.caption("※ 時刻表担当がまだ作業前だと、事業者情報・座標の画面は「まだ○○が終わっていません」"
                    "と出ます（時刻表が進むと自動で入力できるようになります）。")
@@ -848,7 +848,7 @@ if not _mode:
         st.success(f"✓ 前回の作業（コード :red[**{SID}**]）を読み込みました。下で担当を選んでください。")
     st.caption("一人で全部進めるか、複数人で分担するかを選びます。あとで「◀ 選び直す」で変更できます。")
     if st.button("🧑 一人で全部進める（時刻表 → 入力 → 座標の順）", type="primary",
-                 use_container_width=True):
+                 width='stretch'):
         ss()["work_mode"] = "solo"; st.rerun()
 
     st.markdown("---")
@@ -867,7 +867,7 @@ if not _mode:
                 ":red[**共有コードが自動で発行**]され画面上部に出ます（それをチームに伝えます）。")
     _pcols = st.columns(3)
     for _i, (_k, _lbl) in enumerate(WORK_AREAS):
-        if _pcols[_i].button(_lbl, key=f"pick_{_k}", use_container_width=True):
+        if _pcols[_i].button(_lbl, key=f"pick_{_k}", width='stretch'):
             ss()["work_mode"] = _k; st.rerun()
 
     # ── ② チームから共有コードを受け取った人：コードを入力して参加 ──
@@ -876,7 +876,7 @@ if not _mode:
     _hc1, _hc2 = st.columns([2, 1])
     _code_in = _hc1.text_input("共有コード", key="_handoff_code_in",
                                label_visibility="collapsed", placeholder="例: 3a9f1c2b（チームから受け取ったコード）")
-    if _hc2.button("このコードで参加", use_container_width=True):
+    if _hc2.button("このコードで参加", width='stretch'):
         _ok, _msg = _load_by_code(_code_in)
         if _ok:
             ss()["_joined_code"] = True     # 参加成功→次の画面で「参加しました！」を出す
@@ -902,7 +902,7 @@ if _mode == "solo":
         _active = "tt"
     _tcols = st.columns(3)
     for _i, (_k, _lbl) in enumerate(WORK_AREAS):
-        if _tcols[_i].button(_lbl, key=f"soloTab_{_k}", use_container_width=True,
+        if _tcols[_i].button(_lbl, key=f"soloTab_{_k}", width='stretch',
                              type=("primary" if _k == _active else "secondary")):
             ss()["solo_area"] = _k
             ss()["_scroll_to_top"] = True   # タブ切替時は画面の先頭へ
@@ -956,7 +956,7 @@ def _handoff_dialog(code):
     st.code(code, language=None)          # コピーボタン付き
     st.markdown("相手は、最初の画面の **「🔑 共有コードで参加する」** に"
                 "このコードを入力すると、同じ案件に参加できます。")
-    if st.button("閉じる", type="primary", use_container_width=True):
+    if st.button("閉じる", type="primary", width='stretch'):
         st.rerun()                        # 右上の × でも閉じられます
 
 if ss().pop("_show_handoff_dialog", False):
@@ -1773,7 +1773,7 @@ if _show_tt:
             if "ブロック" in base_df.columns:      # 便のまとまりの番号順に並べて表示
                 base_df = base_df.sort_values("ブロック").reset_index(drop=True)
             edited = st.data_editor(
-                base_df, hide_index=True, use_container_width=True,
+                base_df, hide_index=True, width='stretch',
                 key=f"route_editor_{ss().get('extract_token', '')}",
                 column_config={
                     "ブロック": st.column_config.NumberColumn(
@@ -1846,7 +1846,7 @@ if _show_tt:
                                      "種別": pd.Series([], dtype="object"),
                                      "対象ダイヤ": pd.Series([], dtype="object")})
             cd_editor = st.data_editor(
-                _cd_base, num_rows="dynamic", key=f"cd_{_htk}", use_container_width=True,
+                _cd_base, num_rows="dynamic", key=f"cd_{_htk}", width='stretch',
                 column_config={
                     "日付": st.column_config.DateColumn("日付", format="YYYY-MM-DD"),
                     "種別": st.column_config.SelectboxColumn("種別", options=["運休", "臨時運行"],
@@ -2013,7 +2013,7 @@ if _show_tt:
                         "『待機時間』『渡船場出発』のような停留所でない行を消せます。")}
                     for lab in labels:
                         colcfg[lab] = st.column_config.TextColumn(lab.split("#")[0])
-                    ed = st.data_editor(df, hide_index=True, use_container_width=True,
+                    ed = st.data_editor(df, hide_index=True, width='stretch',
                                         key=f"tt_{tok}_{bi}", column_config=colcfg, num_rows="dynamic")
 
                     def _enm(i):   # 編集後の停留所名（削除/改名を反映）
@@ -2100,7 +2100,7 @@ if _show_tt:
                         if rev or nextday:
                             with st.expander("色付きで表示（🔴逆行=要修正／🔵日跨ぎ=翌日）", expanded=bool(rev)):
                                 st.dataframe(ed.style.apply(lambda _x: css, axis=None),
-                                             hide_index=True, use_container_width=True)
+                                             hide_index=True, width='stretch')
                                 if rev_cells:
                                     st.markdown("**🔴 逆行セルをここで直す**"
                                                 "（正しい時刻を入れると上書き。空欄なら上の表のまま）")
@@ -2263,7 +2263,7 @@ if _show_q:
                     ])
                     fare_cat_df = st.data_editor(
                         _fare_base, hide_index=True, num_rows="dynamic", key=f"farecat_{tk}",
-                        use_container_width=True,
+                        width='stretch',
                         column_config={
                             "区分": st.column_config.TextColumn(
                                 "区分", help="例：大人／小児／障がい者／大人(IC)／シルバー", width="medium"),
@@ -2303,7 +2303,7 @@ if _show_q:
                     for _c in _stops_all:
                         _zcfg[_c] = st.column_config.NumberColumn(_c, min_value=0, step=10, format="%d")
                     zone_df = st.data_editor(_zbase, hide_index=True, key=f"zonedf_{tk}",
-                                             column_config=_zcfg, use_container_width=False)
+                                             column_config=_zcfg, width='content')
                     st.caption(f"{len(_stops_all)}停留所。対角（同一停留所）は**通常は空欄でOK**。"
                                "ただし**循環路線で一周して同じ停留所で降りる**場合は、その**対角セルに運賃を入れてください**"
                                "（対角に入力があればその運賃も出力します）。"
@@ -2877,7 +2877,7 @@ if _show_coord:
                         _aidf = [{"停留所名": _k, "元の自動読み": _v.get("before", ""),
                                   "AIが入れた読み": _v.get("yomi", ""), "確度": _v.get("confidence", ""),
                                   "根拠(AI)": _v.get("note", "")} for _k, _v in _aiap.items()]
-                        st.dataframe(pd.DataFrame(_aidf), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(_aidf), hide_index=True, width='stretch')
                     _rows = []
                     for _nm in _order:
                         _h = _cur[_nm].get("ja-Hrkt", "")
@@ -2900,7 +2900,7 @@ if _show_coord:
                         }
                         _edited = st.data_editor(pd.DataFrame(_rows), hide_index=True,
                                                  key="readings_editor", column_config=_cfg,
-                                                 use_container_width=True)
+                                                 width='stretch')
                         if st.form_submit_button("この内容で反映（zip・地図を更新）"):
                             _renames, _by = {}, {}   # old→new名 / new名→{ja-Hrkt?,en?}
                             for _i, _nm in enumerate(_order):
@@ -2976,7 +2976,7 @@ if _show_coord:
                         with st.form("readings_other_form"):
                             _oed = st.data_editor(
                                 pd.DataFrame(_orows), hide_index=True, key="readings_other_editor",
-                                use_container_width=True,
+                                width='stretch',
                                 column_config={
                                     "種類": st.column_config.TextColumn("種類", disabled=True, width="small"),
                                     "項目": st.column_config.TextColumn("項目", disabled=True, width="small"),
@@ -3047,7 +3047,7 @@ if _show_coord:
                         _mis = [r for r in _cmp if str(r["判定"]).startswith("✗")]
                         st.caption(f"AIと自動読みが**食い違う停留所：{len(_mis)}件**（ここが確認の要。"
                                    "低確度は特に慎重に）。")
-                        st.dataframe(pd.DataFrame(_cmp), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(_cmp), hide_index=True, width='stretch')
                         if _mis:
                             _sel = st.multiselect("AI候補を採用する停留所（原典で確認して選ぶ）",
                                                   [r["停留所名"] for r in _mis], default=[], key="ai_read_sel")
@@ -3521,7 +3521,7 @@ if ss().get("result"):
         if _vz:
             st.download_button("⬇  完成した GTFS-JP 一式（zip）をダウンロード",
                                _vz[0].read_bytes(), _vz[0].name, type="primary",
-                               use_container_width=True, key="dl_zip_main")
+                               width='stretch', key="dl_zip_main")
         # ビューア(HTML)のDLは補助 → 小さく右下に
         _vc1, _vc2 = st.columns([3, 1])
         _vc2.download_button("ビューア(HTML)を保存", html.encode("utf-8"),
