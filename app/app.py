@@ -20,7 +20,6 @@ from contextlib import nullcontext
 from pathlib import Path
 
 import streamlit as st
-import streamlit.components.v1 as components
 import folium
 import pandas as pd
 from streamlit_folium import st_folium
@@ -973,7 +972,7 @@ if _hide:
 
 # タブ遷移直後は画面の先頭へスクロール（前タブ下部のスクロール位置を持ち越さない）。
 if ss().pop("_scroll_to_top", False):
-    components.html(
+    st.iframe(
         """<script>
         (function () {
           function toTop() {
@@ -992,7 +991,7 @@ if ss().pop("_scroll_to_top", False):
           [30, 120, 300, 600, 1000].forEach(function (t) { setTimeout(toTop, t); });
         })();
         </script>""",
-        height=0)
+        height=1)   # st.iframe は height=0 を許さないため 1px（実質不可視）
 
 if _show_tt:
     with tab_tt:
@@ -1069,7 +1068,7 @@ if _show_tt:
         };
         </script>
         """
-            components.html(
+            st.iframe(
                 _tmpl.replace("__BID__", _bid).replace("__LABEL__", _html.escape(label))
                 .replace("__B64__", json.dumps(b64)).replace("__MIME__", json.dumps(mime)),
                 height=46)
@@ -2836,7 +2835,7 @@ if _show_coord:
             mv = out / "map_view.html"
             if mv.exists():
                 st.subheader("地図プレビュー（停留所・経路）")
-                components.html(mv.read_text(encoding="utf-8"), height=520, scrolling=True)
+                st.iframe(mv, height=520)
             # 要確認CSV
             rc_csv = out / "座標_要確認.csv"
             if rc_csv.exists():
@@ -3515,7 +3514,7 @@ if ss().get("result"):
                    "📅運行カレンダー / 🚏バス停一覧 / ✓データチェック結果）。"
                    "内容を確認したら、**下の大きなボタンから GTFS-JP 一式（zip）をダウンロード**してください。")
         html = viewer.read_text(encoding="utf-8")
-        components.html(html, height=820, scrolling=True)
+        st.iframe(html, height=820)
         # ★ 完成物 = GTFS-JP 一式(zip) を、ビューアの直下に目立つ大ボタンで配置
         _vz = list((WORK / "out").glob("*_gtfs-jp.zip"))
         if _vz:
