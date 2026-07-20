@@ -125,6 +125,65 @@ def check_apply_decisions():
                f"stop_times={len(s.get('stop_times', []))}")
 
 
+# ---- 5b. 車両のつながり（block_links）が block_id になる ----
+def check_block_links():
+    """折り返し（同一車両が続けて走る便）に共通の block_id が付くこと。
+
+    長井線平日の「駅東口→長井 の便が長井で折り返して 長井→駅東口 になる」形を
+    最小構成で再現する。つながりを指定しない便には block_id を付けないことも確認。
+    """
+    import json
+
+    def _blk(bi, names, times):
+        return {"block_index": bi, "stops": [{"name": n} for n in names],
+                "trips": [{"cells": [{"seq": k + 1, "num": None, "name": n,
+                                      "time": t, "reserve": False}
+                                     for k, (n, t) in enumerate(zip(names, times))]}]}
+    extract = {"blocks": [
+        _blk(0, ["駅東口", "長井"], ["10:45:00", "11:00:00"]),        # 下り 7便
+        _blk(1, ["長井", "駅東口"], ["11:00:00", "11:20:00"]),        # 上り 8便
+        _blk(2, ["駅東口", "長井"], ["17:00:00", "17:15:00"]),        # つながり指定なし
+    ]}
+    per = {"start_date": "20260401", "end_date": "20270331"}
+    spec = {"routes": [{"route_id": "R01", "route_long_name": "長井線", "blocks": [0, 1, 2]}],
+            "block_direction": {"0": 1, "1": 0, "2": 1},
+            "exclude_unnumbered": False, "stop_key": "name",
+            "service": {"service_id": "SVC", "mon": 1, "tue": 1, "wed": 1, "thu": 1,
+                        "fri": 1, "sat": 0, "sun": 0, **per},
+            # trip は 1始まり（apply_decisions の採番に合わせる）
+            "block_links": [[{"block": 0, "trip": 1}, {"block": 1, "trip": 1}]]}
+    with tempfile.TemporaryDirectory() as d:
+        dp = Path(d)
+        (dp / "ex.json").write_text(json.dumps(extract, ensure_ascii=False), encoding="utf-8")
+        (dp / "sp.json").write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+        out = dp / "structured.json"
+        r = subprocess.run([sys.executable, "-X", "utf8", str(REPO / "apply_decisions.py"),
+                            "--extract", str(dp / "ex.json"), "--decisions", str(dp / "sp.json"),
+                            "--out", str(out)],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if r.returncode != 0 or not out.exists():
+            record("block_links", FAIL, (r.stderr or r.stdout or "")[-80:])
+            return
+        s = json.loads(out.read_text(encoding="utf-8"))
+        bids = [(t["trip_id"], (t.get("block_id") or "")) for t in s.get("trips", [])]
+        linked = [b for _, b in bids if b]
+        # つないだ2便は同じ block_id、指定しなかった便は空
+        ok = (len(bids) == 3 and len(linked) == 2 and linked[0] == linked[1]
+              and sum(1 for _, b in bids if not b) == 1)
+        # trips.txt に block_id 列が出ること
+        try:
+            import generate_gtfs_files as gg
+            s["agency"] = {"agency_name": "テスト", "agency_url": "https://example.jp"}
+            gg.generate_trips(s, dp)
+            head = (dp / "trips.txt").read_text(encoding="utf-8-sig").splitlines()[0]
+            ok = ok and "block_id" in head
+        except Exception as e:
+            record("block_links", SKIP, f"trips.txt確認不可: {str(e)[:40]}")
+            return
+        record("block_links", PASS if ok else FAIL,
+               f"block_id={[b for _, b in bids]} trips.txtに列あり")
+
+
 # ---- 6. アプリが起動して抽出まで動く（AppTest スモーク）----
 def check_apptest_smoke():
     try:
@@ -174,7 +233,8 @@ def main():
     print("run_checks - 回帰チェック（外部依存が無い項目はSKIP）")
     print("=" * 64)
     for fn in (check_compile, check_shape_dedup, check_feed_contact, check_eval_compare,
-               check_apply_decisions, check_apptest_smoke, check_golden):
+               check_apply_decisions, check_block_links,
+               check_apptest_smoke, check_golden):
         try:
             fn()
         except Exception as e:

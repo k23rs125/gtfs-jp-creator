@@ -1701,6 +1701,131 @@ if _show_tt:
             return rows
 
 
+        def _trip_rows_for_links(bs):
+            """便の一覧（車両のつながり指定用）。始発・終着と時刻を添えて人が選べる形にする。
+
+    trip の番号は apply_decisions と合わせて **1始まり**、かつ時刻セルが2つ未満の便は
+    生成側で落とされるのでここでも除く（番号がずれると別の便に block_id が付いてしまう）。
+    """
+            rows = []
+            for _bi, _b in enumerate(bs):
+                for _ti, _t in enumerate(_b.get("trips", []), 1):
+                    _cs = [c for c in _t.get("cells", []) if c.get("time")]
+                    if len(_cs) < 2:
+                        continue
+                    _lbl = f"{_t['trip_number']}便" if _t.get("trip_number") else f"{_ti}本目"
+                    rows.append({"bi": _bi, "ti": _ti, "label": _lbl,
+                                 "from": _cs[0].get("name", ""), "dep": _cs[0]["time"],
+                                 "to": _cs[-1].get("name", ""), "arr": _cs[-1]["time"]})
+            return rows
+
+
+        def _hhmm(t):
+            return str(t)[:5]
+
+
+        def _mins(t):
+            try:
+                h, m, *_ = str(t).split(":")
+                return int(h) * 60 + int(m)
+            except Exception:
+                return -1
+
+
+        def _link_candidates(rows):
+            """折り返しの候補: 前の便の終着＝次の便の始発 で、時刻が前後している組。
+
+    あくまで候補（同じ車両とは書かれていない）。自動では入れず、画面に出すだけにする。
+    """
+            out = []
+            for a in rows:
+                for b in rows:
+                    if a is b:
+                        continue
+                    if a["to"] == b["from"] and 0 <= _mins(b["dep"]) - _mins(a["arr"]) <= 60:
+                        out.append((a, b, _mins(b["dep"]) - _mins(a["arr"])))
+            return sorted(out, key=lambda x: _mins(x[0]["arr"]))
+
+
+        def _render_vehicle_links(bs, tk):
+            """②の「車両のつながり」欄。同じ番号を付けた便を1つの車両ブロックにする。
+
+    戻り値は apply_decisions がそのまま解釈できる block_links
+    （[[{"block":bi,"trip":ti}, ...], ...] / trip は1始まり）。
+    """
+            rows = _trip_rows_for_links(bs)
+            if len(rows) < 2:
+                return []
+            with st.expander("🚌 車両のつながり（折り返し）を指定する（任意）", expanded=False):
+                st.caption("同じ車両が続けて走る便（例：**駅→長井 の便が長井で折り返して 長井→駅 の便になる**）を"
+                           "まとめると、GTFSに **block_id** として出力され、乗り通しとして扱われます。"
+                           "**指定しなくてもデータは正しく作れます**（block_id が付かないだけです）。")
+                st.caption("つなげたい便に**同じ番号**を入れてください（1つの車両＝1つの番号）。"
+                           "別の車両は違う番号に、つながりが無い便は空欄のままで構いません。")
+                _cands = _link_candidates(rows)
+                if _cands:
+                    st.markdown("**折り返しの候補**（終着と次の始発が同じ停留所の組み合わせ。"
+                                "同じ車両かどうかは時刻表に書かれていないので、**自動では入れません**）:")
+                    for a, b, gap in _cands[:12]:
+                        st.caption(f"　・{a['label']}（{a['to']} {_hhmm(a['arr'])}着）→ "
+                                   f"{b['label']}（{b['from']} {_hhmm(b['dep'])}発）　待ち {gap}分")
+                _base = pd.DataFrame([{
+                    "まとまり": r["bi"], "便": r["label"],
+                    "始発": f"{r['from']} {_hhmm(r['dep'])}",
+                    "終着": f"{r['to']} {_hhmm(r['arr'])}",
+                    "つながり": None} for r in rows])
+                _ed = st.data_editor(
+                    _base, hide_index=True, width='stretch', key=f"vlink_{tk}",
+                    column_config={
+                        "まとまり": st.column_config.NumberColumn("便のまとまり", disabled=True),
+                        "便": st.column_config.TextColumn("便", disabled=True),
+                        "始発": st.column_config.TextColumn("始発", disabled=True),
+                        "終着": st.column_config.TextColumn("終着", disabled=True),
+                        "つながり": st.column_config.NumberColumn(
+                            "つながり（同じ番号＝同じ車両）", min_value=1, max_value=99, step=1,
+                            help="続けて走る便に同じ番号を入れる。空欄＝つながり無し"),
+                    })
+                # 同じ番号の便を1グループに。順番は発車時刻順（表の並び順に依存させない）。
+                _g = {}
+                for _i, _r in _ed.reset_index(drop=True).iterrows():
+                    _v = _r.get("つながり")
+                    if _v is None or pd.isna(_v):
+                        continue
+                    _g.setdefault(int(_v), []).append(rows[_i])
+                links, _msgs, _bad = [], [], False
+                for _k in sorted(_g):
+                    _mem = sorted(_g[_k], key=lambda r: _mins(r["dep"]))
+                    if len(_mem) < 2:
+                        _msgs.append(f"つながり{_k}: 便が1本だけなので、つながりとして扱いません。")
+                        continue
+                    # 同じ車両なら時刻が重ならないこと（前の便の到着より後に次の便が出る）。
+                    # 重なっていたら1台では走れないので、推測で直さずエラーにして人に返す。
+                    _ng = [(a, b) for a, b in zip(_mem, _mem[1:]) if _mins(b["dep"]) < _mins(a["arr"])]
+                    if _ng:
+                        a, b = _ng[0]
+                        st.error(f"つながり{_k}: {a['label']}（{a['to']} {_hhmm(a['arr'])}着）より前に "
+                                 f"{b['label']}（{b['from']} {_hhmm(b['dep'])}発）が出発しています。"
+                                 "1台の車両では走れない組み合わせです。番号を見直してください。")
+                        _bad = True
+                        continue
+                    # 前の便の終着と次の便の始発が違う＝回送が必要。誤りとは限らないので注意喚起のみ。
+                    _far = [(a, b) for a, b in zip(_mem, _mem[1:]) if a["to"] != b["from"]]
+                    for a, b in _far:
+                        _msgs.append(f"つながり{_k}: {a['label']}は「{a['to']}」着、"
+                                     f"{b['label']}は「{b['from']}」発で場所が違います（回送が必要）。"
+                                     "意図した組み合わせか確認してください。")
+                    links.append([{"block": r["bi"], "trip": r["ti"]} for r in _mem])
+                for _m in _msgs:
+                    st.warning("⚠️ " + _m)
+                if links:
+                    st.success("車両のつながり "
+                               + " ／ ".join("→".join(r["label"] for r in
+                                                      sorted(_g[k], key=lambda r: _mins(r["dep"])))
+                                             for k in sorted(_g) if len(_g[k]) >= 2 and not _bad)
+                               + " を block_id として出力します。")
+                return links
+
+
         # 運行する曜日は便のまとまりごとに 月〜日 の7チェックで指定する（月水金など任意の組合せ可）。
         DAY_COLS = ["月", "火", "水", "木", "金", "土", "日"]
         DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
@@ -1938,6 +2063,12 @@ if _show_tt:
                 cd_pe = _cdp3.text_input("運休期間 終了(YYYYMMDD)", value="", key=f"cdpe_{_htk}",
                                          help="西暦8桁（例 20260907）")
 
+            # ── 車両のつながり（折り返し・through-running）────────────────────────────
+            # 「駅→長井」の便が長井で折り返して「長井→駅」の便になる、のように同じ車両が
+            # 続けて走る場合、GTFSでは共通の block_id で表す。時刻表からは読み取れない
+            # （同じ車両か別の車両かは書かれていない）ので、候補を出すだけにして確定は人が行う。
+            block_links = _render_vehicle_links(blocks_e, _htk)
+
             # 割り当て表から decision_spec を構築（同じ路線名のブロックを1路線にまとめる）
             name_blocks, block_dir, headsign, block_days = {}, {}, {}, {}
             for _, r in edited.iterrows():
@@ -1959,7 +2090,7 @@ if _show_tt:
             routes = [{"route_id": f"R{i + 1:02d}", "route_long_name": nm, "blocks": bidx, "circular": False}
                       for i, (nm, bidx) in enumerate(name_blocks.items())]
             ss().decision_spec = {"routes": routes, "block_direction": block_dir, "block_headsign": headsign,
-                                  "block_days": block_days,
+                                  "block_days": block_days, "block_links": block_links,
                                   "exclude_reserve": True, "exclude_unnumbered": False, "stop_key": "name"}
             if len(routes) > 1:
                 st.info(f"{len(routes)} 路線として構成します: " + " / ".join(r["route_long_name"] for r in routes))
