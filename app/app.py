@@ -724,6 +724,28 @@ st.markdown("""
 st.caption("正確さの源は決定的スクリプト、LLMは構造化の判断のみ、"
            "無い情報は推測せず確認フォームで入力します（誤りを作らない＝正しく失敗）。")
 
+def _ymd_date_input(container, label, prefill, key, help_text=""):
+    """日付をカレンダーから選ばせ、内部で使う "YYYYMMDD" の文字列を返す。
+
+    「YYYYMMDD」と書かれても Y/M/D が何を指すか伝わらず、8桁を手打ちさせると
+    月日の取り違えや桁数間違いが起きる。表示はカレンダー、保存は従来どおりの
+    8桁文字列に揃えることで、後続の処理（GTFSのcalendar等）は変更しない。
+    prefill は検出済みの "YYYYMMDD"（空・不正なら未選択で出す）。
+    """
+    _v = None
+    _s = str(prefill or "").strip()
+    if len(_s) == 8 and _s.isdigit():
+        try:
+            _v = datetime.datetime.strptime(_s, "%Y%m%d").date()
+        except ValueError:
+            _v = None
+    _d = container.date_input(label, value=_v, key=key, format="YYYY/MM/DD",
+                              min_value=datetime.date(2000, 1, 1),
+                              max_value=datetime.date(2040, 12, 31),
+                              help=help_text or None)
+    return _d.strftime("%Y%m%d") if _d else ""
+
+
 # 使い方ガイドの操作動画。リポジトリ内 app/guide_videos/ を優先し、無ければ
 # 稲ゼミ直下の「使い方ガイド」フォルダを見る（動画は容量が大きくGit管理しないため）。
 GUIDE_VIDEO_DIRS = [REPO / "app" / "guide_videos", REPO.parent / "使い方ガイド"]
@@ -2094,11 +2116,25 @@ if _show_tt:
                                              "チェックすると開始・終了の入力欄が出ます。")
             cd_ps, cd_pe = "", ""
             if cd_use_period:
+                st.caption("カレンダーから日付を選んでください（開始日と終了日を**含めて**運休になります）。")
                 _cdp2, _cdp3 = st.columns(2)
-                cd_ps = _cdp2.text_input("運休期間 開始(YYYYMMDD)", value="", key=f"cdps_{_htk}",
-                                         help="西暦8桁（例 20260901）")
-                cd_pe = _cdp3.text_input("運休期間 終了(YYYYMMDD)", value="", key=f"cdpe_{_htk}",
-                                         help="西暦8桁（例 20260907）")
+                # 8桁の数字を手で打たせると「YYYYMMDD」の意味が伝わらず間違いやすいため、
+                # カレンダーから選ぶ形にする（内部では従来どおり YYYYMMDD の文字列で扱う）。
+                _ds = _cdp2.date_input("運休の開始日", value=None, format="YYYY/MM/DD",
+                                       key=f"cdps_{_htk}", help="この日から運休（この日も運休に含みます）")
+                _de = _cdp3.date_input("運休の終了日", value=None, format="YYYY/MM/DD",
+                                       key=f"cdpe_{_htk}", help="この日まで運休（この日も運休に含みます）")
+                cd_ps = _ds.strftime("%Y%m%d") if _ds else ""
+                cd_pe = _de.strftime("%Y%m%d") if _de else ""
+                if _ds and _de and _de < _ds:
+                    st.error("運休の終了日が開始日より前になっています。日付を確認してください。")
+                    cd_ps = cd_pe = ""
+                elif _ds and _de:
+                    # strftime の %-m/%-d は Windows で使えないため自前で組み立てる
+                    st.caption(f"→ {_ds.year}年{_ds.month}月{_ds.day}日〜{_de.year}年{_de.month}月{_de.day}日 の "
+                               f"**{(_de - _ds).days + 1}日間**を運休にします。")
+                elif _ds or _de:
+                    st.warning("開始日と終了日の**両方**を選んでください（片方だけでは運休になりません）。")
 
             # ── 車両のつながり（折り返し・through-running）────────────────────────────
             # 「駅→長井」の便が長井で折り返して「長井→駅」の便になる、のように同じ車両が
@@ -2577,19 +2613,19 @@ if _show_q:
                            "（複数の行き先に対応）。")
                 # 運行する曜日は②の『運行日』で便のまとまりごとに決めるため、ここでは入力しない。
                 # ②でパターン未割当の便が万一残った場合の予備サービス(SVC)にだけ既定曜日を使う。
-                c4, c5 = st.columns(2)
                 st.caption("📅 **有効期間**＝この時刻表（ダイヤ）が使われる期間です。"
-                           "**西暦8桁**で、区切り記号なしで入力します（例：2026年4月1日 → `20260401`）。"
-                           "ダイヤ改正日が決まっていなければ、**年度末（例 `20270331`）**を入れておけば十分です。")
-                start = c4.text_input("有効期間 開始 (YYYYMMDD)", value=det.get("start_date", ""), key=f"st_{tk}",
-                                      placeholder="例: 20260401",
-                                      help="このダイヤ(サービス)が有効な期間＝カレンダーの期間です。"
-                                           "西暦8桁・区切りなし（例 20260401）。"
-                                           "GTFSでは『feed全体の有効期限』と『各サービスの運行期間』を分けられますが、"
-                                           "通常はこの1つでOK（❓用語ヘルプ参照）。")
-                end = c5.text_input("有効期間 終了 (YYYYMMDD)", value=det.get("end_date", ""), key=f"en_{tk}",
-                                    placeholder="例: 20270331",
-                                    help="西暦8桁・区切りなし（例 20270331）。")
+                           "カレンダーから日付を選んでください。"
+                           "ダイヤ改正日が決まっていなければ、**年度末（例 2027年3月31日）**にしておけば十分です。")
+                c4, c5 = st.columns(2)
+                start = _ymd_date_input(
+                    c4, "有効期間 開始", det.get("start_date", ""), f"st_{tk}",
+                    "このダイヤ(サービス)が有効な期間＝カレンダーの期間です。"
+                    "GTFSでは『feed全体の有効期限』と『各サービスの運行期間』を分けられますが、"
+                    "通常はこの1つでOK（❓用語ヘルプ参照）。")
+                end = _ymd_date_input(c5, "有効期間 終了", det.get("end_date", ""), f"en_{tk}",
+                                      "この日までこのダイヤが有効です（例：年度末）。")
+                if start and end and end < start:
+                    st.error("有効期間の終了日が開始日より前になっています。日付を確認してください。")
                 # ※運休日（祝日・年末年始・お盆・個別の運休日）は②の表の下へ移動済み。
                 # 乗降制約（降車専用＝乗車不可）。抽出でマーカーを検出したブロックのみ提示。
                 # 範囲は自動で決めず、検出した停留所を初期選択にして人が確定する（正しく失敗）。
