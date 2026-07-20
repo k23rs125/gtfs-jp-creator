@@ -1249,8 +1249,7 @@ if _show_tt:
             ext_out = WORK / "extract.json"
             tmp = WORK / "extract_file.json"
             merged = {"source": None, "sources": [str(s) for s in srcs],
-                      "blocks": [], "warnings": [], "needs_confirmation": [],
-                      "sheet_summary": [], "skipped_sheets": []}
+                      "blocks": [], "warnings": [], "needs_confirmation": []}
             detected_all = {}
             img_files, fail_files = [], []
             for src in srcs:
@@ -1282,9 +1281,6 @@ if _show_tt:
                     merged["needs_confirmation"].append(nd)
                 for w in pj.get("warnings", []):
                     merged["warnings"].append(f"{name}: {w}")
-                # Excelの読んだシート/読まなかったシートも引き継ぐ（抽出直後に利用者へ見せるため）
-                merged["sheet_summary"].extend(pj.get("sheet_summary") or [])
-                merged["skipped_sheets"].extend(pj.get("skipped_sheets") or [])
                 # 運賃・事業者などの条件検出をマージ（先に見つかった非空値を採用）
                 cond_tmp = WORK / "conditions_file.json"
                 run([SCRIPTS / "detect_conditions.py", src, "-o", cond_tmp])
@@ -1577,17 +1573,6 @@ if _show_tt:
             total_trips = sum(len(b.get("trips", [])) for b in blocks)
             st.info(f"便のまとまり {len(blocks)} 組 / 便 計 {total_trips}"
                     "（便のまとまり＝時刻表のひとかたまり。PDFなら1ページ分・往復なら片道分）")
-            # Excelの複数シートを読んだときは、どのシートを読み・どれを読まなかったかを必ず見せる
-            # （黙って一部のシートだけ使うと、原典と違うデータが静かにできてしまうため）。
-            _shsum = ex.get("sheet_summary") or []
-            if len(_shsum) > 1:
-                st.success("📗 Excelの **" + str(len(_shsum)) + "つのシート** から読み取りました： "
-                           + " ／ ".join(f"**{s['sheet']}**（{s['trips']}便）" for s in _shsum))
-            if ex.get("skipped_sheets"):
-                st.caption("読み取らなかったシート（時刻が入っていないため）: "
-                           + " ／ ".join(ex["skipped_sheets"]))
-            for _w in (ex.get("warnings") or []):
-                st.warning("⚠️ " + str(_w))
             # 抽出直後に原典を開けるようにする（読み取り結果が合っているかを最初にここで見比べる）。
             render_source_panel("ex")
             for b in blocks:
@@ -1650,11 +1635,6 @@ if _show_tt:
             return None
 
 
-        # 原典の往復見出し → direction_id。0/1 のどちらを割り当てるかは GTFS では任意だが、
-        # 同じ路線で一貫していることが必要。上り/往路を0、下り/復路を1に固定する。
-        _DIR_LABEL_ID = {"上り": 0, "往路": 0, "往": 0, "下り": 1, "復路": 1, "復": 1}
-
-
         def _auto_route_rows(bs, source=""):
             """停留所集合が近いブロック＝同一路線(往復)とみなし、路線名・方向を自動割当（要確認・編集可）。
 
@@ -1710,24 +1690,11 @@ if _show_tt:
                     # 行き先の既定: 方向見出し(direction_hint)があれば入れる。無ければ空にして、
                     # 生成時に終点名/循環判定から自動で「○○方面」にさせる（循環の起点手前も正しく扱う）。
                     dh = bs[bi].get("direction_hint")
-                    # 方向(0/1): 原典に「上り/下り」「往路/復路」と書かれていればそれに従う。
-                    # 書かれていなければ従来どおり並び順（1つ目=行き, 2つ目=帰り）。並び順だけだと
-                    # 表が 下り→上り の順に並ぶ時刻表で行きと帰りが入れ替わってしまうため。
-                    _dl = bs[bi].get("direction_label")
-                    _dir = _DIR_LABEL_ID.get(_dl, d % 2)
-                    _row = {"ブロック": bi, "見出し": _dl or dh or "",
+                    _row = {"ブロック": bi, "見出し": dh or "",
                             "停留所数": len(nm), "路線名": rname,
-                            "方向(0/1)": "0（行き）" if _dir == 0 else "1（帰り）",
+                            "方向(0/1)": "0（行き）" if d % 2 == 0 else "1（帰り）",
                             "行き先表示": dh or "",
                             "月": True, "火": True, "水": True, "木": True, "金": True, "土": False, "日": False}
-                    # 原典に「（平日）」「（土日祝）」等と**書かれている**場合だけ、曜日の初期値に反映する
-                    # （書かれていなければ平日のまま＝推測しない）。いずれも要確認で、表で直せる。
-                    _dhint = bs[bi].get("day_hint")
-                    if _dhint in _DAY_HINT_DAYS:
-                        for _k, _c in enumerate(DAY_COLS):
-                            _row[_c] = bool(_DAY_HINT_DAYS[_dhint][_k])
-                    if bs[bi].get("sheet"):              # Excelの複数シート取り込み時にどのシート由来か表示
-                        _row["シート"] = bs[bi]["sheet"]
                     if bs[bi].get("source_name"):        # 複数ファイル取り込み時のみ元ファイル名を表示
                         _row["ファイル"] = bs[bi]["source_name"]
                     rows.append(_row)
@@ -1738,12 +1705,6 @@ if _show_tt:
         DAY_COLS = ["月", "火", "水", "木", "金", "土", "日"]
         DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
         DAY_DEFAULT = [True, True, True, True, True, False, False]   # 既定＝平日(月〜金)
-        # 原典のタイトルに書かれた運行日の表記 →7曜日 の初期値。書かれていないものは補わない。
-        _DAY_HINT_DAYS = {
-            "平日": [1, 1, 1, 1, 1, 0, 0], "土日祝": [0, 0, 0, 0, 0, 1, 1],
-            "土曜": [0, 0, 0, 0, 0, 1, 0], "日祝": [0, 0, 0, 0, 0, 0, 1],
-            "毎日": [1, 1, 1, 1, 1, 1, 1],
-        }
         # 旧保存データ（プリセット名）→7曜日 の読み替え表（後方互換）。
         _OLD_PATTERN_DAYS = {
             "平日(月〜金)": [1, 1, 1, 1, 1, 0, 0], "土曜": [0, 0, 0, 0, 0, 1, 0],
@@ -1856,10 +1817,6 @@ if _show_tt:
                         "便のまとまり", disabled=True,
                         help="時刻表のひとかたまり（PDFなら1ページ分／往復なら片道分）。この単位で路線・方向・行き先を割り当てます。"),
                     "見出し": st.column_config.TextColumn("見出し(参考)", disabled=True),
-                    "シート": st.column_config.TextColumn(   # Excelの複数シート取り込み時のみ表示（列があれば）
-                        "元シート", disabled=True,
-                        help="この便のまとまりが、Excelのどのシート由来か。"
-                             "平日用・休日用でシートが分かれている場合の見分けに使います"),
                     "ファイル": st.column_config.TextColumn(  # 複数ファイル取り込み時のみ表示（列があれば）
                         "元ファイル", disabled=True, help="この便のまとまりが、どのアップロードfile由来か"),
                     "停留所数": st.column_config.NumberColumn("停留所数", disabled=True),
@@ -1867,8 +1824,6 @@ if _show_tt:
                     "方向(0/1)": st.column_config.SelectboxColumn(
                         "方向（行き/帰り）", options=["0（行き）", "1（帰り）"], required=True,
                         help="同じ路線の往復を分ける番号です。行き=0／帰り=1（どちらを0にするかは決めでOK）。"
-                             "原典に『上り/下り』『往路/復路』と書かれていればそれに合わせています"
-                             "（上り・往路=0／下り・復路=1）。書かれていなければ表の並び順です。"
                              "循環路線は0のまま。GTFSデータには 0/1 の数字で出力されます。"),
                     "行き先表示": st.column_config.TextColumn(
                         "行き先表示", help="バス前面に出る行き先。便のまとまりごとに指定できます。"
@@ -1884,9 +1839,9 @@ if _show_tt:
                 },
             )
             st.caption("**運行する曜日**は**月〜日のチェック**で指定（初期値＝平日：月〜金／**月水金**など任意の組合せOK）。"
-                       "原典に『（平日）』『（土日祝）』などと**書かれている場合はそれを初期値**にしています（要確認）。"
                        "**祝日**にどのダイヤが運休/運行するかは、**下の『運休日』の「祝日は運休」**で"
-                       "ダイヤごとに選びます。曜日で時刻が違う時刻表は便のまとまりを分けてください。")
+                       "ダイヤごとに選びます。年末年始・お盆の運休も同じ場所で設定します。"
+                       "曜日で時刻が違う時刻表は便のまとまりを分けてください。")
             st.info("💡 **こんな時は（例）**\n\n"
                     "- **往復の路線** → 行き（佐屋→駅）と帰り（駅→佐屋）を **同じ路線名** にし、方向を 0 と 1 に。\n"
                     "- **平日と土日で時刻が違う** → 平日ページは 月〜金、土日ページは 土・日 にチェックを分ける。\n"
