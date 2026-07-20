@@ -87,6 +87,11 @@ DAY_HINT_PATTERNS = [
 ]
 
 
+# 往復の別を表す見出し。ここに完全一致した語だけを方向の手がかりに使う
+# （行き先表示ではないので headsign には入れない）。
+DIRECTION_LABELS = {"上り", "下り", "往路", "復路", "往", "復"}
+
+
 def day_hint_from_texts(texts):
     """タイトル行の文字列から「平日/土日祝/土曜/日祝/毎日」の表記を1つ返す。無ければ None。"""
     for text in texts:
@@ -245,6 +250,27 @@ def extract_sheet(ws, name_col_arg=None):
                     return v.strip()
         return None
 
+    def _direction_label(hdr_row, col_lo, col_hi):
+        """「上り／下り」「往路／復路」の見出しを領域内から拾う。行き先ではなく往復の別。
+
+        方向(direction_id)を並び順（1つ目=行き, 2つ目=帰り）で決めると、表の並びが
+        逆のときに行きと帰りが入れ替わる。原典に書かれている往復の見出しがあれば
+        それを使う。行き先表示(headsign)とは別物なので direction_hint とは分けて持つ。
+        """
+        if hdr_row is None:
+            return None
+        for rr in (hdr_row, hdr_row - 1, hdr_row - 2, hdr_row - 3):
+            if rr < 1:
+                continue
+            for cc in range(col_lo, col_hi):
+                v = cells.get((rr, cc))
+                if not isinstance(v, str):
+                    continue
+                s = re.sub(r"\s|　", "", v)          # 「上　　　り」のような字送りを詰める
+                if s in DIRECTION_LABELS:
+                    return s
+        return None
+
     header_rows = []
     for r in range(1, ws.max_row + 1):
         labels = sum(1 for tc in trip_cols
@@ -331,6 +357,7 @@ def extract_sheet(ws, name_col_arg=None):
             bi = len(blocks)
             blocks.append({"block_index": bi, "name_col": nc, "section_row": hdr,
                            "direction_hint": _direction_hint(hdr, band_lo, col_hi),
+                           "direction_label": _direction_label(hdr, band_lo, col_hi),
                            "stops": stops, "trips": trips, "warnings": []})
             flagged = [s["name"] for s in stops if s.get("boarding_hint")]
             if flagged:

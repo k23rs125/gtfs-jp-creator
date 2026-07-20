@@ -141,13 +141,17 @@ def check_excel_multisheet():
         return
     import datetime as _dt
 
-    def _put(ws, title, r0, times):
+    def _put(ws, title, r0, updown_hours):
+        """1シートに 上り／下り を横並びで置く（見出しは「上　り」のように字送りあり）。"""
         ws.cell(r0, 1, f"【時刻表】（{title}）　テスト線")
-        ws.cell(r0 + 1, 1, "停留所")
-        ws.cell(r0 + 1, 2, 1)                      # 便番号の行（あれば便ヘッダとして使われる）
-        for k, (nm, hh, mm) in enumerate(times):
-            ws.cell(r0 + 2 + k, 1, nm)
-            ws.cell(r0 + 2 + k, 2, _dt.time(hh, mm))
+        for col, (label, hh) in zip((1, 4), updown_hours):
+            ws.cell(r0 + 1, col, label)
+            ws.cell(r0 + 2, col, "停留所")
+            ws.cell(r0 + 2, col + 1, 1)            # 便番号の行（あれば便ヘッダとして使われる）
+            names = ["A停", "B停", "C停"] if col == 1 else ["C停", "B停", "A停"]
+            for k, nm in enumerate(names):
+                ws.cell(r0 + 3 + k, col, nm)
+                ws.cell(r0 + 3 + k, col + 1, _dt.time(hh, k * 10))
 
     with tempfile.TemporaryDirectory() as d:
         dp = Path(d)
@@ -155,9 +159,9 @@ def check_excel_multisheet():
         wb = openpyxl.Workbook()
         s1 = wb.active
         s1.title = "平日"
-        _put(s1, "平日", 1, [("A停", 8, 0), ("B停", 8, 10), ("C停", 8, 20)])
+        _put(s1, "平日", 1, [("上　り", 8), ("下　り", 10)])
         s2 = wb.create_sheet("土日祝")
-        _put(s2, "土日祝", 1, [("A停", 14, 0), ("B停", 14, 10), ("C停", 14, 20)])
+        _put(s2, "土日祝", 1, [("上　り", 14), ("下　り", 15)])
         # 便番号の行を持たない冊子風シート: 2つの表を上下に積む（連結されないこと）
         s3 = wb.create_sheet("冊子")
         for r0, ttl, base in ((1, "平日", 9), (10, "土日祝", 16)):
@@ -183,13 +187,18 @@ def check_excel_multisheet():
         ok_sheets = {"平日", "土日祝", "冊子"} <= sheets
         # (2) どの便も1つの表の中で完結している（各表は3停留所なので、4停留所以上の便が
         #     できていたら上下に積まれた別の表が連結されている）。便の総数も固定する。
-        ok_split = len(trips) == 4 and all(len(t["cells"]) == 3 for t in trips)
+        ok_split = len(trips) == 6 and all(len(t["cells"]) == 3 for t in trips)
         # (3) 曜日の表記を拾えている
         hints = {b.get("day_hint") for b in ex["blocks"]}
         ok_hint = {"平日", "土日祝"} <= hints
-        ok = ok_sheets and ok_split and ok_hint
+        # (4) 上り/下り の見出しから方向が取れている（並び順まかせにしない）。
+        #     字送り（「上　り」）を詰めて拾えることも含めて確認する。
+        updown = [b.get("direction_label") for b in ex["blocks"] if b.get("sheet") != "冊子"]
+        ok_dir = updown.count("上り") == 2 and updown.count("下り") == 2
+        ok = ok_sheets and ok_split and ok_hint and ok_dir
         record("excel_multisheet", PASS if ok else FAIL,
-               f"シート{len(sheets)} 便{len(trips)} 連結なし={ok_split} 曜日表記={ok_hint}")
+               f"シート{len(sheets)} 便{len(trips)} 連結なし={ok_split} "
+               f"曜日表記={ok_hint} 上下り={ok_dir}")
 
 
 # ---- 6. アプリが起動して抽出まで動く（AppTest スモーク）----
