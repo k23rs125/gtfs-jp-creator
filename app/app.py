@@ -846,9 +846,13 @@ def _video_length_label(path):
     return ""
 
 
-def _render_guide_video(filename):
-    """操作動画を折りたたみで出す。開くまで読み込まれないので初期表示が重くならない。"""
-    _p = _guide_video(filename)
+def _render_guide_video(*filenames):
+    """操作動画を折りたたみで出す。開くまで読み込まれないので初期表示が重くならない。
+
+    候補を複数渡すと、見つかった最初のものを使う。⑤⑥のように統合動画から
+    個別動画へ差し替える途中でも表示が途切れないよう、優先順で候補を並べる。
+    """
+    _p = next((v for v in (_guide_video(f) for f in filenames) if v), None)
     if not _p:
         return
     _len = _video_length_label(_p)
@@ -912,11 +916,15 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 > 💡 **こんな時は**：地図の点を押すと、下の一覧でその停留所が自動で選ばれ、緯度・経度が表示されます。
 > ピンをドラッグ→クリックでその位置に確定。同じ名前のバス停が県内に複数あると位置を誤ることがあるので、
 > 橙が残っている間は「公式提出可」にせず、必ず地図で確認してください。
-
+""", unsafe_allow_html=True)
+    # ⑤の動画。個別動画が無ければ、統合動画（⑤⑥まとめ）を暫定で表示する。
+    _render_guide_video("座標の確認（地図）.mp4", "⑤ 座標 〜 ⑥ ダウンロード.mp4")
+    st.markdown("""
 **⑥ ビューアで確認 → ダウンロード** — 完成した内容をブラウザで確認し、
 **ビューアの下にある大きなボタンから GTFS-JP 一式（zip）をダウンロード** します。
 """, unsafe_allow_html=True)
-    _render_guide_video("⑤ 座標 〜 ⑥ ダウンロード.mp4")
+    # ⑥の動画。個別動画を置けばここに表示される（無ければ枠ごと出ない）。
+    _render_guide_video("ビューアで確認・ダウンロード.mp4")
     st.markdown("""
 ---
 
