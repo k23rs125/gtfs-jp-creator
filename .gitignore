@@ -297,3 +297,8 @@ skills/gtfs-jp-creator/tools/
 !/eval_report_v1.md
 !/eval_report_v2.md
 !/使い方_統合ガイド.md
+
+# 使い方ガイドの操作動画（1本20〜100MBありGitHubの制限に触れるため管理しない）
+# 配置先: app/guide_videos/ または 稲ゼミ直下の「使い方ガイド」フォルダ
+app/guide_videos/
+*.mp4
