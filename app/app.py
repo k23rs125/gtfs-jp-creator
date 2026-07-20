@@ -805,12 +805,54 @@ def _guide_video(filename):
     return None
 
 
-def _render_guide_video(filename, label):
+_VIDEO_LEN_CACHE = {}    # (パス, 更新時刻, サイズ) -> 表示用の長さ。再実行のたびに読み直さない
+
+
+def _video_length_label(path):
+    """mp4 の再生時間を「20秒」「1分24秒」の形で返す。読めなければ空文字。
+
+    長さを手で書くと動画を撮り直すたびにずれるため、ファイルから読む。
+    mvhd ボックスは moov の位置により先頭にも末尾にもあるので前後1MBずつ見る。
+    差し替えを検知できるよう、更新時刻とサイズも含めた鍵でキャッシュする。
+    """
+    try:
+        import struct
+        _stt = path.stat()
+        _ck = (str(path), _stt.st_mtime_ns, _stt.st_size)
+        if _ck in _VIDEO_LEN_CACHE:
+            return _VIDEO_LEN_CACHE[_ck]
+        _sz = _stt.st_size
+        with path.open("rb") as _f:
+            _bufs = [_f.read(min(_sz, 1 << 20))]
+            if _sz > (1 << 20):
+                _f.seek(_sz - (1 << 20))
+                _bufs.append(_f.read())
+        for _b in _bufs:
+            _i = _b.find(b"mvhd")
+            if _i < 0:
+                continue
+            if _b[_i + 4] == 0:
+                _ts, _dur = struct.unpack(">II", _b[_i + 16:_i + 24])
+            else:
+                _ts, _dur = struct.unpack(">IQ", _b[_i + 24:_i + 36])
+            if _ts:
+                _sec = int(_dur / _ts)          # 再生器の表示に合わせて切り捨て
+                _m, _s = divmod(_sec, 60)
+                _VIDEO_LEN_CACHE[_ck] = f"{_m}分{_s}秒" if _m else f"{_s}秒"
+                return _VIDEO_LEN_CACHE[_ck]
+        _VIDEO_LEN_CACHE[_ck] = ""      # 読めないファイルを毎回読み直さない
+    except Exception:
+        pass
+    return ""
+
+
+def _render_guide_video(filename):
     """操作動画を折りたたみで出す。開くまで読み込まれないので初期表示が重くならない。"""
     _p = _guide_video(filename)
     if not _p:
         return
-    with st.expander(f"▶️ 動画で見る（{label}）"):
+    _len = _video_length_label(_p)
+    with st.expander("▶️ 動画で見る" + (f"（{_len}）" if _len else "")):
         st.video(str(_p))
 
 
@@ -830,14 +872,14 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 > 💡 **こんな時は**：元の Excel が手元にあれば **Excel が最も正確**です。画像 PDF は OCR するため
 > 数字の誤読が出ることがあり、後の⏰で必ず見比べてください。
 """, unsafe_allow_html=True)
-    _render_guide_video("時刻表読み取り.mp4", "25秒")
+    _render_guide_video("時刻表読み取り.mp4")
     st.markdown("""
 **② 路線の割り当て** — どのページ（＝**便のまとまり**）が **どの路線・方向** かを表で確認します。
 **行き先表示** と **運行する曜日（月〜日のチェック）** もこの表で直せます（月水金など任意の組合せOK）。
 > 💡 **こんな時は**：行きと帰りは **同じ路線名** にして方向を 0／1 に。平日と土日で時刻が違う時刻表は、
 > そのページの**曜日チェック**を 月〜金／土・日 に分けます（別々のダイヤとして出力されます）。
 """, unsafe_allow_html=True)
-    _render_guide_video("路線の割り当て.mp4", "30秒")
+    _render_guide_video("路線の割り当て.mp4")
     st.markdown("""
 **⏰ 時刻表の確認・修正** — 取り込んだ時刻を原典と見比べます。
 **<span style="color:#c62828">赤＝時刻の逆行（要修正）</span>**、**<span style="color:#1565c0">青＝日跨ぎ（翌日・正常）</span>**。
@@ -845,7 +887,7 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 > 💡 **こんな時は**：「待機時間」などの逆行は自動で除外されますが、赤が残ったら原典を見て正しい時刻に直します。
 > 赤いセルの下に **専用の修正欄** が出るので、そこに正しい時刻を入れられます。
 """, unsafe_allow_html=True)
-    _render_guide_video("時刻表の決定.mp4", "1分28秒")
+    _render_guide_video("時刻表の決定.mp4")
     st.markdown("""
 **③ PDF/Excel に無い項目を入力** — 時刻表に **書かれていない** 情報
 （事業者名・運賃・有効期間・運休日など）を入れます（**運行する曜日は②の『運行日』で設定**）。
@@ -855,7 +897,7 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 
 **生成** — 「GTFS-JP を生成する」を押すと、座標補完・路線図・翻訳・検証まで **自動で** 走ります。
 """, unsafe_allow_html=True)
-    _render_guide_video("GTFSデータの作成.mp4", "1分2秒")
+    _render_guide_video("GTFSデータの作成.mp4")
     st.markdown("""
 **④ 結果（ふりがな・停留所名の確認）** — 読み（ふりがな）や英語、停留所名の誤りを直します。
 **⚠印** が付いた行（漢字が残る等）は特に確認してください。
@@ -863,7 +905,7 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 > zip と地図が更新されます。**「🔎 AIで読みをチェック（任意・要確認）」** を押すと、自動読みと違う所を
 > AIが洗い出します（採用は自分で選ぶ。APIキーが要ります）。
 """, unsafe_allow_html=True)
-    _render_guide_video("地図プレビュー及び、ふりがな確認.mp4", "32秒")
+    _render_guide_video("地図プレビュー及び、ふりがな確認.mp4")
     st.markdown("""
 **⑤ 座標の確認（地図）** — 地図で停留所の位置を確認します。**<span style="color:#e08a1e">橙＝要確認</span>** の停留所を、
 **地図の点をクリックして選び**、**ピンをドラッグして正しい位置へ動かして**確定します（動かした先の緯度経度が入ります）。
@@ -874,7 +916,7 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 **⑥ ビューアで確認 → ダウンロード** — 完成した内容をブラウザで確認し、
 **ビューアの下にある大きなボタンから GTFS-JP 一式（zip）をダウンロード** します。
 """, unsafe_allow_html=True)
-    _render_guide_video("座標から最後まで.mp4", "1分24秒")
+    _render_guide_video("座標から最後まで.mp4")
     st.markdown("""
 ---
 
