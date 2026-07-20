@@ -1548,14 +1548,14 @@ if _show_tt:
             else:
                 _with_overlay(lambda: do_extract_multi(_srcs),
                               msg=f"{len(_srcs)} 個の時刻表を読み取っています…")
+        # サンプルは「読み取りが正確なもの」だけを置く。OCR由来で時刻の読み違いが残る例は
+        # 誤った手本になるため提供しない（＝誤ったデータを配らない方針）。
         st.caption("サンプルで試す:")
-        c_b, c_c, c_d = st.columns([1, 1, 1])
+        c_b, c_c = st.columns([1, 1])
         if c_b.button("太宰府まほろば号（往復）"):
             _extract_with_overlay(SAMPLES / "sample_dazaifu_mahoroba.xlsx")
         if c_c.button("築城巡回線（循環・変則便）"):
             _extract_with_overlay(SAMPLES / "sample_tsuiki_junkai.xlsx")
-        if c_d.button("こがバス（画像PDF→OCR）"):
-            _extract_with_overlay(SAMPLES / "sample_koga_ocr.md")
 
         # 画像化PDFが検出されたら、アプリ内でOCRして続行できるパネルを出す
         render_ocr_panel()
@@ -1838,21 +1838,24 @@ if _show_tt:
                 _oe = _o2.text_input("お盆 終了 (MM-DD)", value="08-15", key=f"obe_{_htk}")
                 obon_range = f"{_os.strip() or '08-13'}:{_oe.strip() or '08-15'}"
             st.caption("個別の運行日・運休日（臨時運休・特別運行がある日。無ければ空でOK）。"
-                       "**対象ダイヤ**で、その日を『どの運行日（②の曜日）に効かせるか』を選べます"
-                       "（『全ダイヤ』＝全部。特別運行はどのダイヤの便を動かすか指定できます）。")
-            _svc_opts = ["全ダイヤ"] + list(_service_labels_map())   # 全ダイヤ ＋ ②の各ダイヤ名
+                       "**どのダイヤの日か**の欄では、その日が上の表のどの運行日（曜日のまとまり）に"
+                       "あたるかを選びます。例：「平日(月〜金)」を選ぶと、平日ダイヤの便だけが"
+                       "その日は運休（または臨時運行）になります。"
+                       "**迷ったら「すべてのダイヤ」**のままでかまいません。")
+            _svc_opts = ["すべてのダイヤ"] + list(_service_labels_map())   # 全ダイヤ ＋ ②の各ダイヤ名
             _cd_base = pd.DataFrame({"日付": pd.Series([], dtype="datetime64[ns]"),
                                      "種別": pd.Series([], dtype="object"),
-                                     "対象ダイヤ": pd.Series([], dtype="object")})
+                                     "どのダイヤの日か": pd.Series([], dtype="object")})
             cd_editor = st.data_editor(
                 _cd_base, num_rows="dynamic", key=f"cd_{_htk}", width='stretch',
                 column_config={
                     "日付": st.column_config.DateColumn("日付", format="YYYY-MM-DD"),
                     "種別": st.column_config.SelectboxColumn("種別", options=["運休", "臨時運行"],
                                                              default="運休", required=True),
-                    "対象ダイヤ": st.column_config.SelectboxColumn(
-                        "対象ダイヤ", options=_svc_opts, default="全ダイヤ",
-                        help="この日を効かせる運行日（②の曜日）。全ダイヤ＝すべてのダイヤに適用")})
+                    "どのダイヤの日か": st.column_config.SelectboxColumn(
+                        "どのダイヤの日か", options=_svc_opts, default="すべてのダイヤ",
+                        help="その日が上の表のどの運行日（曜日のまとまり）にあたるか。"
+                             "すべてのダイヤ＝全部に適用（迷ったらこれ）")})
             cd_use_period = st.checkbox("期間で運休", value=False, key=f"cdp_{_htk}",
                                         help="連続した期間をまるごと運休に（工事・季節運休など）。"
                                              "チェックすると開始・終了の入力欄が出ます。")
@@ -2335,11 +2338,18 @@ if _show_q:
                 # 運行する曜日は②の『運行日』で便のまとまりごとに決めるため、ここでは入力しない。
                 # ②でパターン未割当の便が万一残った場合の予備サービス(SVC)にだけ既定曜日を使う。
                 c4, c5 = st.columns(2)
+                st.caption("📅 **有効期間**＝この時刻表（ダイヤ）が使われる期間です。"
+                           "**西暦8桁**で、区切り記号なしで入力します（例：2026年4月1日 → `20260401`）。"
+                           "ダイヤ改正日が決まっていなければ、**年度末（例 `20270331`）**を入れておけば十分です。")
                 start = c4.text_input("有効期間 開始 (YYYYMMDD)", value=det.get("start_date", ""), key=f"st_{tk}",
+                                      placeholder="例: 20260401",
                                       help="このダイヤ(サービス)が有効な期間＝カレンダーの期間です。"
+                                           "西暦8桁・区切りなし（例 20260401）。"
                                            "GTFSでは『feed全体の有効期限』と『各サービスの運行期間』を分けられますが、"
                                            "通常はこの1つでOK（❓用語ヘルプ参照）。")
-                end = c5.text_input("有効期間 終了 (YYYYMMDD)", value=det.get("end_date", ""), key=f"en_{tk}")
+                end = c5.text_input("有効期間 終了 (YYYYMMDD)", value=det.get("end_date", ""), key=f"en_{tk}",
+                                    placeholder="例: 20270331",
+                                    help="西暦8桁・区切りなし（例 20270331）。")
                 # ※運休日（祝日・年末年始・お盆・個別の運休日）は②の表の下へ移動済み。
                 # 乗降制約（降車専用＝乗車不可）。抽出でマーカーを検出したブロックのみ提示。
                 # 範囲は自動で決めず、検出した停留所を初期選択にして人が確定する（正しく失敗）。
@@ -2460,9 +2470,11 @@ if _show_q:
                         if pd.isna(_dv) or not _kind:
                             continue
                         _ymd = pd.Timestamp(_dv).strftime("%Y%m%d")
-                        # 対象ダイヤ: 「全ダイヤ」or未指定→全service、特定ダイヤ→その1つ（無効なら全）。
-                        _tgt = str(_r.get("対象ダイヤ") or "全ダイヤ").strip()
-                        if _tgt in ("", "全ダイヤ"):
+                        # どのダイヤの日か: 「すべてのダイヤ」or未指定→全service、特定ダイヤ→その1つ
+                        # （無効なら全）。旧列名「対象ダイヤ」/旧値「全ダイヤ」の保存データとも互換。
+                        _tgt = str(_r.get("どのダイヤの日か") or _r.get("対象ダイヤ")
+                                   or "すべてのダイヤ").strip()
+                        if _tgt in ("", "すべてのダイヤ", "全ダイヤ"):
                             _tsids = _svc_ids
                         else:
                             _one = _svc_label2sid.get(_tgt)
@@ -2860,9 +2872,13 @@ if _show_coord:
                 _aiap = ss().get("ai_applied") or {}   # 生成時にAIが探索して既定化した読み（要確認）
                 _n_susp = sum(1 for _nm in _order if _reading_suspicious(_cur[_nm].get("ja-Hrkt", "")))
                 _hdr = (f' / ⚠要確認 {_n_susp}件' if _n_susp else '') + (f' / 🔎AI {len(_aiap)}件' if _aiap else '')
-                with st.expander(f"🈁 ふりがな・英語・停留所名の確認・修正"
+                with st.expander(f"🈁 ふりがな・英語の確認・修正 — 停留所名／路線名／事業者名"
                                  f"（難読地名の誤読をここで直す{_hdr}）",
                                  expanded=bool(_n_susp) or bool(_aiap) or bool(ss().get("ai_readings"))):
+                    st.info("このなかで **①停留所名（下の表）** と "
+                            "**②路線名・事業者名・行き先表示（さらに下の表）** の"
+                            "**ふりがな・英語**を直せます。**路線名・事業者名を直したいときは"
+                            "下までスクロール**してください。")
                     st.caption("✏️ **読み・停留所名のセルはクリック（ダブルクリック）で編集**できます。"
                                "読みは辞書付き解析（SudachiPy）で自動生成します（半角カナはNFKCで正規化、"
                                "全国共通の難読は辞書で補正）。それでも難読地名は誤読が残ることがあります"
@@ -3096,6 +3112,12 @@ if _show_coord:
                            "**全部が確定になるまで「公式提出可」にしない**（＝推測座標を黙って出さない）。"
                            "**行き・帰りは別々の停留所**として表示されます（多くは反対車線＝別座標。"
                            "終点・敷地内で同じ場所なら『同じ場所にする』で揃えられます）。")
+                st.info("**「この位置で確定」を押さなかったらどうなる？** — その停留所は"
+                        "**橙（要確認）のまま**残ります。zip は作れて中身の座標も入っていますが、"
+                        "それは**アプリが推定した位置**なので、④の提出前チェックは"
+                        "**「公式提出可」になりません**（要確認の件数が表示されます）。"
+                        "つまり**データが消えるわけではなく、「まだ人が確認していない」印が付いたまま**です。"
+                        "推定位置で問題なければ、**動かさずにそのまま「この位置で確定」を押せばOK**です。")
 
                 # ── 行き↔帰りの反転（地図で向きが逆と分かった便のまとまりを反転＋その場で再生成）──
                 with st.expander("↔ 行き／帰りが逆のとき反転する（停留所の順・時刻を逆にして再生成）"):
