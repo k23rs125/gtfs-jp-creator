@@ -724,26 +724,51 @@ st.markdown("""
 st.caption("正確さの源は決定的スクリプト、LLMは構造化の判断のみ、"
            "無い情報は推測せず確認フォームで入力します（誤りを作らない＝正しく失敗）。")
 
-def _ymd_date_input(container, label, prefill, key, help_text=""):
-    """日付をカレンダーから選ばせ、内部で使う "YYYYMMDD" の文字列を返す。
+def _ymd_date_input(label, prefill, key, help_text=""):
+    """「年・月・日」を別々の欄で入力させ、内部で使う "YYYYMMDD" の文字列を返す。
 
-    「YYYYMMDD」と書かれても Y/M/D が何を指すか伝わらず、8桁を手打ちさせると
-    月日の取り違えや桁数間違いが起きる。表示はカレンダー、保存は従来どおりの
-    8桁文字列に揃えることで、後続の処理（GTFSのcalendar等）は変更しない。
-    prefill は検出済みの "YYYYMMDD"（空・不正なら未選択で出す）。
+    YYYYMMDD や YYYY/MM/DD といった表記は Y/M/D が何を指すか伝わらないため、
+    画面には「年」「月」「日」としか出さない。保存は従来どおり8桁文字列に揃えるので、
+    後続の処理（GTFSのcalendar等）は変更しない。
+    prefill は検出済みの "YYYYMMDD"（空・不正なら未入力で出す）。
     """
-    _v = None
+    _y = _m = _d = None
     _s = str(prefill or "").strip()
     if len(_s) == 8 and _s.isdigit():
         try:
-            _v = datetime.datetime.strptime(_s, "%Y%m%d").date()
+            _dt = datetime.datetime.strptime(_s, "%Y%m%d").date()
+            _y, _m, _d = _dt.year, _dt.month, _dt.day
         except ValueError:
-            _v = None
-    _d = container.date_input(label, value=_v, key=key, format="YYYY/MM/DD",
-                              min_value=datetime.date(2000, 1, 1),
-                              max_value=datetime.date(2040, 12, 31),
-                              help=help_text or None)
-    return _d.strftime("%Y%m%d") if _d else ""
+            _y = _m = _d = None
+    st.markdown(f"**{label}**" + (f"　<span style='color:#5b6b7b;font-size:0.85em'>{help_text}</span>"
+                                  if help_text else ""), unsafe_allow_html=True)
+    _c1, _c2, _c3, _c4 = st.columns([2, 1.4, 1.4, 4])
+    _yy = _c1.number_input("年", min_value=2000, max_value=2040, value=_y, step=1,
+                           key=f"{key}_y", placeholder="2026")
+    _mm = _c2.number_input("月", min_value=1, max_value=12, value=_m, step=1,
+                           key=f"{key}_m", placeholder="4")
+    _dd = _c3.number_input("日", min_value=1, max_value=31, value=_d, step=1,
+                           key=f"{key}_d", placeholder="1")
+    if _yy is None and _mm is None and _dd is None:
+        return ""
+    if _yy is None or _mm is None or _dd is None:
+        st.warning(f"{label}：**年・月・日をすべて**入れてください。")
+        return ""
+    try:                                  # 2月30日のような存在しない日は受け付けない
+        datetime.date(int(_yy), int(_mm), int(_dd))
+    except ValueError:
+        st.error(f"{label}：{int(_yy)}年{int(_mm)}月{int(_dd)}日 は存在しない日付です。")
+        return ""
+    return f"{int(_yy):04d}{int(_mm):02d}{int(_dd):02d}"
+
+
+def _md_input(label, default_m, default_d, key):
+    """「月・日」だけの入力（年末年始・お盆の範囲用）。"MM-DD" の文字列を返す。"""
+    _c1, _c2, _c3 = st.columns([1.4, 1.4, 5])
+    _c1.markdown(f"<div style='padding-top:6px'>{label}</div>", unsafe_allow_html=True)
+    _mm = _c2.number_input("月", min_value=1, max_value=12, value=default_m, step=1, key=f"{key}_m")
+    _dd = _c3.number_input("日", min_value=1, max_value=31, value=default_d, step=1, key=f"{key}_d")
+    return f"{int(_mm):02d}-{int(_dd):02d}"
 
 
 # 使い方ガイドの操作動画。リポジトリ内 app/guide_videos/ を優先し、無ければ
@@ -2079,19 +2104,21 @@ if _show_tt:
                 # 日曜を含むダイヤがあるのに祝日未設定＝祝日は通常の曜日どおりになる。黙って決めない。
                 st.caption("💡 日曜を含むダイヤがあります。**祝日に運休/運行するダイヤを決めたい場合は"
                            "『祝日は運休』にチェック**してください（未設定のときは祝日も通常の曜日どおりに扱います）。")
-            # 年末年始・お盆は「どこまでか」を可変に（既定＝12/29〜1/3、8/13〜8/15）。MM-DD で入力。
+            # 年末年始・お盆は「どこまでか」を可変に（既定＝12/29〜1/3、8/13〜8/15）。
+            # 毎年同じ月日なので年は入力させず、月と日だけを別々の欄で入れる。
             nenmatsu_range, obon_range = "12-29:01-03", "08-13:08-15"
             if hol_nenmatsu:
-                _n1, _n2 = st.columns(2)
-                _ns = _n1.text_input("年末年始 開始 (MM-DD)", value="12-29", key=f"nns_{_htk}")
-                _ne = _n2.text_input("年末年始 終了 (MM-DD)", value="01-03", key=f"nne_{_htk}",
-                                     help="年をまたぐ場合も、開始＞終了の表記でOK（例 12-29〜01-03）")
-                nenmatsu_range = f"{_ns.strip() or '12-29'}:{_ne.strip() or '01-03'}"
+                st.markdown("**年末年始の運休期間**")
+                st.caption("毎年この月日で運休にします。年をまたいでも構いません（例：12月29日〜1月3日）。")
+                _ns = _md_input("開始", 12, 29, f"nns_{_htk}")
+                _ne = _md_input("終了", 1, 3, f"nne_{_htk}")
+                nenmatsu_range = f"{_ns}:{_ne}"
             if hol_obon:
-                _o1, _o2 = st.columns(2)
-                _os = _o1.text_input("お盆 開始 (MM-DD)", value="08-13", key=f"obs_{_htk}")
-                _oe = _o2.text_input("お盆 終了 (MM-DD)", value="08-15", key=f"obe_{_htk}")
-                obon_range = f"{_os.strip() or '08-13'}:{_oe.strip() or '08-15'}"
+                st.markdown("**お盆の運休期間**")
+                st.caption("毎年この月日で運休にします（例：8月13日〜8月15日）。")
+                _os = _md_input("開始", 8, 13, f"obs_{_htk}")
+                _oe = _md_input("終了", 8, 15, f"obe_{_htk}")
+                obon_range = f"{_os}:{_oe}"
             st.caption("個別の運行日・運休日（臨時運休・特別運行がある日。無ければ空でOK）。"
                        "**どのダイヤの日か**の欄では、その日がどの**路線のどの運行日（曜日のまとまり）**に"
                        "あたるかを選びます。例：「感田線／平日(月〜金)」を選ぶと、感田線の平日ダイヤの便だけが"
@@ -2104,7 +2131,8 @@ if _show_tt:
             cd_editor = st.data_editor(
                 _cd_base, num_rows="dynamic", key=f"cd_{_htk}", width='stretch',
                 column_config={
-                    "日付": st.column_config.DateColumn("日付", format="YYYY-MM-DD"),
+                    # 表示も「2026年9月1日」の形にして、YYYY/MM/DD のような表記を画面に出さない
+                    "日付": st.column_config.DateColumn("日付", format="YYYY年M月D日"),
                     "種別": st.column_config.SelectboxColumn("種別", options=["運休", "臨時運行"],
                                                              default="運休", required=True),
                     "どのダイヤの日か": st.column_config.SelectboxColumn(
@@ -2116,25 +2144,21 @@ if _show_tt:
                                              "チェックすると開始・終了の入力欄が出ます。")
             cd_ps, cd_pe = "", ""
             if cd_use_period:
-                st.caption("カレンダーから日付を選んでください（開始日と終了日を**含めて**運休になります）。")
-                _cdp2, _cdp3 = st.columns(2)
-                # 8桁の数字を手で打たせると「YYYYMMDD」の意味が伝わらず間違いやすいため、
-                # カレンダーから選ぶ形にする（内部では従来どおり YYYYMMDD の文字列で扱う）。
-                _ds = _cdp2.date_input("運休の開始日", value=None, format="YYYY/MM/DD",
-                                       key=f"cdps_{_htk}", help="この日から運休（この日も運休に含みます）")
-                _de = _cdp3.date_input("運休の終了日", value=None, format="YYYY/MM/DD",
-                                       key=f"cdpe_{_htk}", help="この日まで運休（この日も運休に含みます）")
-                cd_ps = _ds.strftime("%Y%m%d") if _ds else ""
-                cd_pe = _de.strftime("%Y%m%d") if _de else ""
-                if _ds and _de and _de < _ds:
-                    st.error("運休の終了日が開始日より前になっています。日付を確認してください。")
-                    cd_ps = cd_pe = ""
-                elif _ds and _de:
-                    # strftime の %-m/%-d は Windows で使えないため自前で組み立てる
-                    st.caption(f"→ {_ds.year}年{_ds.month}月{_ds.day}日〜{_de.year}年{_de.month}月{_de.day}日 の "
-                               f"**{(_de - _ds).days + 1}日間**を運休にします。")
-                elif _ds or _de:
-                    st.warning("開始日と終了日の**両方**を選んでください（片方だけでは運休になりません）。")
+                st.caption("開始日と終了日を**含めて**運休になります。")
+                cd_ps = _ymd_date_input("運休の開始日", "", f"cdps_{_htk}", "この日から運休（この日も含む）")
+                cd_pe = _ymd_date_input("運休の終了日", "", f"cdpe_{_htk}", "この日まで運休（この日も含む）")
+                if cd_ps and cd_pe:
+                    _p0 = datetime.datetime.strptime(cd_ps, "%Y%m%d").date()
+                    _p1 = datetime.datetime.strptime(cd_pe, "%Y%m%d").date()
+                    if _p1 < _p0:
+                        st.error("運休の終了日が開始日より前になっています。日付を確認してください。")
+                        cd_ps = cd_pe = ""
+                    else:
+                        st.caption(f"→ {_p0.year}年{_p0.month}月{_p0.day}日〜"
+                                   f"{_p1.year}年{_p1.month}月{_p1.day}日 の "
+                                   f"**{(_p1 - _p0).days + 1}日間**を運休にします。")
+                elif cd_ps or cd_pe:
+                    st.warning("開始日と終了日の**両方**を入れてください（片方だけでは運休になりません）。")
 
             # ── 車両のつながり（折り返し・through-running）────────────────────────────
             # 「駅→長井」の便が長井で折り返して「長井→駅」の便になる、のように同じ車両が
@@ -2614,16 +2638,12 @@ if _show_q:
                 # 運行する曜日は②の『運行日』で便のまとまりごとに決めるため、ここでは入力しない。
                 # ②でパターン未割当の便が万一残った場合の予備サービス(SVC)にだけ既定曜日を使う。
                 st.caption("📅 **有効期間**＝この時刻表（ダイヤ）が使われる期間です。"
-                           "カレンダーから日付を選んでください。"
-                           "ダイヤ改正日が決まっていなければ、**年度末（例 2027年3月31日）**にしておけば十分です。")
-                c4, c5 = st.columns(2)
-                start = _ymd_date_input(
-                    c4, "有効期間 開始", det.get("start_date", ""), f"st_{tk}",
-                    "このダイヤ(サービス)が有効な期間＝カレンダーの期間です。"
-                    "GTFSでは『feed全体の有効期限』と『各サービスの運行期間』を分けられますが、"
-                    "通常はこの1つでOK（❓用語ヘルプ参照）。")
-                end = _ymd_date_input(c5, "有効期間 終了", det.get("end_date", ""), f"en_{tk}",
-                                      "この日までこのダイヤが有効です（例：年度末）。")
+                           "ダイヤ改正日が決まっていなければ、**年度末（例：2027年3月31日）**"
+                           "にしておけば十分です。")
+                start = _ymd_date_input("有効期間 開始", det.get("start_date", ""), f"st_{tk}",
+                                        "このダイヤが使われ始める日")
+                end = _ymd_date_input("有効期間 終了", det.get("end_date", ""), f"en_{tk}",
+                                      "このダイヤが使われる最後の日（例：年度末）")
                 if start and end and end < start:
                     st.error("有効期間の終了日が開始日より前になっています。日付を確認してください。")
                 # ※運休日（祝日・年末年始・お盆・個別の運休日）は②の表の下へ移動済み。
