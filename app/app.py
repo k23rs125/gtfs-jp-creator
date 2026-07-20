@@ -1079,16 +1079,23 @@ if _show_tt:
     時刻・停留所・運賃を原典と横並びで照合できるようにし、誤読・誤りの見落としを減らす。
     複数ファイルを取り込んだ時は、各原典を個別に別タブで開けるようにする。"""
             _IMG = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")
-            srcs = ss().get("sources_all") or ([ss().get("source_display")] if ss().get("source_display") else [])
-            srcs = [s for s in srcs if s and Path(s).exists() and str(s).lower().endswith(_IMG)]
+            _all = ss().get("sources_all") or ([ss().get("source_display")] if ss().get("source_display") else [])
+            _all = [s for s in _all if s and Path(s).exists()]
+            srcs = [s for s in _all if str(s).lower().endswith(_IMG)]
             if not srcs:
+                # Excel/Word 等はブラウザのタブで表示できない。何も出ないと理由が分からないため明示する。
+                if _all and where == "ex":
+                    st.caption("📄 原典を別タブで開けるのは **PDF・画像** のときです"
+                               f"（今回の原典『{Path(_all[0]).name}』は Excel／文書のため、"
+                               "元のアプリで開いて見比べてください）。")
                 return
             multi = len(srcs) > 1
             for i, sp in enumerate(srcs):
                 _lbl = (f"📄『{Path(sp).name}』を別タブで開く" if multi
                         else "📄 原典を別タブで開く（別画面に並べて見比べる）")
                 _open_source_new_tab_button(sp, str(sp).lower(), f"{where}{i}", _lbl)
-            st.caption("↑ 別タブで開いて、ウィンドウを横に並べる（または別モニタに移す）と、下の表と見比べやすくなります。"
+            st.caption("↑ 別タブで開いて、ウィンドウを横に並べる（または別モニタに移す）と、"
+                       "**読み取った内容と原典を見比べやすく**なります。"
                        + ("（複数ファイルはそれぞれ開けます）" if multi else ""))
             # インラインのプレビュー枠は廃止（別タブで開いて見比べる方式に統一＝画面をすっきり）。
 
@@ -1566,6 +1573,8 @@ if _show_tt:
             total_trips = sum(len(b.get("trips", [])) for b in blocks)
             st.info(f"便のまとまり {len(blocks)} 組 / 便 計 {total_trips}"
                     "（便のまとまり＝時刻表のひとかたまり。PDFなら1ページ分・往復なら片道分）")
+            # 抽出直後に原典を開けるようにする（読み取り結果が合っているかを最初にここで見比べる）。
+            render_source_panel("ex")
             for b in blocks:
                 trips = b.get("trips", [])
                 # 便ごとに停留所数が異なる（循環・区間便）ため、代表は便[0]でなく全体の停留所列を使う
