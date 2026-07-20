@@ -776,12 +776,32 @@ def _md_input(label, default_m, default_d, key):
 GUIDE_VIDEO_DIRS = [REPO / "app" / "guide_videos", REPO.parent / "使い方ガイド"]
 
 
+def _norm_video_name(name):
+    """動画ファイル名の表記ゆれを吸収した比較用の文字列を返す。
+
+    「時刻表の読み取り」と「時刻表読み取り」のように、助詞や記号の有無だけが違う
+    ファイル名を同じものとして扱う（撮り直しで名前が揺れても動画が消えないように）。
+    """
+    return re.sub(r"[の\s　_＿\-ー、,．.･・]+", "", str(name).rsplit(".", 1)[0]).lower()
+
+
 def _guide_video(filename):
-    """使い方ガイドの動画パスを返す。見つからなければ None（ガイド本文はそのまま出す）。"""
+    """使い方ガイドの動画パスを返す。見つからなければ None（ガイド本文はそのまま出す）。
+
+    撮り直しでファイル名が少し変わっても動画が消えないよう、完全一致で見つからなければ
+    「の」や空白を無視した名前で照合する。
+    """
     for _d in GUIDE_VIDEO_DIRS:
         _p = _d / filename
         if _p.exists():
             return _p
+    _key = _norm_video_name(filename)
+    for _d in GUIDE_VIDEO_DIRS:
+        if not _d.is_dir():
+            continue
+        for _f in sorted(_d.glob("*.mp4")):
+            if _norm_video_name(_f.name) == _key:
+                return _f
     return None
 
 
@@ -810,7 +830,7 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
 > 💡 **こんな時は**：元の Excel が手元にあれば **Excel が最も正確**です。画像 PDF は OCR するため
 > 数字の誤読が出ることがあり、後の⏰で必ず見比べてください。
 """, unsafe_allow_html=True)
-    _render_guide_video("時刻表の読み取り.mp4", "20秒")
+    _render_guide_video("時刻表読み取り.mp4", "25秒")
     st.markdown("""
 **② 路線の割り当て** — どのページ（＝**便のまとまり**）が **どの路線・方向** かを表で確認します。
 **行き先表示** と **運行する曜日（月〜日のチェック）** もこの表で直せます（月水金など任意の組合せOK）。
