@@ -26,7 +26,7 @@ results = []
 def record(name, status, detail=""):
     results.append((name, status))
     mark = {"PASS": "✅", "FAIL": "❌", "SKIP": "⏭"}[status]
-    print(f"  {mark} [{status}] {name}" + (f" — {detail}" if detail else ""))
+    print(f"  {mark} [{status}] {name}" + (f" - {detail}" if detail else ""))
 
 
 # ---- 1. コンパイル（app + 全スクリプト）----
@@ -171,7 +171,7 @@ def check_golden():
 
 def main():
     print("=" * 64)
-    print("run_checks — 回帰チェック（外部依存が無い項目はSKIP）")
+    print("run_checks - 回帰チェック（外部依存が無い項目はSKIP）")
     print("=" * 64)
     for fn in (check_compile, check_shape_dedup, check_feed_contact, check_eval_compare,
                check_apply_decisions, check_apptest_smoke, check_golden):

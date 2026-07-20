@@ -1824,15 +1824,44 @@ if _show_tt:
             _htk = ss().get("extract_token", "")
             _hdet = ss().get("detected", {}) or {}
             st.markdown("**運休日（全路線に一律で適用。該当する場合のみチェック）**")
-            st.caption("上の表で運行する曜日を決め、ここで**祝日などの運休**を設定します。"
-                       "『祝日は運休』は 平日/土曜ダイヤを祝日に休みにします（**日**にチェックした日祝ダイヤはその日も運行）。")
+            st.caption("上の表で運行する曜日を決め、ここで**祝日などの運休**を設定します。")
             _h1, _h2, _h3 = st.columns(3)
             hol_syuku = _h1.checkbox("祝日は運休", value=bool(_hdet.get("holiday_syukujitsu")), key=f"hs_{_htk}",
-                                     help="内閣府の祝日データ（同梱・〜2027年）で祝日を運休に展開")
+                                     help="内閣府の祝日データ（同梱・〜2027年）で祝日の運休/運行を展開")
             hol_nenmatsu = _h2.checkbox("年末年始運休", value=bool(_hdet.get("holiday_nenmatsu")), key=f"hn_{_htk}",
                                         help="年末年始を運休に展開（下で期間を変えられます）")
             hol_obon = _h3.checkbox("お盆運休", value=bool(_hdet.get("holiday_obon")), key=f"ho_{_htk}",
                                     help="お盆を運休に展開（下で期間を変えられます）")
+            # ── 祝日にどのダイヤを運休にするかを「利用者が選ぶ」（推測しない）──
+            # 例: 平日ダイヤと土日ダイヤがある場合、「平日だけ運休」「両方運休」などを明示的に選べる。
+            _svc_map_hol = _service_labels_map()
+            _hol_labels = list(_svc_map_hol)
+            hol_syuku_labels = []
+            if hol_syuku:
+                if not _hol_labels:
+                    st.warning("②の表で運行する曜日（ダイヤ）を決めると、"
+                               "ここで『祝日に運休するダイヤ』を選べるようになります。")
+                else:
+                    # 既定は「日曜を含まないダイヤ（平日・土曜など）」＝最も多い運用。変更可。
+                    _def_hol = [_l for _l in _hol_labels if not str(_svc_map_hol[_l]).endswith("1")]
+                    hol_syuku_labels = st.multiselect(
+                        "祝日に運休するダイヤ（複数選べます）", _hol_labels,
+                        default=_def_hol, key=f"hsy_{_htk}",
+                        help="選んだダイヤは祝日に運休します。選ばなかったダイヤは祝日も運行します。")
+                    _rest = [_l for _l in _hol_labels if _l not in hol_syuku_labels]
+                    if not hol_syuku_labels:
+                        st.warning("運休にするダイヤが1つも選ばれていません。このままだと**祝日は通常の曜日どおり**"
+                                   "（祝日あつかいなし）になります。該当するダイヤを選んでください。")
+                    elif _rest:
+                        st.caption("→ 選んだ **" + "・".join(hol_syuku_labels) + "** は祝日に運休。"
+                                   "選ばなかった **" + "・".join(_rest) + "** が**祝日も運行**します"
+                                   "（平日にあたる祝日でも、このダイヤで走ります＝「土日祝ダイヤ」あつかい）。")
+                    else:
+                        st.caption("→ すべてのダイヤを選んだので、**祝日はどのダイヤも運休**（バスが走らない日）になります。")
+            elif any(str(_v).endswith("1") for _v in _svc_map_hol.values()):
+                # 日曜を含むダイヤがあるのに祝日未設定＝祝日は通常の曜日どおりになる。黙って決めない。
+                st.caption("💡 日曜を含むダイヤがあります。**祝日に運休/運行するダイヤを決めたい場合は"
+                           "『祝日は運休』にチェック**してください（未設定のときは祝日も通常の曜日どおりに扱います）。")
             # 年末年始・お盆は「どこまでか」を可変に（既定＝12/29〜1/3、8/13〜8/15）。MM-DD で入力。
             nenmatsu_range, obon_range = "12-29:01-03", "08-13:08-15"
             if hol_nenmatsu:
@@ -2508,11 +2537,15 @@ if _show_q:
                 # 祝日運休チェックの有無に関わらず、その祝日に運行(1)を追加する（＝一般的な祝日を反映）。
                 # 平日/土曜ダイヤを祝日に運休(2)にするのは「祝日は運休」チェックON時だけ（利用者の選択）。
                 # run_pipeline の一律運休は複数ダイヤで日祝サービスの日曜まで消すため、ここで決定的に展開。
-                # 「日曜にチェックがある便＝祝日も運行(日祝ダイヤ)」とみなす（sun=1 で判定）。
-                # 平日/土曜(sun=0)は下の「祝日は運休」がONのとき、その曜日に当たる祝日を運休にする。
-                _has_hol_pattern = any(int(s.get("sun", 0)) == 1 for s in spec["services"])
+                # 祝日にどのダイヤを運休にするかは「利用者が②の下で明示的に選ぶ」（sun=1 からの推測はしない）。
+                #   選んだダイヤ          → その祝日が該当曜日なら運休(2)
+                #   選ばなかったダイヤ    → その祝日が該当曜日でなくても運行(1)＝日祝ダイヤとして扱う
+                _hol_off_sids = set()
+                if hol_syuku:
+                    _m_hol = _service_labels_map()
+                    _hol_off_sids = {_m_hol[_l] for _l in (hol_syuku_labels or []) if _l in _m_hol}
                 _syuku_inapp_ok = False
-                if hol_syuku or _has_hol_pattern:
+                if hol_syuku:
                     try:
                         from generate_calendar_dates import load_syukujitsu
                         _holidays = load_syukujitsu(
@@ -2526,13 +2559,16 @@ if _show_q:
                             _ymd = _d.strftime("%Y%m%d"); _dk = _daykeys[_d.weekday()]
                             for _s in spec["services"]:
                                 _sid = _s["service_id"]
-                                _runs_hol = int(_s.get("sun", 0)) == 1   # 日曜含む便＝祝日も運行
+                                _off = _sid in _hol_off_sids      # 利用者が「祝日は運休」と選んだダイヤ
                                 _covers = int(_s.get(_dk, 0)) == 1
-                                if _runs_hol and not _covers:
-                                    _add_cd(_ymd, 1, [_sid])   # 祝日はこのダイヤで運行（常に）
-                                elif (not _runs_hol) and _covers and hol_syuku:
-                                    _add_cd(_ymd, 2, [_sid])   # 平日/土曜は祝日運休（チェックON時のみ）
-                        _syuku_inapp_ok = hol_syuku   # 一律運休の抑制は祝日運休ON時のみ意味を持つ
+                                if _off and _covers:
+                                    _add_cd(_ymd, 2, [_sid])   # 選んだダイヤ→祝日は運休
+                                elif (not _off) and not _covers and _hol_off_sids:
+                                    # 運休にするダイヤが指定されている場合に限り、
+                                    # 選ばなかったダイヤを「日祝ダイヤ」として祝日に運行させる。
+                                    # （1つも選ばれていないときは何も展開しない＝祝日も通常の曜日どおり）
+                                    _add_cd(_ymd, 1, [_sid])
+                        _syuku_inapp_ok = True    # ここで展開済みなので後段の一律運休は不要
                     except Exception:
                         _syuku_inapp_ok = False   # 失敗時は後段の一律運休へフォールバック
                 if _cal_dates:
