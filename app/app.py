@@ -1726,18 +1726,47 @@ if _show_tt:
             return "・".join(_n) if _n else "（曜日なし）"
 
 
-        def _svc_id_from_days(bits):
+        def _svc_id_from_days(bits, route_id=""):
+            """曜日ビット(＋路線)から service_id を作る（例 R01の平日 → SVC_1111100_R01）。
+            路線ごとに祝日の扱いが違うことがあるため、路線をまたいでサービスは共有しない。"""
             b = [int(x) for x in bits] if (isinstance(bits, (list, tuple)) and len(bits) == 7) else [1, 1, 1, 1, 1, 0, 0]
             if not any(b):
                 b = [1, 1, 1, 1, 1, 0, 0]
-            return "SVC_" + "".join(str(x) for x in b)
+            return "SVC_" + "".join(str(x) for x in b) + (f"_{route_id}" if route_id else "")
+
+
+        def _svc_days_bits(sid):
+            """service_id（SVC_1111100 / SVC_1111100_R01）から曜日ビット文字列を取り出す。"""
+            _p = str(sid).split("_")
+            return _p[1] if len(_p) > 1 and len(_p[1]) == 7 and set(_p[1]) <= {"0", "1"} else ""
+
+
+        def _block_route_map():
+            """便のまとまり(block index) → (route_id, 路線名) の対応。"""
+            m = {}
+            for _r in (ss().get("decision_spec", {}) or {}).get("routes", []):
+                _rid = _r.get("route_id", "")
+                _rnm = (_r.get("route_long_name") or "").strip() or _rid
+                for _b in _r.get("blocks", []):
+                    m[str(_b)] = (_rid, _rnm)
+            return m
+
+
+        def _svc_disp_label(route_name, bits):
+            """利用者に見せるダイヤ名（例「感田線／平日(月〜金)」）。路線名が無ければ曜日だけ。"""
+            _d = _days_label(bits)
+            return f"{route_name}／{_d}" if route_name else _d
 
 
         def _service_labels_map():
-            """②の運行日(block_days)から {ダイヤ名: service_id} を作る（同一組合せは1つに集約）。"""
+            """②の運行日(block_days)と路線から {ダイヤ名: service_id} を作る。
+            同じ路線・同じ曜日組合せは1つに集約。路線が違えば別のダイヤとして扱う
+            （路線Aは祝日運休・路線Bは祝日も運行、のような指定を可能にするため）。"""
+            _br = _block_route_map()
             m = {}
-            for _d in (ss().get("decision_spec", {}) or {}).get("block_days", {}).values():
-                m[_days_label(_d)] = _svc_id_from_days(_d)
+            for _bi, _d in (ss().get("decision_spec", {}) or {}).get("block_days", {}).items():
+                _rid, _rnm = _br.get(str(_bi), ("", ""))
+                m[_svc_disp_label(_rnm, _d)] = _svc_id_from_days(_d, _rid)
             return m
 
 
@@ -1843,11 +1872,14 @@ if _show_tt:
                                "ここで『祝日に運休するダイヤ』を選べるようになります。")
                 else:
                     # 既定は「日曜を含まないダイヤ（平日・土曜など）」＝最も多い運用。変更可。
-                    _def_hol = [_l for _l in _hol_labels if not str(_svc_map_hol[_l]).endswith("1")]
+                    _def_hol = [_l for _l in _hol_labels
+                                if not _svc_days_bits(_svc_map_hol[_l]).endswith("1")]
                     hol_syuku_labels = st.multiselect(
-                        "祝日に運休するダイヤ（複数選べます）", _hol_labels,
+                        "祝日に運休するダイヤ（路線ごとに複数選べます）", _hol_labels,
                         default=_def_hol, key=f"hsy_{_htk}",
-                        help="選んだダイヤは祝日に運休します。選ばなかったダイヤは祝日も運行します。")
+                        help="「路線名／曜日」の単位で選びます。選んだダイヤは祝日に運休し、"
+                             "選ばなかったダイヤは祝日も運行します。"
+                             "路線ごとに祝日の扱いが違う場合も指定できます。")
                     _rest = [_l for _l in _hol_labels if _l not in hol_syuku_labels]
                     if not hol_syuku_labels:
                         st.warning("運休にするダイヤが1つも選ばれていません。このままだと**祝日は通常の曜日どおり**"
@@ -1858,7 +1890,7 @@ if _show_tt:
                                    "（平日にあたる祝日でも、このダイヤで走ります＝「土日祝ダイヤ」あつかい）。")
                     else:
                         st.caption("→ すべてのダイヤを選んだので、**祝日はどのダイヤも運休**（バスが走らない日）になります。")
-            elif any(str(_v).endswith("1") for _v in _svc_map_hol.values()):
+            elif any(_svc_days_bits(_v).endswith("1") for _v in _svc_map_hol.values()):
                 # 日曜を含むダイヤがあるのに祝日未設定＝祝日は通常の曜日どおりになる。黙って決めない。
                 st.caption("💡 日曜を含むダイヤがあります。**祝日に運休/運行するダイヤを決めたい場合は"
                            "『祝日は運休』にチェック**してください（未設定のときは祝日も通常の曜日どおりに扱います）。")
@@ -1876,8 +1908,8 @@ if _show_tt:
                 _oe = _o2.text_input("お盆 終了 (MM-DD)", value="08-15", key=f"obe_{_htk}")
                 obon_range = f"{_os.strip() or '08-13'}:{_oe.strip() or '08-15'}"
             st.caption("個別の運行日・運休日（臨時運休・特別運行がある日。無ければ空でOK）。"
-                       "**どのダイヤの日か**の欄では、その日が上の表のどの運行日（曜日のまとまり）に"
-                       "あたるかを選びます。例：「平日(月〜金)」を選ぶと、平日ダイヤの便だけが"
+                       "**どのダイヤの日か**の欄では、その日がどの**路線のどの運行日（曜日のまとまり）**に"
+                       "あたるかを選びます。例：「感田線／平日(月〜金)」を選ぶと、感田線の平日ダイヤの便だけが"
                        "その日は運休（または臨時運行）になります。"
                        "**迷ったら「すべてのダイヤ」**のままでかまいません。")
             _svc_opts = ["すべてのダイヤ"] + list(_service_labels_map())   # 全ダイヤ ＋ ②の各ダイヤ名
@@ -2471,19 +2503,21 @@ if _show_q:
                 # 祝日運行は「日曜にチェック(sun=1)＝日祝ダイヤ」で判定（下の運休日設定と連動）。
                 bdays = ss()["decision_spec"].get("block_days", {})
 
-                def _svc_from_days(_d):
+                _br_gen = _block_route_map()
+
+                def _svc_from_days(_d, _rid=""):
                     if not (isinstance(_d, (list, tuple)) and len(_d) == 7):
                         _d = [int(form_days[k]) for k in DAY_KEYS]
                     _d = [int(bool(x)) for x in _d]
                     if not any(_d):                       # 曜日未選択の保険＝平日
                         _d = [1, 1, 1, 1, 1, 0, 0]
-                    sid = "SVC_" + "".join(str(x) for x in _d)
+                    sid = _svc_id_from_days(_d, _rid)
                     return sid, {"service_id": sid, **{DAY_KEYS[i]: _d[i] for i in range(7)}, **period}
 
                 services = {}
                 block_service = {}
                 for bi, days in bdays.items():
-                    sid, svc = _svc_from_days(days)
+                    sid, svc = _svc_from_days(days, _br_gen.get(str(bi), ("", ""))[0])
                     services.setdefault(sid, svc)
                     block_service[bi] = sid
                 if not services:   # 便が無い等の保険（最低1サービスは必要）
