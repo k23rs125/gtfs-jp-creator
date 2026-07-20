@@ -76,6 +76,29 @@ def route_title_from_texts(texts):
     return None
 
 
+# 時刻表のタイトルに書かれた運行日の表記。書かれている語だけを拾い、無ければ None
+# （＝推測しない）。アプリ側で②の曜日チェックの初期値に使い、必ず要確認として出す。
+DAY_HINT_PATTERNS = [
+    ("平日", re.compile(r"平\s*日")),
+    ("土日祝", re.compile(r"土\s*日\s*祝|土日・祝")),
+    ("土曜", re.compile(r"土\s*曜")),
+    ("日祝", re.compile(r"日\s*曜\s*[・､、]?\s*祝|日\s*祝")),
+    ("毎日", re.compile(r"毎\s*日")),
+]
+
+
+def day_hint_from_texts(texts):
+    """タイトル行の文字列から「平日/土日祝/土曜/日祝/毎日」の表記を1つ返す。無ければ None。"""
+    for text in texts:
+        if not text:
+            continue
+        s = str(text)
+        for label, pat in DAY_HINT_PATTERNS:
+            if pat.search(s):
+                return label
+    return None
+
+
 def cell_time(v):
     """セル値を 'H:MM:00' に正規化。時刻でなければ None。"""
     if isinstance(v, datetime.datetime):
@@ -110,25 +133,12 @@ def col_letter_to_idx(s: str) -> int:
     return n
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(
-        description="Excel時刻表から停留所・時刻を抽出（PDF座標方式と同じJSON形式で出力）")
-    ap.add_argument("input", help="入力 .xlsx")
-    ap.add_argument("-o", "--output", required=True, help="出力JSON")
-    ap.add_argument("--sheet", default=None, help="シート名（既定: 先頭シート）")
-    ap.add_argument("--name-col", default=None, help="停留所名の列（A や 3）。未指定で自動検出")
-    ap.add_argument("--header-rows", type=int, default=None,
-                    help="先頭の見出し行数（未指定で自動）")
-    args = ap.parse_args()
+def extract_sheet(ws, name_col_arg=None):
+    """ワークシート1枚を抽出して {blocks, warnings, needs} を返す。
 
-    in_path = Path(args.input)
-    if not in_path.exists():
-        print(f"Error: 入力が見つかりません: {in_path}", file=sys.stderr)
-        return 1
-
-    wb = openpyxl.load_workbook(in_path, data_only=True)
-    ws = wb[args.sheet] if args.sheet else wb[wb.sheetnames[0]]
-
+    複数シートのブックでも各シートを同じ手順で処理できるよう、main() から切り出したもの。
+    blocks の block_index はこの関数内では 0 始まり。main() 側で通し番号に振り直す。
+    """
     # --- 全セルを読む ---
     cells = {}
     for row in ws.iter_rows():
@@ -136,12 +146,7 @@ def main() -> int:
             if c.value is not None and str(c.value).strip() != "":
                 cells[(c.row, c.column)] = c.value
     if not cells:
-        result = {"source": str(in_path), "sheet": ws.title, "blocks": [],
-                  "warnings": ["シートが空です。"], "needs_confirmation": []}
-        Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2),
-                                     encoding="utf-8")
-        print("[警告] シートが空です。", file=sys.stderr)
-        return 0
+        return {"blocks": [], "warnings": [f"シート「{ws.title}」は空です。"], "needs": []}
 
     # --- スケジュール時刻セルと便(列) ---
     # 時刻型セルのうち「実時刻(hour>=4)」だけを便の時刻とみなす。所要時間列
@@ -152,14 +157,9 @@ def main() -> int:
         if t and int(t.split(":")[0]) >= 4:
             sched_cells[(r, c)] = t
     if not sched_cells:
-        result = {"source": str(in_path), "sheet": ws.title, "blocks": [],
-                  "warnings": ["実時刻(4:00以降)のセルが見つかりません。レイアウト/シートを確認してください。"],
-                  "needs_confirmation": [{"type": "no_time_cells",
-                      "message": "便の時刻セル(4:00以降のHH:MM)が無いため抽出できません。--sheet で正しいシートを指定するか、時刻が HH:MM 形式か確認してください。"}]}
-        Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2),
-                                     encoding="utf-8")
-        print("[警告] 便の時刻セルが見つかりません。", file=sys.stderr)
-        return 0
+        # 表紙・案内・運賃表など時刻表でないシートはここに来る。ブックに時刻表シートが
+        # 他にあれば正常なので、エラーではなく「時刻表なし」として返す。
+        return {"blocks": [], "warnings": [], "needs": [], "no_time_cells": True}
 
     col_sched_count = Counter(c for (r, c) in sched_cells)
     trip_cols = sorted([c for c, n in col_sched_count.items() if n >= 2])
@@ -171,8 +171,8 @@ def main() -> int:
     # 停留所名列を持つ）に対応。停留所名列を複数検出し、各名前列に「その右隣〜次の名前列
     # より左」の便列だけを対応付ける。単一表なら従来どおり1列になる。
     name_count = Counter(c for (r, c), v in cells.items() if is_name_cell(v))
-    if args.name_col:
-        name_cols = [col_letter_to_idx(args.name_col)]
+    if name_col_arg:
+        name_cols = [col_letter_to_idx(name_col_arg)]
     elif name_count:
         top = max(name_count.values())
         thr = max(4, int(top * 0.5))   # 表らしい名前列（散発的な少数セルは除外）
@@ -254,11 +254,24 @@ def main() -> int:
             header_rows.append(r)
     header_rows.sort()
 
-    # 各セクションの範囲: (ヘッダ行, 開始行, 終了行)。ヘッダが無ければ単一表。
-    if header_rows:
-        bounds = header_rows + [ws.max_row + 1]
-        sections = [(header_rows[i], header_rows[i], bounds[i + 1])
-                    for i in range(len(header_rows))]
+    # タイトル行（「【時刻表】（平日）○○線」等）も表の切れ目とみなす。
+    # 便番号の行が無い冊子用レイアウトでは便ヘッダ行を検出できず、上下に積まれた
+    # 平日表と土日祝表がひとつながりの便として連結されてしまう（7:50発の便が
+    # そのまま翌の9:45発へ続く、といった実在しない便になる）。タイトル行で切って防ぐ。
+    title_rows = [r for r in range(1, ws.max_row + 1)
+                  if any(isinstance(cells.get((r, c)), str) and "時刻表" in cells[(r, c)]
+                         for c in range(1, ws.max_column + 1))]
+
+    # 各セクションの範囲: (便ヘッダ行, 開始行, 終了行)。切れ目が無ければ単一表。
+    _bnds = sorted(set(header_rows) | set(title_rows))
+    if _bnds:
+        _edges = _bnds + [ws.max_row + 1]
+        sections = []
+        for _i, _st in enumerate(_bnds):
+            _end = _edges[_i + 1]
+            # 便番号を読む行は、その区間の中にある便ヘッダ行（無ければ None）
+            _hdr = next((h for h in header_rows if _st <= h < _end), None)
+            sections.append((_hdr, _st, _end))
     else:
         sections = [(None, 0, ws.max_row + 1)]
 
@@ -332,21 +345,144 @@ def main() -> int:
                     needs.append({"type": "time_nonmonotonic", "block": bi, "col": t["col"],
                                   "message": f"ブロック{bi} 便(列{t['col']})で時刻が逆行しています。"
                                              "要予約への寄り道や折り返しの可能性。原典で確認してください。"})
-    needs.append({"type": "assign_required",
-                  "message": "便名・方向(direction_id)・循環の展開は表構造から確定できません。原典と照合して割り当ててください(Step2)。"})
-
     # 先頭のタイトル行から路線名（○○線/系統/ルート）を拾って各ブロックに付ける
     # （例:「まほろば号 湯の谷地域線」時刻表 → 湯の谷地域線）。停留所名・ファイル名で拾えない補完。
-    _maxr = min([b.get("section_row", 6) for b in blocks], default=6)
+    # section_row は便ヘッダ行が無い表では None になるため、数値だけを見る
+    _maxr = min([b["section_row"] for b in blocks
+                 if isinstance(b.get("section_row"), int)], default=6)
     _title_texts = [ws.cell(r, c).value
                     for r in range(1, max(2, _maxr))
                     for c in range(1, ws.max_column + 1) if ws.cell(r, c).value]
     _rt = route_title_from_texts(_title_texts)
-    if _rt:
-        for b in blocks:
+    # 運行日の表記（（平日）（土日祝）等）。タイトル→無ければシート名の順に、書かれた語だけを拾う。
+    _dh = day_hint_from_texts(_title_texts) or day_hint_from_texts([ws.title])
+    for b in blocks:
+        b["sheet"] = ws.title                 # どのシート由来かを保持（②で見分けるため）
+        if _rt:
             b["route_title"] = _rt
+        if _dh:
+            b["day_hint"] = _dh
 
-    result = {"source": str(in_path), "sheet": ws.title,
+    return {"blocks": blocks, "warnings": warnings_list, "needs": needs,
+            "n_name_cols": len(name_cols), "n_trip_cols": len(trip_cols),
+            "n_stops": len(all_served)}
+
+
+def trip_signature(t):
+    """便の指紋（停留所名と時刻の並び）。完全一致＝同じ便。
+
+    冊子用シートのように同じ時刻表を別レイアウトで再掲しているブックがあり、
+    そのまま取り込むと同じ便を二重に登録してしまう。停留所も時刻もすべて同じ便が
+    別の便であることは実務上ありえないため、「中身が同一」という事実で重複と判定する。
+    """
+    return tuple((c.get("name", ""), c.get("time", "")) for c in t.get("cells", []))
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        description="Excel時刻表から停留所・時刻を抽出（PDF座標方式と同じJSON形式で出力）")
+    ap.add_argument("input", help="入力 .xlsx")
+    ap.add_argument("-o", "--output", required=True, help="出力JSON")
+    ap.add_argument("--sheet", default=None,
+                    help="シート名（未指定なら時刻表のある全シートを読む。複数は , 区切り）")
+    ap.add_argument("--name-col", default=None, help="停留所名の列（A や 3）。未指定で自動検出")
+    ap.add_argument("--header-rows", type=int, default=None,
+                    help="先頭の見出し行数（未指定で自動）")
+    args = ap.parse_args()
+
+    in_path = Path(args.input)
+    if not in_path.exists():
+        print(f"Error: 入力が見つかりません: {in_path}", file=sys.stderr)
+        return 1
+
+    wb = openpyxl.load_workbook(in_path, data_only=True)
+    if args.sheet:
+        want = [s.strip() for s in args.sheet.split(",") if s.strip()]
+        missing = [s for s in want if s not in wb.sheetnames]
+        if missing:
+            print(f"Error: シートがありません: {' / '.join(missing)}", file=sys.stderr)
+            return 1
+        sheets = [wb[s] for s in want]
+    else:
+        sheets = list(wb.worksheets)        # 既定＝全シート（時刻表が無いシートは自然に除外）
+
+    blocks, warnings_list, needs = [], [], []
+    sheet_summary, skipped, seen_trip = [], [], {}
+    for ws in sheets:
+        res = extract_sheet(ws, args.name_col)
+        warnings_list.extend(res.get("warnings", []))
+        if not res["blocks"]:
+            # 時刻が1つも無いシート（表紙・案内・運賃表など）は時刻表でないとみなして飛ばす
+            skipped.append(ws.title)
+            continue
+        kept, bi_map, n_dup, n_new = [], {}, 0, 0
+        for b in res["blocks"]:
+            _old_bi = b.get("block_index")
+            # 既に読んだ便と中身が完全に同じ便は落とす（冊子用シート等の再掲による二重登録を防ぐ）
+            fresh = []
+            for t in b.get("trips", []):
+                sig = trip_signature(t)
+                if sig in seen_trip:
+                    n_dup += 1
+                    continue
+                seen_trip[sig] = ws.title
+                fresh.append(t)
+            if not fresh:
+                continue
+            n_new += len(fresh)
+            b["trips"] = fresh
+            # 残った便が通る停留所だけに絞る（落とした便にしか出てこない停留所を残さない）
+            _served = {c.get("name") for t in fresh for c in t.get("cells", [])}
+            b["stops"] = [s for s in b.get("stops", []) if s.get("name") in _served]
+            b["block_index"] = len(blocks) + len(kept)
+            bi_map[_old_bi] = b["block_index"]
+            kept.append(b)
+        if n_dup and not n_new:
+            warnings_list.append(
+                f"シート「{ws.title}」の便は、すべて他のシートと中身が完全に同じでした。"
+                "二重登録を避けるため取り込んでいません（冊子用の再掲など）。")
+        elif n_dup and n_new:
+            # 一部だけ重複＝「再掲＋追記」か「別ダイヤ」か、機械では決められない。人に返す。
+            needs.append({"type": "partial_duplicate_sheet", "sheet": ws.title,
+                          "message": f"シート「{ws.title}」には他シートと同じ便が{n_dup}件、"
+                                     f"同じでない便が{n_new}件ありました。重複分は取り込んでいません。"
+                                     "同じ時刻表の再掲なのか、別のダイヤなのかを原典で確認してください。"})
+        blocks.extend(kept)
+        # ブロック番号を通し番号に振り直したので、要確認メッセージの番号も合わせる。
+        # 取り込まなかった重複ブロックへの指摘はそのまま出すと番号が指す先が無いので落とす。
+        for nd in res.get("needs", []):
+            if "block" in nd:
+                if nd["block"] not in bi_map:
+                    continue
+                nd = {**nd, "block": bi_map[nd["block"]]}
+            nd = {**nd, "sheet": ws.title}
+            needs.append(nd)
+        if kept:
+            sheet_summary.append({"sheet": ws.title, "blocks": len(kept),
+                                  "trips": sum(len(b["trips"]) for b in kept),
+                                  "stops": res.get("n_stops", 0)})
+    if not blocks:
+        warnings_list.append("時刻表（4:00以降の時刻セル）が見つかりませんでした。"
+                             "レイアウトを確認するか --sheet でシートを指定してください。")
+        needs.append({"type": "no_time_cells",
+                      "message": "便の時刻セル(4:00以降のHH:MM)が無いため抽出できません。"
+                                 "--sheet で正しいシートを指定するか、時刻が HH:MM 形式か確認してください。"})
+    else:
+        needs.append({"type": "assign_required",
+                      "message": "便名・方向(direction_id)・循環の展開は表構造から確定できません。"
+                                 "原典と照合して割り当ててください(Step2)。"})
+    if len(sheet_summary) > 1:
+        # 複数シートを1つの案件としてまとめた事実は必ず人に見せる（黙って混ぜない）。
+        needs.append({"type": "multi_sheet",
+                      "sheets": [s["sheet"] for s in sheet_summary],
+                      "message": "複数のシートから時刻表を読み取りました（"
+                                 + " / ".join(f"{s['sheet']}:{s['trips']}便" for s in sheet_summary)
+                                 + "）。②でシートごとに路線名と運行する曜日を割り当ててください。"})
+
+    result = {"source": str(in_path),
+              "sheet": sheet_summary[0]["sheet"] if len(sheet_summary) == 1 else "",
+              "sheets": [s["sheet"] for s in sheet_summary],
+              "sheet_summary": sheet_summary, "skipped_sheets": skipped,
               "blocks": blocks, "warnings": warnings_list,
               "needs_confirmation": needs}
     Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2),
@@ -354,10 +490,11 @@ def main() -> int:
 
     # サマリ（cp932安全・絵文字なし）
     total_trips = sum(len(b["trips"]) for b in blocks)
-    print(f"[INFO] シート: {ws.title}", file=sys.stderr)
-    print(f"[INFO] 停留所名の列: {len(name_cols)}列  便(時刻列): {len(trip_cols)}列  "
-          f"表(領域×セクション): {len(blocks)}", file=sys.stderr)
-    print(f"[INFO] 停留所 {len(all_served)} / 便 {total_trips} を抽出", file=sys.stderr)
+    for s in sheet_summary:
+        print(f"[INFO] シート: {s['sheet']}  表={s['blocks']}  便={s['trips']}", file=sys.stderr)
+    if skipped:
+        print(f"[INFO] 時刻表なしで除外: {' / '.join(skipped)}", file=sys.stderr)
+    print(f"[INFO] 合計 表(領域×セクション)={len(blocks)} / 便={total_trips}", file=sys.stderr)
     if needs:
         print(f"[INFO] 要確認: {len(needs)}件", file=sys.stderr)
     print(f"[OK] 出力: {args.output}", file=sys.stderr)

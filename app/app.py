@@ -1249,7 +1249,8 @@ if _show_tt:
             ext_out = WORK / "extract.json"
             tmp = WORK / "extract_file.json"
             merged = {"source": None, "sources": [str(s) for s in srcs],
-                      "blocks": [], "warnings": [], "needs_confirmation": []}
+                      "blocks": [], "warnings": [], "needs_confirmation": [],
+                      "sheet_summary": [], "skipped_sheets": []}
             detected_all = {}
             img_files, fail_files = [], []
             for src in srcs:
@@ -1281,6 +1282,9 @@ if _show_tt:
                     merged["needs_confirmation"].append(nd)
                 for w in pj.get("warnings", []):
                     merged["warnings"].append(f"{name}: {w}")
+                # Excelの読んだシート/読まなかったシートも引き継ぐ（抽出直後に利用者へ見せるため）
+                merged["sheet_summary"].extend(pj.get("sheet_summary") or [])
+                merged["skipped_sheets"].extend(pj.get("skipped_sheets") or [])
                 # 運賃・事業者などの条件検出をマージ（先に見つかった非空値を採用）
                 cond_tmp = WORK / "conditions_file.json"
                 run([SCRIPTS / "detect_conditions.py", src, "-o", cond_tmp])
@@ -1573,6 +1577,17 @@ if _show_tt:
             total_trips = sum(len(b.get("trips", [])) for b in blocks)
             st.info(f"便のまとまり {len(blocks)} 組 / 便 計 {total_trips}"
                     "（便のまとまり＝時刻表のひとかたまり。PDFなら1ページ分・往復なら片道分）")
+            # Excelの複数シートを読んだときは、どのシートを読み・どれを読まなかったかを必ず見せる
+            # （黙って一部のシートだけ使うと、原典と違うデータが静かにできてしまうため）。
+            _shsum = ex.get("sheet_summary") or []
+            if len(_shsum) > 1:
+                st.success("📗 Excelの **" + str(len(_shsum)) + "つのシート** から読み取りました： "
+                           + " ／ ".join(f"**{s['sheet']}**（{s['trips']}便）" for s in _shsum))
+            if ex.get("skipped_sheets"):
+                st.caption("読み取らなかったシート（時刻が入っていないため）: "
+                           + " ／ ".join(ex["skipped_sheets"]))
+            for _w in (ex.get("warnings") or []):
+                st.warning("⚠️ " + str(_w))
             # 抽出直後に原典を開けるようにする（読み取り結果が合っているかを最初にここで見比べる）。
             render_source_panel("ex")
             for b in blocks:
@@ -1695,6 +1710,14 @@ if _show_tt:
                             "方向(0/1)": "0（行き）" if d % 2 == 0 else "1（帰り）",
                             "行き先表示": dh or "",
                             "月": True, "火": True, "水": True, "木": True, "金": True, "土": False, "日": False}
+                    # 原典に「（平日）」「（土日祝）」等と**書かれている**場合だけ、曜日の初期値に反映する
+                    # （書かれていなければ平日のまま＝推測しない）。いずれも要確認で、表で直せる。
+                    _dhint = bs[bi].get("day_hint")
+                    if _dhint in _DAY_HINT_DAYS:
+                        for _k, _c in enumerate(DAY_COLS):
+                            _row[_c] = bool(_DAY_HINT_DAYS[_dhint][_k])
+                    if bs[bi].get("sheet"):              # Excelの複数シート取り込み時にどのシート由来か表示
+                        _row["シート"] = bs[bi]["sheet"]
                     if bs[bi].get("source_name"):        # 複数ファイル取り込み時のみ元ファイル名を表示
                         _row["ファイル"] = bs[bi]["source_name"]
                     rows.append(_row)
@@ -1705,6 +1728,12 @@ if _show_tt:
         DAY_COLS = ["月", "火", "水", "木", "金", "土", "日"]
         DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
         DAY_DEFAULT = [True, True, True, True, True, False, False]   # 既定＝平日(月〜金)
+        # 原典のタイトルに書かれた運行日の表記 →7曜日 の初期値。書かれていないものは補わない。
+        _DAY_HINT_DAYS = {
+            "平日": [1, 1, 1, 1, 1, 0, 0], "土日祝": [0, 0, 0, 0, 0, 1, 1],
+            "土曜": [0, 0, 0, 0, 0, 1, 0], "日祝": [0, 0, 0, 0, 0, 0, 1],
+            "毎日": [1, 1, 1, 1, 1, 1, 1],
+        }
         # 旧保存データ（プリセット名）→7曜日 の読み替え表（後方互換）。
         _OLD_PATTERN_DAYS = {
             "平日(月〜金)": [1, 1, 1, 1, 1, 0, 0], "土曜": [0, 0, 0, 0, 0, 1, 0],
@@ -1817,6 +1846,10 @@ if _show_tt:
                         "便のまとまり", disabled=True,
                         help="時刻表のひとかたまり（PDFなら1ページ分／往復なら片道分）。この単位で路線・方向・行き先を割り当てます。"),
                     "見出し": st.column_config.TextColumn("見出し(参考)", disabled=True),
+                    "シート": st.column_config.TextColumn(   # Excelの複数シート取り込み時のみ表示（列があれば）
+                        "元シート", disabled=True,
+                        help="この便のまとまりが、Excelのどのシート由来か。"
+                             "平日用・休日用でシートが分かれている場合の見分けに使います"),
                     "ファイル": st.column_config.TextColumn(  # 複数ファイル取り込み時のみ表示（列があれば）
                         "元ファイル", disabled=True, help="この便のまとまりが、どのアップロードfile由来か"),
                     "停留所数": st.column_config.NumberColumn("停留所数", disabled=True),
@@ -1835,18 +1868,19 @@ if _show_tt:
                     "木": st.column_config.CheckboxColumn("木"),
                     "金": st.column_config.CheckboxColumn("金"),
                     "土": st.column_config.CheckboxColumn("土"),
-                    "日": st.column_config.CheckboxColumn(
-                        "日", help="日曜にチェックすると祝日も運行扱い（日祝ダイヤ）になります"),
+                    "日": st.column_config.CheckboxColumn("日"),
                 },
             )
             st.caption("**運行する曜日**は**月〜日のチェック**で指定（初期値＝平日：月〜金／**月水金**など任意の組合せOK）。"
-                       "**日曜にチェック＝祝日も運行**（日祝ダイヤ）扱いです。祝日・年末年始などの運休は"
-                       "**下の『運休日』**でまとめて設定します。曜日で時刻が違う時刻表は便のまとまりを分けてください。")
+                       "原典に『（平日）』『（土日祝）』などと**書かれている場合はそれを初期値**にしています（要確認）。"
+                       "**祝日**にどのダイヤが運休/運行するかは、**下の『運休日』の「祝日は運休」**で"
+                       "ダイヤごとに選びます。曜日で時刻が違う時刻表は便のまとまりを分けてください。")
             st.info("💡 **こんな時は（例）**\n\n"
                     "- **往復の路線** → 行き（佐屋→駅）と帰り（駅→佐屋）を **同じ路線名** にし、方向を 0 と 1 に。\n"
                     "- **平日と土日で時刻が違う** → 平日ページは 月〜金、土日ページは 土・日 にチェックを分ける。\n"
                     "- **月水金だけ運行** → 月・水・金だけチェック（祝日を休むなら下の**『祝日は運休』**）。\n"
-                    "- **日祝ダイヤ** → **日** にチェック（日曜と祝日に運行）。\n"
+                    "- **日祝ダイヤ** → **土・日** にチェックし、下の『祝日は運休』で**このダイヤを選ばない**"
+                    "（選ばなかったダイヤが祝日も運行します）。\n"
                     "- **循環路線** → 方向は 0 のまま、行き先は『右回り／左回り』でもOK。")
 
             # ── 運休日（②の表のすぐ下に配置）：祝日・年末年始・お盆・個別の運休日をここでまとめて設定 ──
@@ -2253,7 +2287,8 @@ if _show_q:
                     "- **運賃が均一（例：100円）** → 金額を1つ入れるだけ。\n"
                     "- **区間で運賃が違う** → 「均一運賃」のチェックを外し、区間の表に金額を入力。\n"
                     "- **事業者名・法人番号が不明** → 空欄のままで進めてOK（後から直せます／暫定値で出ます）。\n"
-                    "- **祝日は運休** → 『祝日は運休』にチェック（日祝ダイヤがあればその日は日祝ダイヤで運行）。\n"
+                    "- **祝日は運休** → ②の『祝日は運休』にチェックし、**運休するダイヤを路線ごとに選ぶ**"
+                    "（選ばなかったダイヤが祝日も運行します）。\n"
                     "- **有効期間が分からない** → 空欄でも生成できます（提出前に正しい期間を入れてください）。")
             _routes_now = ss()["decision_spec"]["routes"]
             det = ss().get("detected", {}) or {}
@@ -2500,7 +2535,7 @@ if _show_q:
                 spec["service"] = {"service_id": "SVC", **form_days, **period}
                 # 複数ダイヤ: ②の運行日(block_days=7曜日)から services と block_service を構築。
                 # 同じ曜日組合せの便は1サービスを共有。service_idは曜日ビットで作る(例 月水金=SVC_1010100)。
-                # 祝日運行は「日曜にチェック(sun=1)＝日祝ダイヤ」で判定（下の運休日設定と連動）。
+                # 祝日にどのダイヤが運休/運行かは、下の運休日設定で利用者が明示的に選ぶ（推測しない）。
                 bdays = ss()["decision_spec"].get("block_days", {})
 
                 _br_gen = _block_route_map()

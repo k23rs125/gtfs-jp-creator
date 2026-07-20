@@ -125,6 +125,73 @@ def check_apply_decisions():
                f"stop_times={len(s.get('stop_times', []))}")
 
 
+# ---- 5b. 複数シートのExcel: 全シートを読み、積まれた表を連結しない ----
+def check_excel_multisheet():
+    """1ブックに複数の時刻表シートがある場合の回帰チェック（合成フィクスチャ）。
+
+    かつては(1)先頭シートしか読まない (2)便番号行が無いレイアウトで上下に積まれた
+    平日表と土日祝表がひとつながりの便に連結される、という2つの不具合があり、
+    原典に無い時刻の便が静かに生成されていた。両方を固定する。
+    """
+    import json
+    try:
+        import openpyxl
+    except Exception as e:
+        record("excel_multisheet", SKIP, f"openpyxl未導入: {str(e)[:30]}")
+        return
+    import datetime as _dt
+
+    def _put(ws, title, r0, times):
+        ws.cell(r0, 1, f"【時刻表】（{title}）　テスト線")
+        ws.cell(r0 + 1, 1, "停留所")
+        ws.cell(r0 + 1, 2, 1)                      # 便番号の行（あれば便ヘッダとして使われる）
+        for k, (nm, hh, mm) in enumerate(times):
+            ws.cell(r0 + 2 + k, 1, nm)
+            ws.cell(r0 + 2 + k, 2, _dt.time(hh, mm))
+
+    with tempfile.TemporaryDirectory() as d:
+        dp = Path(d)
+        xlsx = dp / "multi.xlsx"
+        wb = openpyxl.Workbook()
+        s1 = wb.active
+        s1.title = "平日"
+        _put(s1, "平日", 1, [("A停", 8, 0), ("B停", 8, 10), ("C停", 8, 20)])
+        s2 = wb.create_sheet("土日祝")
+        _put(s2, "土日祝", 1, [("A停", 14, 0), ("B停", 14, 10), ("C停", 14, 20)])
+        # 便番号の行を持たない冊子風シート: 2つの表を上下に積む（連結されないこと）
+        s3 = wb.create_sheet("冊子")
+        for r0, ttl, base in ((1, "平日", 9), (10, "土日祝", 16)):
+            s3.cell(r0, 1, f"【時刻表】（{ttl}）　別線")
+            s3.cell(r0 + 1, 1, "行先")
+            s3.cell(r0 + 1, 2, "駅")
+            for k, nm in enumerate(["X停", "Y停", "Z停"]):
+                s3.cell(r0 + 2 + k, 1, nm)
+                s3.cell(r0 + 2 + k, 2, _dt.time(base, k * 10))
+        wb.save(xlsx)
+
+        out = dp / "ex.json"
+        r = subprocess.run([sys.executable, "-X", "utf8",
+                            str(SCRIPTS / "extract_timetable_excel.py"), str(xlsx), "-o", str(out)],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if r.returncode != 0 or not out.exists():
+            record("excel_multisheet", FAIL, (r.stderr or "")[-80:])
+            return
+        ex = json.loads(out.read_text(encoding="utf-8"))
+        sheets = set(ex.get("sheets") or [])
+        trips = [t for b in ex["blocks"] for t in b["trips"]]
+        # (1) 先頭シートだけでなく全シートを読んでいる
+        ok_sheets = {"平日", "土日祝", "冊子"} <= sheets
+        # (2) どの便も1つの表の中で完結している（各表は3停留所なので、4停留所以上の便が
+        #     できていたら上下に積まれた別の表が連結されている）。便の総数も固定する。
+        ok_split = len(trips) == 4 and all(len(t["cells"]) == 3 for t in trips)
+        # (3) 曜日の表記を拾えている
+        hints = {b.get("day_hint") for b in ex["blocks"]}
+        ok_hint = {"平日", "土日祝"} <= hints
+        ok = ok_sheets and ok_split and ok_hint
+        record("excel_multisheet", PASS if ok else FAIL,
+               f"シート{len(sheets)} 便{len(trips)} 連結なし={ok_split} 曜日表記={ok_hint}")
+
+
 # ---- 6. アプリが起動して抽出まで動く（AppTest スモーク）----
 def check_apptest_smoke():
     try:
@@ -174,7 +241,8 @@ def main():
     print("run_checks - 回帰チェック（外部依存が無い項目はSKIP）")
     print("=" * 64)
     for fn in (check_compile, check_shape_dedup, check_feed_contact, check_eval_compare,
-               check_apply_decisions, check_apptest_smoke, check_golden):
+               check_apply_decisions, check_excel_multisheet,
+               check_apptest_smoke, check_golden):
         try:
             fn()
         except Exception as e:
