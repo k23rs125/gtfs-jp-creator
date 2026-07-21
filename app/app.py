@@ -2447,6 +2447,45 @@ if _show_tt:
                                 ss().pop("anomalies_token", None)    # 逆行等を再チェック
                                 st.rerun()
 
+                    # ---- 停留所の順番を入れ替える（並べ替え）----
+                    with st.expander("↕ 停留所の順番を入れ替える（並べ替え）"):
+                        _mn = [str(ed.iloc[i].get("停留所", "") or "").strip() for i in range(len(ed))]
+                        _mk = [nm for nm in _mn if nm]
+                        if len(_mk) < 2:
+                            st.caption("停留所が2つ以上あるとき並べ替えられます。")
+                        else:
+                            _mc1, _mc2 = st.columns(2)
+                            _mv = _mc1.selectbox("動かす停留所", _mk, key=f"mvsel_{tok}_{bi}")
+                            _dopts = ["（いちばん上へ）"] + [f"{k + 1}. {nm}" for k, nm in enumerate(_mk)
+                                                            if nm != _mv]
+                            _dest = _mc2.selectbox("移動先（この停留所の後ろへ）", _dopts,
+                                                   key=f"mvdest_{tok}_{bi}")
+                            st.caption("停留所を動かすと、その停留所の各便の時刻も一緒に移動します。"
+                                       "編集中の内容は保持されます。")
+                            if st.button("移動する", key=f"mvbtn_{tok}_{bi}"):
+                                _apply_block_edits(b, bi, ed, labels)   # 現在の編集を先に反映
+                                _names = [s["name"] for s in b["stops"]]
+                                if _mv in _names:
+                                    _moved = b["stops"].pop(_names.index(_mv))
+                                    _names.remove(_mv)
+                                    if _dest.startswith("（いちばん上"):
+                                        _at = 0
+                                    else:
+                                        _tgt = _dest.split(". ", 1)[1]
+                                        _at = _names.index(_tgt) + 1 if _tgt in _names else len(_names)
+                                    b["stops"].insert(_at, _moved)
+                                    # 各便の時刻セルを新しい停留所順に並べ替え、seqを振り直す
+                                    _order = {s["name"]: i for i, s in enumerate(b["stops"])}
+                                    for _t in b.get("trips", []):
+                                        _t["cells"] = sorted(_t.get("cells", []),
+                                                             key=lambda c: _order.get(c.get("name"), 10 ** 9))
+                                        for _k, _c in enumerate(_t["cells"], 1):
+                                            _c["seq"] = _k
+                                    ss().pop(f"tt_{tok}_{bi}", None)
+                                    ss().pop("_tt_apply_req", None)
+                                    ss().pop("anomalies_token", None)
+                                    st.rerun()
+
                     # ---- 編集内容をその場で再チェック（逆行・不正値・OCR疑い）----
                     edited_cells = []   # 便ごとの [{i,name,min,time}]
                     inval = []          # 非時刻の入力（誤入力の疑い）
