@@ -2486,6 +2486,23 @@ if _show_tt:
                                     ss().pop("anomalies_token", None)
                                     st.rerun()
 
+                    # ---- 便（列）を追加する ----
+                    with st.expander("➕ 便を追加する（列を増やす）"):
+                        st.caption("空の便を右端に1本追加します。追加後、その列に各停留所の時刻を"
+                                   "入力してください（空欄＝その停留所は通過）。編集中の内容は保持されます。")
+                        _nadd = st.number_input("追加する本数", min_value=1, max_value=20, value=1,
+                                                step=1, key=f"addtripn_{tok}_{bi}")
+                        if st.button("便を追加", key=f"addtrip_{tok}_{bi}"):
+                            _apply_block_edits(b, bi, ed, labels)   # 現在の編集を先に反映
+                            for _ in range(int(_nadd)):
+                                b.setdefault("trips", []).append(
+                                    {"col": None, "trip_number": None, "label": None,
+                                     "n_stops": 0, "monotonic": True, "cells": []})
+                            ss().pop(f"tt_{tok}_{bi}", None)     # 列が増えるので表を作り直させる
+                            ss().pop("_tt_apply_req", None)
+                            ss().pop("anomalies_token", None)
+                            st.rerun()
+
                     # ---- 編集内容をその場で再チェック（逆行・不正値・OCR疑い）----
                     edited_cells = []   # 便ごとの [{i,name,min,time}]
                     inval = []          # 非時刻の入力（誤入力の疑い）
