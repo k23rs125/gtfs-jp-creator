@@ -2341,6 +2341,28 @@ if _show_tt:
                 _bdir = _ds.get("block_direction", {})
                 edited_blocks = {}
                 issue_tot = {"rev": 0, "inval": 0, "an": 0}
+
+                def _apply_block_edits(b, bi, ed, labels):
+                    """データエディタの内容を block の stops/trips へ書き戻す。
+                    『確定して反映』と『停留所の挿入』で共用する。空行は停留所から除外。"""
+                    new_names = [str(ed.iloc[i].get("停留所", "") or "").strip() for i in range(len(ed))]
+                    b["stops"] = [{"name": nm} for nm in new_names if nm]
+                    for j, t in enumerate(b.get("trips", [])):
+                        lab = labels[j] if j < len(labels) else None
+                        newcells = []
+                        for i in range(len(ed)):
+                            nm = new_names[i]
+                            if not nm or lab is None or lab not in ed.columns:
+                                continue   # 削除された停留所行はスキップ
+                            _fix = str(ss().get(f"fix_{tok}_{bi}_{i}_{lab}", "") or "").strip()
+                            val = _fix if _fix else str(ed.iloc[i][lab]).strip()
+                            m = re.match(r"^(\d{1,2}):(\d{2})", val)
+                            if not m:
+                                continue   # 空欄・非時刻はその便では通過（cellを作らない）
+                            newcells.append({"seq": len(newcells) + 1, "num": None, "name": nm,
+                                             "time": f"{int(m.group(1)):02d}:{m.group(2)}:00", "reserve": False})
+                        t["cells"] = newcells; t["n_stops"] = len(newcells)
+
                 for b in blocks_t:
                     bi = b.get("block_index")
                     stops = [s.get("name") for s in b.get("stops", [])]
@@ -2397,6 +2419,34 @@ if _show_tt:
                         except Exception:
                             return ""
                     edited_blocks[bi] = (ed, labels, stops)
+
+                    # ---- 停留所を「間に」挿入する（表の行は末尾にしか増やせないため）----
+                    with st.expander("➕ 停留所を間に挿入する（時刻表に無い停留所を足す）"):
+                        _nm_now = [str(ed.iloc[i].get("停留所", "") or "").strip() for i in range(len(ed))]
+                        _nm_kept = [nm for nm in _nm_now if nm]   # 空行を除く＝反映後のstopsと同じ並び
+                        _opts = ["（いちばん上に入れる）"] + [f"{k + 1}. {nm}" for k, nm in enumerate(_nm_kept)]
+                        _ic1, _ic2 = st.columns(2)
+                        _pos = _ic1.selectbox("入れる位置（この停留所の後ろ）", _opts,
+                                              key=f"inspos_{tok}_{bi}")
+                        _newnm = _ic2.text_input("追加する停留所名", key=f"insnm_{tok}_{bi}",
+                                                 placeholder="例：〇〇北口")
+                        st.caption("挿入した行の各便の時刻を入力してください（空欄＝その便は通過）。"
+                                   "編集中の内容は保持されます。")
+                        if st.button("この位置に挿入", key=f"insbtn_{tok}_{bi}"):
+                            _n = _newnm.strip()
+                            if not _n:
+                                st.warning("追加する停留所名を入力してください。")
+                            elif _n in _nm_kept:
+                                st.warning(f"「{_n}」は既にこのまとまりにあります。")
+                            else:
+                                _apply_block_edits(b, bi, ed, labels)   # 現在の編集を先に反映（失わない）
+                                _at = 0 if _pos.startswith("（いちばん上") else int(_pos.split(".")[0])
+                                b["stops"].insert(_at, {"name": _n})
+                                ss().pop(f"tt_{tok}_{bi}", None)     # 表を作り直させる（行が増えるため）
+                                ss().pop("_tt_apply_req", None)      # 挿入で自前反映済み＝重複反映を防ぐ
+                                ss().pop("anomalies_token", None)    # 逆行等を再チェック
+                                st.rerun()
+
                     # ---- 編集内容をその場で再チェック（逆行・不正値・OCR疑い）----
                     edited_cells = []   # 便ごとの [{i,name,min,time}]
                     inval = []          # 非時刻の入力（誤入力の疑い）
@@ -2507,26 +2557,7 @@ if _show_tt:
                         if bi not in edited_blocks:
                             continue
                         ed, labels, stops = edited_blocks[bi]
-                        # 編集後の停留所名（空欄＝削除された行）。行ごとに1つ。
-                        new_names = [str(ed.iloc[i].get("停留所", "") or "").strip() for i in range(len(ed))]
-                        # ブロックの master 停留所を編集後で更新（空行＝待機時間等は除外）
-                        b["stops"] = [{"name": nm} for nm in new_names if nm]
-                        for j, t in enumerate(b.get("trips", [])):
-                            lab = labels[j] if j < len(labels) else None
-                            newcells = []
-                            for i in range(len(ed)):
-                                nm = new_names[i]
-                                if not nm or lab is None or lab not in ed.columns:
-                                    continue   # 削除された停留所行はスキップ
-                                # 赤セル修正欄に入力があれば優先（空欄なら表の値）
-                                _fix = str(ss().get(f"fix_{tok}_{bi}_{i}_{lab}", "") or "").strip()
-                                val = _fix if _fix else str(ed.iloc[i][lab]).strip()
-                                m = re.match(r"^(\d{1,2}):(\d{2})", val)
-                                if not m:
-                                    continue
-                                newcells.append({"seq": len(newcells) + 1, "num": None, "name": nm,
-                                                 "time": f"{int(m.group(1)):02d}:{m.group(2)}:00", "reserve": False})
-                            t["cells"] = newcells; t["n_stops"] = len(newcells)
+                        _apply_block_edits(b, bi, ed, labels)   # 編集内容を stops/trips へ反映（共通処理）
                     # decision_spec は上の割り当て(現在値)から作成済みなので保持。
                     # 生成結果・確定座標だけ無効化（時刻表が変わったので再生成が要る）。
                     for k in ("result", "confirmed", "anomalies_token"):
