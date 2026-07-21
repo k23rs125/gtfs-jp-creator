@@ -887,7 +887,7 @@ with st.expander("📖 使い方ガイド（はじめての方はここを開い
     st.markdown("""
 **⏰ 時刻表の確認・修正** — 取り込んだ時刻を原典と見比べます。
 **<span style="color:#c62828">赤＝時刻の逆行（要修正）</span>**、**<span style="color:#1565c0">青＝日跨ぎ（翌日・正常）</span>**。
-停留所名もこの画面で直せます。
+停留所名もこの画面で直せます。**セルを直して Enter で反映**されます。
 > 💡 **こんな時は**：「待機時間」などの逆行は自動で除外されますが、赤が残ったら原典を見て正しい時刻に直します。
 > 赤いセルの下に **専用の修正欄** が出るので、そこに正しい時刻を入れられます。
 """, unsafe_allow_html=True)
@@ -2327,8 +2327,8 @@ if _show_tt:
                            "空欄＝通過。**停留所名も直接編集**でき、**行を選んで削除**もできます"
                            "（「待機時間」「○○出発」など停留所でない行を消す／表記を直す）。"
                            + (f"OCR誤読の疑い **{n_an}件** は各表の下に列挙しています。" if n_an else "")
-                           + "直したら**修正欄で Enter**（または『この時刻表で確定して反映』ボタン）で反映します"
-                             "（自動では書き換えません）。")
+                           + "セルを直して **Enter** を押すと反映されます"
+                             "（下の『この時刻表で確定して反映』ボタンでもOK）。")
                 st.markdown("<span style='color:#c62828;font-weight:700'>⚠ 時刻は必ず原典と1つずつ見比べて"
                             "確認してください。「📄 原典を別タブで開く」で並べて照合できます。"
                             "</span>", unsafe_allow_html=True)
@@ -2384,8 +2384,12 @@ if _show_tt:
                         "『待機時間』『渡船場出発』のような停留所でない行を消せます。")}
                     for lab in labels:
                         colcfg[lab] = st.column_config.TextColumn(lab.split("#")[0])
+                    # 表のセルを編集して Enter を押すと on_change で _tt_apply_req が立ち、
+                    # 下の反映処理が走る（赤セルの修正欄と同じ挙動）。ボタンを押さなくても
+                    # 「編集して Enter で反映」できるようにするため。画面遷移はしない（下で _apply_btn のみ遷移）。
                     ed = st.data_editor(df, hide_index=True, width='stretch',
-                                        key=f"tt_{tok}_{bi}", column_config=colcfg, num_rows="dynamic")
+                                        key=f"tt_{tok}_{bi}", column_config=colcfg, num_rows="dynamic",
+                                        on_change=lambda: ss().__setitem__("_tt_apply_req", True))
 
                     def _enm(i):   # 編集後の停留所名（削除/改名を反映）
                         try:
