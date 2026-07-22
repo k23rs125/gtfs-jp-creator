@@ -534,6 +534,31 @@ def main():
                                       "座標だけでは方面を分離できないため、原典の時刻表で方面ごとに分けて"
                                       "（行先・経路別に）確認・割り当ててください。")})
         # (3) 便ごとの停留所数のばらつき → 取りこぼし/区間便の確認
+    # (3b) 【汎用の整合チェック】どの便にも割り当てられなかった「時刻の列」を検知する。
+    #   座標方式は便列の x 範囲を絞るため、範囲の外側にある便列が丸ごと落ちることがある
+    #   （例：最終便の列が next_cx-60 の内側ぎりぎりだと欠落）。落ちた便を黙って捨てず、
+    #   要確認として報告する（＝正しく失敗）。特定の時刻表に依存しない汎用処理。
+    if real_blocks:
+        page_times = [(w['x0'], w['top']) for w in words if TIME_RE.match(w['text'])]
+        assigned_colx = [t['col_x'] for b in real_blocks for t in b['trips']]
+        if page_times:
+            for cxx in cluster_cols([round(x) for x, _ in page_times], args.col_gap):
+                n_here = sum(1 for x, _ in page_times if abs(x - cxx) <= args.col_gap)
+                covered = any(abs(cxx - acx) <= args.col_gap + 10 for acx in assigned_colx)
+                if not covered and n_here >= 3:   # 3件以上まとまった未割当列＝便1本ぶんの可能性
+                    needs.append({"type": "unassigned_time_column", "col_x": round(cxx, 1),
+                                  "count": n_here,
+                                  "message": (f"時刻が {n_here} 件まとまっている列(x≈{round(cxx)})が"
+                                              "どの便にも割り当てられていません。便が1本まるごと"
+                                              "抜けている可能性があります。原典と便数を照合してください。")})
+            n_assigned_cells = sum(len(t['cells']) for b in real_blocks for t in b['trips'])
+            # 抽出できた時刻セル数がページ上の時刻トークン数より大幅に少ない＝取りこぼしの目安
+            if len(page_times) - n_assigned_cells >= max(5, int(len(page_times) * 0.1)):
+                result["warnings"].append(
+                    f"ページ上の時刻 {len(page_times)} 件に対し、便に割り当てられたのは "
+                    f"{n_assigned_cells} 件でした。差が大きい場合は便や停留所の取りこぼしの"
+                    "可能性があるため、原典と照合してください。")
+
     # (4) 便名・方向は座標から確定できない → 必ず確認
     if real_blocks:
         needs.append({"type": "assign_required",
