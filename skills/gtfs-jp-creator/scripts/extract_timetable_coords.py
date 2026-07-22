@@ -44,8 +44,11 @@ except ImportError:
     print("Error: pdfplumber が必要です (pip install pdfplumber)", file=sys.stderr)
     sys.exit(1)
 
-# 停留所名の先頭に紛れ込むアイコン由来文字・全角空白
-ICON_PREFIX = re.compile(r'^[店駅\u3000\s]+')
+# 停留所名の先頭に紛れ込む装飾アイコン「店」・全角空白を除去する。
+# かつては「駅」も除去していたが、駅東口・駅西口・駅前のように「駅」は
+# 名前の一部であることが多く壊すため対象から外した（公式GTFSでも『駅東口』が正）。
+# 「店」は店舗マーク(jojima等)で名前の一部でないことが多いため残す。
+ICON_PREFIX = re.compile(r'^[店\u3000\s]+')
 TIME_RE = re.compile(r'^\d{1,2}[:：]\d{2}$')   # 全角コロン（5：50）の時刻表にも対応
 NUM_RE = re.compile(r'^\d{1,3}$')
 JP_RE = re.compile(r'[ぁ-んァ-ヶ一-龠]')
