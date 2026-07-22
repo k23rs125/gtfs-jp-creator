@@ -2341,6 +2341,9 @@ if _show_tt:
                 }
                 .ins-stopname{ font-size:13px; padding:2px 8px; color:#16202B;
                     border:1px solid #eceff1; border-radius:6px; background:#fafbfc; }
+                /* 時刻表グリッド右上の標準ツールバー（＋/検索/DL/全画面）を隠す（この表のみ） */
+                [class*="st-key-ttgrid_"] [data-testid="stElementToolbar"],
+                [class*="st-key-ttgrid_"] [data-testid="stDataFrameToolbar"]{ display:none !important; }
                 </style>""", unsafe_allow_html=True)
                 render_source_panel("tt")   # 原本（PDF/画像）を並べて照合できるパネル
                 n_an = len(anomalies)
@@ -2433,8 +2436,12 @@ if _show_tt:
                     # 1便ごとに反映処理＋再実行が走ると、便が多い時に入力が非常に遅くなるため。
                     # 入力し終えたら下の『この時刻表で確定して反映』ボタンで一括反映する（赤セルの
                     # 修正欄は従来どおり Enter で個別反映）。逆行等のチェックは入力中もライブ表示される。
-                    ed = st.data_editor(df, hide_index=True, width='stretch',
-                                        key=f"tt_{tok}_{bi}", column_config=colcfg, num_rows="dynamic")
+                    # 表右上の標準ツールバー（＋/検索/ダウンロード/全画面）は、挿入・便追加を
+                    # 専用UIで持つため不要。この表に限って CSS で隠す（他の表には影響しない）。
+                    with st.container(key=f"ttgrid_{tok}_{bi}"):
+                        ed = st.data_editor(df, hide_index=True, width='stretch',
+                                            key=f"tt_{tok}_{bi}", column_config=colcfg,
+                                            num_rows="dynamic")
 
                     def _enm(i):   # 編集後の停留所名（削除/改名を反映）
                         try:
