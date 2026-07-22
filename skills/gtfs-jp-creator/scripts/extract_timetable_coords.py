@@ -34,6 +34,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -48,6 +49,30 @@ ICON_PREFIX = re.compile(r'^[店駅\u3000\s]+')
 TIME_RE = re.compile(r'^\d{1,2}[:：]\d{2}$')   # 全角コロン（5：50）の時刻表にも対応
 NUM_RE = re.compile(r'^\d{1,3}$')
 JP_RE = re.compile(r'[ぁ-んァ-ヶ一-龠]')
+
+
+def normalize_cjk(text):
+    """PDFが漢字を『CJK部首/康熙部首』のコードポイントで返す場合があるため、
+    通常の漢字へ正規化する（見た目は同じでも別Unicodeで、日本語判定を通らず
+    停留所名が丸ごと落ちる原因になる。例: '⼩⻑⽥'→'小長田', '⻑⽊'→'長木'）。
+    まず NFKC で康熙部首・全角を畳み、NFKC で残る CJK部首補助(U+2E80–2EFF)は
+    Unicode の対応表(CJKRadicals)に相当する写像で個別に置換する。特定のPDFに
+    依存しない汎用処理。"""
+    if not text:
+        return text
+    t = unicodedata.normalize("NFKC", text)
+    if any(0x2E80 <= ord(c) <= 0x2EFF for c in t):   # 残った CJK部首補助を漢字へ
+        t = "".join(_CJK_RADICAL_MAP.get(c, c) for c in t)
+    return t
+
+
+# CJK部首補助(U+2E80–2EFF)→ 対応する漢字。NFKC では畳まれない字形のみを補う。
+# 誤写像で名前を壊さないため、確実なものだけに限定する（不明な部首は原字のまま
+# 残し、④の画面で人が直せる＝正しく失敗）。
+_CJK_RADICAL_MAP = {
+    "⻑": "長",   # ⻑ CJK RADICAL C-SIMPLIFIED LONG（本件: '⻑⽊'→'長木'）
+    "⻄": "西",   # ⻄ CJK RADICAL WEST TWO（本件: '⻄口'→'西口'）
+}
 
 # 停留所名ではない見出し・案内文の断片
 NOISE_NAMES = {
@@ -301,6 +326,10 @@ def main():
                 best, bestn = pg, n
         page = best
     words = page.extract_words()
+    # 文字を漢字へ正規化（PDFが漢字を CJK部首/康熙部首 のコードポイントで返すと、
+    # 日本語判定を通らず停留所名が丸ごと落ちるため。全角→半角も畳まれる）。座標は不変。
+    for _w in words:
+        _w["text"] = normalize_cjk(_w["text"])
     page_no = pdf.pages.index(page) + 1
     # --- 画像PDF検出 (課題: 画像化された時刻表は座標方式が使えない) ---
     # 選択ページの文字オブジェクトが極端に少ない場合、時刻表が画像として
