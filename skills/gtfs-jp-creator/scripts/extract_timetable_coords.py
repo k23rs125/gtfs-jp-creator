@@ -437,7 +437,12 @@ def main():
         _name_right = max((w['x1'] for w in _names), default=cx + 40)
         boundary = min((_name_right + _first_time) / 2, _first_time - 2) if _times_x else cx + 120
         x_lo, x_hi = cx - 20, boundary
-        time_x_lo, time_x_hi = boundary, next_cx - 60 if next_cx < page_w else page_w
+        # 時刻列の上限は「次の名前列ブロックの手前」まで。従来は固定 60pt 手前としていたが、
+        # 最終便の列が次ブロックの番号列付近に来ると便が丸ごと落ちた（例: 香春線の7便目）。
+        # 時刻は TIME_RE(HH:MM)で判定するため、次ブロックの番号列(裸の数字)や名前(日本語)は
+        # この範囲に入っても時刻として拾われない。次ブロックの時刻列は next_cx より右にあるので、
+        # 上限を next_cx 直前まで広げても隣の便を巻き込まない。小さな安全マージンのみ残す。
+        time_x_lo, time_x_hi = boundary, next_cx - 8 if next_cx < page_w else page_w
 
         # --- 方面見出しによる縦セクション分割 ---
         # このブロックの水平範囲内の見出し行を検出し、時刻帯の「中段」にある見出し
