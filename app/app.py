@@ -2319,6 +2319,29 @@ if _show_tt:
             blocks_t = ss().extract.get("blocks", [])
             if blocks_t:
                 st.subheader("⏰ 時刻表の確認・修正（全便・全停留所）")
+                # 停留所リストの「＋」挿入ボタン用スタイル（ホバーで中央にフェード表示）。
+                st.markdown("""<style>
+                /* 挿入レール内の縦の余白を詰める */
+                [class*="st-key-insrail_"] [data-testid="stVerticalBlock"]{ gap:.15rem; }
+                /* ＋ボタン：通常は透明の細い帯。行間にホバーすると中央に出現しアニメーション */
+                [class*="st-key-plus_"]{ margin:0; }
+                [class*="st-key-plus_"] .stButton{ display:flex; justify-content:center; margin:0; }
+                [class*="st-key-plus_"] .stButton>button{
+                    opacity:0; transform:translateY(-2px) scale(.7);
+                    transition:opacity .18s ease, transform .18s ease, box-shadow .18s ease;
+                    min-height:0; height:22px; width:30px; padding:0; line-height:1;
+                    border-radius:11px; border:1px dashed #90a4ae; background:#ffffff;
+                    color:#1565c0; font-weight:700; font-size:15px;
+                }
+                [class*="st-key-plus_"]:hover .stButton>button,
+                [class*="st-key-plus_"] .stButton>button:focus-visible{
+                    opacity:1; transform:translateY(0) scale(1);
+                    border-style:solid; border-color:#1565c0;
+                    box-shadow:0 2px 6px rgba(21,101,192,.28);
+                }
+                .ins-stopname{ font-size:13px; padding:2px 8px; color:#16202B;
+                    border:1px solid #eceff1; border-radius:6px; background:#fafbfc; }
+                </style>""", unsafe_allow_html=True)
                 render_source_panel("tt")   # 原本（PDF/画像）を並べて照合できるパネル
                 n_an = len(anomalies)
                 st.markdown("<span style='color:#16202B;font-weight:700'>✏️ 時刻・停留所名のセルはクリック"
@@ -2420,32 +2443,40 @@ if _show_tt:
                             return ""
                     edited_blocks[bi] = (ed, labels, stops)
 
-                    # ---- 停留所を「間に」挿入する（表の行は末尾にしか増やせないため）----
-                    with st.expander("➕ 停留所を間に挿入する（時刻表に無い停留所を足す）"):
-                        _nm_now = [str(ed.iloc[i].get("停留所", "") or "").strip() for i in range(len(ed))]
-                        _nm_kept = [nm for nm in _nm_now if nm]   # 空行を除く＝反映後のstopsと同じ並び
-                        _opts = ["（いちばん上に入れる）"] + [f"{k + 1}. {nm}" for k, nm in enumerate(_nm_kept)]
-                        _ic1, _ic2 = st.columns(2)
-                        _pos = _ic1.selectbox("入れる位置（この停留所の後ろ）", _opts,
-                                              key=f"inspos_{tok}_{bi}")
-                        _newnm = _ic2.text_input("追加する停留所名", key=f"insnm_{tok}_{bi}",
-                                                 placeholder="例：〇〇北口")
-                        st.caption("挿入した行の各便の時刻を入力してください（空欄＝その便は通過）。"
-                                   "編集中の内容は保持されます。")
-                        if st.button("この位置に挿入", key=f"insbtn_{tok}_{bi}"):
-                            _n = _newnm.strip()
-                            if not _n:
-                                st.warning("追加する停留所名を入力してください。")
-                            elif _n in _nm_kept:
-                                st.warning(f"「{_n}」は既にこのまとまりにあります。")
-                            else:
-                                _apply_block_edits(b, bi, ed, labels)   # 現在の編集を先に反映（失わない）
-                                _at = 0 if _pos.startswith("（いちばん上") else int(_pos.split(".")[0])
-                                b["stops"].insert(_at, {"name": _n})
-                                ss().pop(f"tt_{tok}_{bi}", None)     # 表を作り直させる（行が増えるため）
-                                ss().pop("_tt_apply_req", None)      # 挿入で自前反映済み＝重複反映を防ぐ
-                                ss().pop("anomalies_token", None)    # 逆行等を再チェック
-                                st.rerun()
+                    # ---- 停留所を「間に」挿入する：停留所リストの間にホバーで＋を表示 ----
+                    # 挿入ロジック（_apply_block_edits＋b["stops"].insert）は従来のまま流用し、
+                    # UI だけを「停留所の間の＋を押す」方式に変更する。
+                    def _insert_stop_at(_pos):
+                        _apply_block_edits(b, bi, ed, labels)   # 現在の編集を先に反映（失わない）
+                        _ex = [s["name"] for s in b["stops"]]
+                        _base = "新しい停留所"; _nn = _base; _c = 2
+                        while _nn in _ex:                       # 仮名は重複しないように採番
+                            _nn = f"{_base}{_c}"; _c += 1
+                        b["stops"].insert(_pos, {"name": _nn})
+                        ss().pop(f"tt_{tok}_{bi}", None)         # 行が増えるので表を作り直させる
+                        ss().pop("_tt_apply_req", None)          # 挿入で自前反映済み＝重複反映を防ぐ
+                        ss().pop("anomalies_token", None)        # 逆行等を再チェック
+                        st.rerun()
+
+                    with st.expander("➕ 停留所を間に挿入する（停留所の間の＋を押す）"):
+                        st.caption("停留所の間にカーソルを合わせると **＋** が現れます。押すとそこに停留所が入り、"
+                                   "名前と時刻は上の表で編集できます（空欄＝その便は通過）。")
+                        _nm_kept = [nm for nm in
+                                    (str(ed.iloc[i].get("停留所", "") or "").strip() for i in range(len(ed)))
+                                    if nm]
+
+                        def _plus_gap(_pos):
+                            with st.container(key=f"plus_{tok}_{bi}_{_pos}"):
+                                if st.button("＋", key=f"plusbtn_{tok}_{bi}_{_pos}",
+                                             help="ここに停留所を挿入する"):
+                                    _insert_stop_at(_pos)
+
+                        with st.container(key=f"insrail_{tok}_{bi}"):
+                            _plus_gap(0)
+                            for _p, _nm in enumerate(_nm_kept):
+                                st.markdown(f"<div class='ins-stopname'>{_p + 1}. {_nm}</div>",
+                                            unsafe_allow_html=True)
+                                _plus_gap(_p + 1)
 
                     # ---- 停留所の順番を入れ替える（並べ替え）----
                     with st.expander("↕ 停留所の順番を入れ替える（並べ替え）"):
