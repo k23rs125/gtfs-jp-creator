@@ -17,19 +17,29 @@ Excel版(parse_fare_matrix_excel.py)と**同じ出力形式**を返し、③の�
   5) **完全な下三角（行 i が i+1 個の運賃を持つ）でなければ取り込まない**（誤った運賃を
      黙って出さない＝「正しく失敗」）。壊れた表は警告して {} を返し、手入力を促す。
 
-座標抽出は PyMuPDF(fitz) を用いる。pdfplumber は本形式で名前と数字を結合したり
-一部を落とすため、トークン数が正確な fitz を採用した。CJK部首・互換文字は NFKC＋
-確認済みの安全な写像で補正する（extract_timetable_coords.py と同方針）。
+座標抽出は pdfplumber（MITライセンス）を用いる。密に並ぶ運賃数字（200 200 …）と
+停留所名を正しく分離するため extract_words(x_tolerance=1.5) を指定する（既定の
+x_tolerance=3 では『名前+数字』が結合し取りこぼす）。この設定で PyMuPDF(fitz) と
+同一のトークン分割（本表で 595 数字）を再現できることを実測で確認済み。
+CJK部首・互換文字は NFKC＋確認済みの安全な写像で補正する。
+
+ライセンス方針: 自治体・公共交通事業者での導入を前提とするため、AGPL の PyMuPDF(fitz)
+は使わず、permissive な pdfplumber(MIT) のみで実装する（オフライン・決定的）。
 
 出力: {"大人":[{from,to,price}...]}（本形式は大人1表が基本。区分ラベルがあれば拾う）
 CLI: python parse_fare_matrix_pdf.py 料金表.pdf [--stops "A,B,C"] [-o out.json]
 """
 import argparse
 import json
+import logging
 import re
 import sys
 import unicodedata
 from pathlib import Path
+
+# pdfplumber は内部で pdfminer.six を使い、一部PDFで無害な FontBBox 警告を大量に出す。
+# 抽出結果には影響しないためログを抑制する（CLI/アプリの出力を汚さない）。
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 # CJK部首・康煕部首など、pdfplumber/fitz が返しうる紛らわしい符号の安全な写像。
 # extract_timetable_coords.py と同じ「確認済みのみ」方針（推測で増やさない）。
@@ -97,29 +107,33 @@ def _assign(value, centers):
 
 
 def _page_words(page):
-    """fitz ページから (x0, top, x1, bottom, text) を正規化して返す。"""
+    """pdfplumber ページから (x0, top, x1, bottom, text) を正規化して返す。
+    x_tolerance=1.5 は密に並ぶ運賃数字と停留所名を正しく分離するための実測値
+    （既定3では『名前+数字』が結合する）。fitz(AGPL)相当の分割を pdfplumber(MIT)で再現。"""
     out = []
-    for w in page.get_text("words"):
-        x0, y0, x1, y1, text = w[0], w[1], w[2], w[3], normalize_cjk(w[4])
+    for w in page.extract_words(x_tolerance=1.5, y_tolerance=3, keep_blank_chars=False):
+        text = normalize_cjk(w["text"])
         if text.strip():
-            out.append((x0, y0, x1, y1, text))
+            out.append((float(w["x0"]), float(w["top"]),
+                        float(w["x1"]), float(w["bottom"]), text))
     return out
 
 
 def parse_fare_matrix_pdf(pdf_path, valid_stops=None):
-    import fitz
-    doc = fitz.open(str(pdf_path))
+    import pdfplumber
     # 運賃表は「数字が最も多いページ」にあるとみなす（表紙などを避ける）。
-    best_page, best_words, best_nums = None, None, -1
-    for pg in doc:
-        ws = _page_words(pg)
-        nnum = sum(1 for w in ws if re.fullmatch(r"\d{2,4}", w[4]))
-        if nnum > best_nums:
-            best_page, best_words, best_nums = pg, ws, nnum
+    # pdfplumber の page はクローズ後に使えないため、必要な値(語・ページ幅)を with 内で取り出す。
+    best_page_w, best_words, best_nums = None, None, -1
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        for pg in pdf.pages:
+            ws = _page_words(pg)
+            nnum = sum(1 for w in ws if re.fullmatch(r"\d{2,4}", w[4]))
+            if nnum > best_nums:
+                best_page_w, best_words, best_nums = float(pg.width), ws, nnum
     if not best_words or best_nums < 3:
         return {}, ["数字（運賃）が十分に見つからず、運賃表として解析できませんでした。"]
     words = best_words
-    page_w = float(best_page.rect.width)
+    page_w = best_page_w
 
     vnorm = {re.sub(r"\s+", "", normalize_cjk(s)) for s in (valid_stops or [])}
 

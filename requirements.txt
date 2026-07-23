@@ -10,11 +10,13 @@ sudachipy         # ふりがな(ja-Hrkt) 生成エンジン(Apache-2.0)。辞�
 sudachidict_core  # SudachiPy の辞書(core・Apache-2.0)
 # pykakasi は不使用。GPL-3.0-or-later で自治体の自己ホスト配布にライセンス制約が生じうるため、
 # 読みは SudachiPy(Apache-2.0)＋補正規則＋補正辞書に一本化した（generate_translations.py 参照）。
-PyMuPDF        # PDF のレンダリング・テキスト抽出（import fitz / pymupdf）
-pymupdf4llm    # 装飾PDF → Markdown（既定エンジン）/ Step1
+# PyMuPDF(fitz) / pymupdf4llm は不使用。AGPL-3.0-or-later（ネットワーク越しの利用でも
+# ソース開示義務が生じる強いコピーレフト）で、自治体・公共交通事業者への導入に不適。
+# PDFのテキスト・座標抽出は permissive な pdfplumber(MIT) に一本化した
+# （parse_fare_matrix_pdf.py / pdf_to_markdown.py / extract_timetable_coords.py 参照）。
 
-# --- 任意（装飾/画像化PDFのOCRが必要な場合のみ。重い） ---
-# mineru[core]   # 画像化・装飾PDFのOCR抽出。初回 ~3GB の ML モデル DL あり
+# --- 任意（画像化・スキャンPDFのOCRが必要な場合のみ。重い） ---
+# mineru[core]   # 画像化PDFのOCR抽出（外部CLI）。初回 ~3GB の ML モデル DL あり
 #                #   pip install -U "mineru[core]"
 
 # =====================================================================

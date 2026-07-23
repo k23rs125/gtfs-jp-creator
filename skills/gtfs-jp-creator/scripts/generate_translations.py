@@ -84,7 +84,9 @@ def _get_sudachi():
 # ここに載せるのは【全国共通で安全な語尾規則のみ】。地域固有の難読読み（例: 長木＝おさぎ、
 # 小長田＝こながた）は地域で読みが異なりうる（長木は他地域では「ながき」）ため規則化せず、
 # 各案件の手動読み（manual_readings.json）や補正辞書での個別指定に委ねる＝自治体横断で安全。
-# 適用は「前半を Sudachi で読み、末尾だけこの読みに差し替える」。長い接尾辞から順に照合する。
+# 適用は _apply_suffix_rules 参照：接尾辞が【形態素の境界から始まる時だけ】当てる。
+# これにより「交通（会社名）」「普通」「水口＝みなくち」等の複合語内の同字は誤補正しない。
+# 長い接尾辞から順に照合する（入口/出口 を単独の 口 より先に）。
 SUFFIX_READING_RULES = [
     ("入口", "いりぐち"), ("出口", "でぐち"),
     ("東口", "ひがしぐち"), ("西口", "にしぐち"),
@@ -94,12 +96,37 @@ SUFFIX_READING_RULES = [
 ]
 
 
+def _morpheme_offsets(name: str):
+    """Sudachi(mode C) での各形態素の開始文字オフセット集合（＝形態素境界）を返す。
+    読みエンジンが無ければ None。副作用防止のガード判定に使う。"""
+    tk = _get_sudachi()
+    if tk is None:
+        return None
+    try:
+        offs = {0}
+        pos = 0
+        for m in tk.tokenize(name, _sudachi_tok.Tokenizer.SplitMode.C):
+            pos += len(m.surface())
+            offs.add(pos)
+        return offs
+    except Exception:
+        return None
+
+
 def _apply_suffix_rules(name: str, base_reading: str) -> str:
-    """表記 name の末尾が既知の地名接尾辞なら、末尾の読みを規則で確定する。
-    前半だけ Sudachi で読み、末尾をSUFFIX_READING_RULESの読みに差し替える。
-    前半が読めない時は規則を無理に当てず base_reading を返す（誤補正しない＝正しく失敗）。"""
-    for suf, suf_read in SUFFIX_READING_RULES:
-        if name.endswith(suf):
+    """表記 name の末尾が既知の地名接尾辞で、かつ【その接尾辞が独立した形態素の境界から
+    始まる】時だけ、末尾の読みを規則で確定する。
+
+    形態素境界で判定するのが要点。「交通」「普通」「水口」のように接尾辞が複合語の一部
+    （＝境界でない）場合は規則を当てない。これにより「○○交通（会社名）→○○どおり」の
+    ような誤補正を、個別の除外リストではなく一般的な仕組みで防ぐ。
+    前半だけ Sudachi で読み、末尾を規則の読みに差し替える。前半が読めない・境界が取れない
+    時は規則を無理に当てず base_reading を返す（誤補正しない＝正しく失敗）。"""
+    offs = _morpheme_offsets(name)
+    if offs is None:
+        return base_reading
+    for suf, suf_read in SUFFIX_READING_RULES:   # 長い接尾辞から順に
+        if name.endswith(suf) and (len(name) - len(suf)) in offs:
             prefix = name[: -len(suf)]
             if not prefix:
                 return suf_read

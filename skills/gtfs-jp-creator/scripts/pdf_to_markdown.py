@@ -5,29 +5,33 @@ pdf_to_markdown.py
 Step 1: バス時刻表PDF / 画像 を構造化Markdown に変換する。
 
 Engines:
-    --engine pymupdf4llm (default, 軽量・高速):
-        テキストPDF + シンプルなレイアウトに最適。
-        装飾的レイアウト（カラー背景、並列テーブル等）には弱い。
+    --engine text (default, 軽量・高速, pdfplumber/MIT):
+        テキストPDF + シンプルなレイアウトに最適。テキストと表を Markdown 化する。
+        装飾的レイアウト（カラー背景、並列テーブル等）には弱い→ mineru を推奨。
     --engine mineru (高品質、重い):
         ML レイアウト解析 + OCR を組み合わせ、装飾レイアウトでも
-        テーブル構造を保持して抽出可能。CPU推論では数十分かかる。
-        GPU環境では数分。
+        テーブル構造を保持して抽出可能。CPU推論では数十分かかる。GPU環境では数分。
+
+ライセンス方針: 自治体・公共交通事業者での導入を前提とするため、AGPL の
+    PyMuPDF(fitz) / pymupdf4llm は使わず、テキスト抽出は permissive な pdfplumber(MIT)
+    のみで実装する。画像PDFの OCR は外部CLI の MinerU（別途導入）を用いる。
+    （旧 `--engine pymupdf4llm` は後方互換で受け付け、内部的に text と同義とする。）
 
 Usage:
     python pdf_to_markdown.py <input.pdf> [-o output.md] [--engine ENGINE]
 
 Examples:
-    # デフォルト（pymupdf4llm）で高速処理
+    # デフォルト（text / pdfplumber）で高速処理
     python pdf_to_markdown.py timetable.pdf -o out.md
 
-    # 装飾的なPDFには MinerU を使う（時間がかかる）
+    # 装飾的なPDF・画像PDFには MinerU を使う（時間がかかる）
     python pdf_to_markdown.py timetable.pdf --engine mineru -o out.md
 
-    # スキャン画像PDFを強制的にテキストPDFとして処理（pymupdf4llmのみ）
+    # スキャン画像PDFを強制的にテキストPDFとして処理（text エンジンのみ）
     python pdf_to_markdown.py scanned.pdf --force-text
 
 Dependencies:
-    Required: pip install pymupdf pymupdf4llm
+    Required: pip install pdfplumber
     Optional: pip install -U "mineru[core]"  # --engine mineru 利用時
 
 Status: Phase 1 (テキスト/装飾PDF対応, スキャン画像はPhase 2でolmOCR追加予定)
@@ -36,8 +40,12 @@ License: Apache 2.0
 """
 
 import argparse
+import logging
 import shutil
 import subprocess
+
+# pdfplumber(pdfminer.six) が一部PDFで出す無害な FontBBox 警告を抑制（出力を汚さない）。
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
 import sys
 from pathlib import Path
 
@@ -51,39 +59,66 @@ MIN_TEXT_CHARS_PER_PAGE = 50
 # ----------------------------------------------------------------------
 
 def detect_pdf_type(pdf_path: Path) -> str:
-    """PDFが「テキスト型」か「画像型」かを判定する (PyMuPDF)。
+    """PDFが「テキスト型」か「画像型」かを判定する (pdfplumber / MIT)。
 
     Returns:
         "text" or "image"
     """
-    import pymupdf
-
-    doc = pymupdf.open(pdf_path)
-    page_count = len(doc)
-    if page_count == 0:
-        doc.close()
-        return "image"
+    import pdfplumber
 
     total_text = ""
-    for page in doc:
-        total_text += page.get_text()
-    doc.close()
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        page_count = len(pdf.pages)
+        if page_count == 0:
+            return "image"
+        for page in pdf.pages:
+            total_text += page.extract_text() or ""
 
     avg_chars = len(total_text.strip()) / page_count
     return "text" if avg_chars >= MIN_TEXT_CHARS_PER_PAGE else "image"
 
 
 # ----------------------------------------------------------------------
-# Engine: pymupdf4llm
+# Engine: text (pdfplumber / MIT) ― 旧 pymupdf4llm(AGPL) の置換
 # ----------------------------------------------------------------------
 
-def extract_with_pymupdf4llm(pdf_path: Path) -> str:
-    """テキスト型PDFを構造化Markdownに変換する (pymupdf4llm)。
+def _table_to_markdown(tbl) -> str:
+    """pdfplumber の table（行×列の2次元リスト）を Markdown 表へ。"""
+    rows = [[(c or "").replace("\n", " ").strip() for c in row]
+            for row in tbl if any((c or "").strip() for c in row)]
+    if not rows:
+        return ""
+    ncol = max(len(r) for r in rows)
+    rows = [r + [""] * (ncol - len(r)) for r in rows]
+    out = ["| " + " | ".join(rows[0]) + " |",
+           "| " + " | ".join(["---"] * ncol) + " |"]
+    for r in rows[1:]:
+        out.append("| " + " | ".join(r) + " |")
+    return "\n".join(out)
 
-    軽量・高速だが、装飾的レイアウトでは品質が低下する場合がある。
+
+def extract_with_text(pdf_path: Path) -> str:
+    """テキスト型PDFを Markdown（テキスト＋表）に変換する (pdfplumber / MIT)。
+
+    permissive ライセンスのみで完結（AGPL の pymupdf4llm を置換）。
+    装飾的レイアウト・複雑な結合セルの表は苦手なため、そうした時刻表は
+    --engine mineru（OCR）を推奨する。
     """
-    import pymupdf4llm
-    return pymupdf4llm.to_markdown(str(pdf_path))
+    import pdfplumber
+    parts: list[str] = []
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        multipage = len(pdf.pages) > 1
+        for i, page in enumerate(pdf.pages, 1):
+            if multipage:
+                parts.append(f"## Page {i}")
+            for tbl in page.extract_tables():
+                md = _table_to_markdown(tbl)
+                if md:
+                    parts.append(md)
+            text = (page.extract_text() or "").strip()
+            if text:
+                parts.append(text)
+    return ("\n\n".join(parts).strip() + "\n") if parts else ""
 
 
 # ----------------------------------------------------------------------
@@ -169,7 +204,7 @@ def extract_with_olmocr(pdf_path: Path) -> str:
     raise NotImplementedError(
         f"olmOCR エンジンは Phase 2 で実装予定です。\n"
         f"代替として --engine mineru を使用してください（OCRも内蔵）。\n"
-        f"あるいは --force-text で pymupdf4llm 強制処理も可能です。"
+        f"あるいは --force-text で text(pdfplumber) 強制処理も可能です。"
     )
 
 
@@ -184,13 +219,14 @@ def main():
     parser.add_argument("input", help="入力PDFファイルパス")
     parser.add_argument("-o", "--output", help="出力Markdownパス (省略時は標準出力)")
     parser.add_argument(
-        "--engine", choices=["pymupdf4llm", "mineru"], default="pymupdf4llm",
-        help="抽出エンジンを選択 (デフォルト: pymupdf4llm)。"
-             "mineru は高品質だが CPU 推論で数十分かかる。",
+        "--engine", choices=["text", "mineru", "pymupdf4llm"], default="text",
+        help="抽出エンジンを選択 (デフォルト: text=pdfplumber/MIT)。"
+             "mineru は高品質だが CPU 推論で数十分かかる。"
+             "pymupdf4llm は後方互換の別名（内部的に text と同義）。",
     )
     parser.add_argument(
         "--force-text", action="store_true",
-        help="(pymupdf4llm時のみ) 自動判定をスキップしてテキスト型として処理",
+        help="(text時のみ) 自動判定をスキップしてテキスト型として処理",
     )
     parser.add_argument(
         "--lang", default="japan",
@@ -228,16 +264,16 @@ def main():
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(3)
     else:
-        # pymupdf4llm
+        # text エンジン (pdfplumber / MIT)。"pymupdf4llm" 指定も後方互換でここに来る。
         if args.force_text:
             pdf_type = "text"
             print("[INFO] --force-text 指定: テキスト型として処理", file=sys.stderr)
         else:
             pdf_type = detect_pdf_type(input_path)
-            print(f"[INFO] エンジン: pymupdf4llm | PDFタイプ判定: {pdf_type}", file=sys.stderr)
+            print(f"[INFO] エンジン: text(pdfplumber) | PDFタイプ判定: {pdf_type}", file=sys.stderr)
 
         if pdf_type == "text":
-            markdown = extract_with_pymupdf4llm(input_path)
+            markdown = extract_with_text(input_path)
         else:
             try:
                 markdown = extract_with_olmocr(input_path)
