@@ -340,8 +340,14 @@ def main() -> int:
     parser.add_argument("--no-hiragana", action="store_true",
                         help="ja-Hrkt（ふりがな）を生成しない（SudachiPy 未導入時の救済など）")
     parser.add_argument("--reading-dict", default=None,
-                        help="難読地名の補正辞書CSV(stop_name,ja-Hrkt,en)。pykakasiより優先。"
-                             "未指定なら references/data/stop_readings.csv があれば自動使用")
+                        help="全国共通辞書CSV(stop_name,ja-Hrkt,en)を明示指定。"
+                             "未指定なら階層辞書の national.csv（無ければ旧 stop_readings.csv）を使用")
+    # 階層辞書（全国<自治体<路線<利用者）の識別子。指定した層があればマージして上書きする。
+    parser.add_argument("--dict-dir", default=None,
+                        help="辞書ルート。未指定は references/dictionaries/（環境変数 GTFS_DICT_DIR 可）")
+    parser.add_argument("--municipality", default=None, help="自治体辞書のキー（例: 福岡県香春町）")
+    parser.add_argument("--route", default=None, help="路線辞書のキー（カンマ区切りで複数可）")
+    parser.add_argument("--dict-user", default=None, help="利用者辞書のキー（例: 佐藤）")
     parser.add_argument("--include-ja", action="store_true",
                         help="ja（原文コピー）行も出力する（既定は ja-Hrkt / en のみ。"
                              "feed_lang=ja では ja 名は stops.txt が持つため既定では重複を避ける）")
@@ -392,24 +398,36 @@ def main() -> int:
             for _, _, value in targets:
                 hiragana_map[value] = to_hiragana(value)
 
-    # --- 難読地名の補正辞書で pykakasi を上書き（全国共通の難読地名のみ） ---
-    if args.reading_dict:
-        dict_path = Path(args.reading_dict)
-    else:
-        dict_path = Path(__file__).resolve().parent.parent / "references" / "data" / "stop_readings.csv"
-    reading_dict = load_reading_dict(dict_path)
+    # --- 階層辞書（全国<自治体<路線<利用者）で Sudachi＋規則の読みを上書き ---
+    # 低優先→高優先でマージ済みの {stop_name: spec(+_layer)} を得る。_layer が出典（監査基盤）。
+    # 後方互換: reading_dictionary が無い/失敗しても、旧 load_reading_dict にフォールバック。
     en_dict: dict[str, str] = {}
-    if reading_dict:
+    reading_layers: dict[str, dict] = {}
+    try:
+        import reading_dictionary as _rd
+        reading_layers = _rd.resolve(dict_dir=args.dict_dir, municipality=args.municipality,
+                                     routes=args.route, user=args.dict_user,
+                                     national_path=args.reading_dict)
+    except Exception as e:
+        print(f"Warning: 階層辞書の読込に失敗、旧辞書にフォールバック: {e}", file=sys.stderr)
+        _legacy = Path(args.reading_dict) if args.reading_dict else (
+            Path(__file__).resolve().parent.parent / "references" / "data" / "stop_readings.csv")
+        for nm, spec in load_reading_dict(_legacy).items():
+            reading_layers[nm] = spec
+    if reading_layers:
         n_over = 0
+        _by_layer: dict[str, int] = {}
         for _, _, value in targets:
-            spec = reading_dict.get(value)
+            spec = reading_layers.get(value)
             if not spec:
                 continue
             if spec.get("ja-Hrkt"):
                 hiragana_map[value] = spec["ja-Hrkt"]; n_over += 1
+                _by_layer[spec.get("_layer", "national")] = _by_layer.get(spec.get("_layer", "national"), 0) + 1
             if spec.get("en"):
                 en_dict[value] = spec["en"]
-        print(f"読み補正辞書: {len(reading_dict)}件中 {n_over}件を停留所名に適用 ({dict_path.name})")
+        _layers_desc = "、".join(f"{k}:{v}" for k, v in _by_layer.items()) or "なし"
+        print(f"階層辞書で {n_over}件の読みを上書き（層別 {_layers_desc}）")
 
     # --- LLM 英訳結果のマージ ---
     en_map: dict[str, str] = {}

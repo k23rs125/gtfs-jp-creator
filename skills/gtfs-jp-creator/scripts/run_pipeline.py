@@ -568,6 +568,25 @@ def main() -> int:
            "--trips", str(gtfs_dir / "trips.txt"),     # 行き先表示の読み
            "-o", str(gtfs_dir / "translations.txt"),
            "--report", str(work_dir / "translations_report.json")]
+    # 読みの階層辞書（全国<自治体<路線<利用者）のキーを渡す。該当辞書があれば上書きされる。
+    if context and any(s in context for s in ("市", "町", "村", "区")):
+        cmd += ["--municipality", context]
+    _route_names = []
+    try:
+        import csv as _csv_r
+        with open(gtfs_dir / "routes.txt", encoding="utf-8-sig") as _rf:
+            for _r in _csv_r.DictReader(_rf):
+                _nm = (_r.get("route_long_name") or _r.get("route_short_name") or "").strip()
+                if _nm and _nm not in _route_names:
+                    _route_names.append(_nm)
+    except Exception:
+        pass
+    if _route_names:
+        cmd += ["--route", ",".join(_route_names)]
+    if cfg.get("dict_user"):
+        cmd += ["--dict-user", str(cfg["dict_user"])]
+    if cfg.get("dict_dir"):
+        cmd += ["--dict-dir", str(cfg["dict_dir"])]
     if translations_en_json:
         cmd += ["--merge-en", translations_en_json]
     else:

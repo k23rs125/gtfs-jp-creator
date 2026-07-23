@@ -39,20 +39,43 @@ try:
     from stop_name_merge import detect_variants, apply_merges, all_stop_names
 except Exception:
     detect_variants = None
-# ふりがな(ja-Hrkt)の再計算に生成側と同じロジックを使う（SudachiPy＋補正規則＋難読地名辞書）。
+# ふりがな(ja-Hrkt)の再計算に生成側と同じロジックを使う（SudachiPy＋補正規則＋階層辞書）。
 try:
-    from generate_translations import (to_hiragana as _to_hira,
-                                        load_reading_dict as _load_rdict)
-    _RDICT = _load_rdict(SCRIPTS.parent / "references" / "data" / "stop_readings.csv")
+    from generate_translations import to_hiragana as _to_hira
+    import reading_dictionary as _rdict_mod
 except Exception:
-    _RDICT, _to_hira = {}, None
+    _to_hira, _rdict_mod = None, None
+
+
+def _reading_overrides():
+    """現在の自治体/路線/利用者から階層辞書（全国<自治体<路線<利用者）をマージした
+    {stop_name: spec(+_layer)} を返す。識別子が変わった時だけ再読込してキャッシュする。
+    spec['_layer'] が読みの出典（監査証跡・出典表示の基盤）。"""
+    if _rdict_mod is None:
+        return {}
+    muni = str(ss().get("muni_input", "") or "").strip()
+    user = str(ss().get("user_name", "") or "").strip()
+    routes = ",".join(
+        (r.get("route_long_name") or "").strip()
+        for r in (ss().get("decision_spec", {}) or {}).get("routes", [])
+        if (r.get("route_long_name") or "").strip())
+    key = (muni, routes, user)
+    if ss().get("_rovr_key") != key:
+        try:
+            ss()["_rovr"] = _rdict_mod.resolve(municipality=muni or None,
+                                               routes=routes or None, user=user or None)
+        except Exception:
+            ss()["_rovr"] = {}
+        ss()["_rovr_key"] = key
+    return ss().get("_rovr", {})
 
 
 def _auto_reading(name):
-    """停留所名からふりがな(ja-Hrkt)を自動生成。補正辞書を最優先→SudachiPy＋補正規則。"""
+    """停留所名からふりがな(ja-Hrkt)を自動生成。階層辞書を最優先→SudachiPy＋補正規則。"""
     name = (name or "").strip()
-    if name in _RDICT and _RDICT[name].get("ja-Hrkt"):
-        return _RDICT[name]["ja-Hrkt"]
+    ov = _reading_overrides().get(name)
+    if ov and ov.get("ja-Hrkt"):
+        return ov["ja-Hrkt"]
     return _to_hira(name) if _to_hira else ""
 
 
@@ -1693,7 +1716,9 @@ if _show_tt:
                 cfg = {"feed_name": "app_feed", "input_json": str(WORK / "structured.json"),
                        "extract_json": str(WORK / "extract.json"), "output_dir": str(WORK / "out"),
                        "context": muni, "p11_prefecture": pref, "use_nominatim": bool(use_nom),
-                       "interpolate_coords": True, "validate": True}
+                       "interpolate_coords": True, "validate": True,
+                       # 読みの階層辞書: 利用者辞書のキー（担当者名）。自治体=context、路線=routes.txt から自動。
+                       "dict_user": str(ss().get("user_name", "") or "").strip()}
                 if hol.get("syuku"):
                     cfg["holiday_syukujitsu"] = str(SCRIPTS.parent / "references" / "data" / "syukujitsu.csv")
                 if hol.get("nenmatsu"):
@@ -2874,8 +2899,9 @@ if _show_q:
                 else:
                     route_name = ""  # 多路線は②の割り当てで路線名を設定
                     c1.caption("路線名は②で設定済み: " + " / ".join(r["route_long_name"] for r in _routes_now))
-                muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県",
-                                     help="P11の都道府県/市域制約に使用。市区町村まで入れると同名停留所の精度が大きく上がります")
+                muni = c1.text_input("対象自治体（都道府県＋市区町村）", value="福岡県", key="muni_input",
+                                     help="P11の都道府県/市域制約と、自治体辞書（読みの階層辞書）のキーに使用。"
+                                          "市区町村まで入れると同名停留所の精度が大きく上がります")
                 c1.caption("⚠ **市区町村まで**入れてください（例: 福岡県築上町）。"
                            "都道府県だけだと同名のバス停を県内の別の場所に誤って合わせる恐れがあります。")
                 c2.caption("**事業者情報**（正式提出に必要。自治体はご自身の情報を入力）")
