@@ -237,13 +237,16 @@ import logging as _logging  # noqa: E402
 _logging.getLogger("streamlit.elements.lib.policies").setLevel(_logging.ERROR)
 
 # --- 見た目（官公庁向けの信頼感ある青系テーマ。CSS注入なのでサーバ/ローカル問わず効く） ---
+# フォントは外部(Google Fonts)を読み込まず、OS同梱の日本語フォントのみを使う（閉域網・
+# オフライン対応。外部通信・情報流出を避ける）。Noto Sans JP が入っていれば使い、無ければ
+# 游ゴシック/ヒラギノ/メイリオへフォールバックする。
 st.markdown("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&display=swap');
   :root { --brand:#1E5FA8; --brand-dark:#123E70; --brand-2:#2E86C8; --brand-light:#E8F0FA;
           --ink:#16202B; --bg:#F4F7FC; --card:#FFFFFF; --border:#E1E8F2; }
   html, body, .stApp, [class*="css"], input, textarea, button {
-    font-family:'Noto Sans JP','Inter',system-ui,-apple-system,sans-serif; }
+    font-family:'Noto Sans JP','Yu Gothic Medium','Yu Gothic',YuGothic,
+      'Hiragino Kaku Gothic ProN','Hiragino Sans',Meiryo,system-ui,-apple-system,sans-serif; }
   .stApp { background:
      radial-gradient(1200px 520px at 82% -8%, #E7F0FB 0%, rgba(231,240,251,0) 55%),
      radial-gradient(900px 440px at -6% 0%, #ECF3FC 0%, rgba(236,243,252,0) 50%),
@@ -328,6 +331,25 @@ def run(cmd, cwd=None):
 
 def ss():  # session_state ショートカット
     return st.session_state
+
+
+def _map_tile_url():
+    """地図の基盤タイルURLを返す。既定は None（オフライン＝タイル取得しない）。
+    閉域網・自治体運用のため、外部タイル(OpenStreetMap等)は既定で取得しない。
+    背景地図が必要な場合のみ、環境変数 GTFS_TILE_URL か ⑤ の設定欄で
+    タイルURL（例: 自前タイルサーバや https://tile.openstreetmap.org/{z}/{x}/{y}.png）を指定する。"""
+    url = (str(ss().get("tile_url", "")) or os.environ.get("GTFS_TILE_URL", "")).strip()
+    return url or None
+
+
+def _folium_map(**kwargs):
+    """基盤タイルを既定オフライン(None=灰背景＋マーカーのみ)にした folium.Map を返す。
+    タイルURLが設定されている時だけ、その基盤地図を表示する（外部通信は利用者の明示指定時のみ）。"""
+    import folium as _fl
+    url = _map_tile_url()
+    if url:
+        return _fl.Map(tiles=url, attr="(指定タイル)", **kwargs)
+    return _fl.Map(tiles=None, **kwargs)
 
 
 if "work" not in ss():
@@ -3751,7 +3773,20 @@ if _show_coord:
                     pts.append((tip, la, lo, conf, r.get("reason", "")))
                 center = ([sum(p[1] for p in pts) / len(pts), sum(p[2] for p in pts) / len(pts)]
                           if pts else [35.0, 138.0])
-                fmap = folium.Map(location=center, zoom_start=14)
+                # 背景地図（基盤タイル）は既定オフライン（外部通信なし＝閉域網対応）。
+                # 必要な場合だけ、ここにタイルURL（自前タイルサーバ等）を入れると背景地図が出る。
+                with st.expander("🗺️ 背景地図の設定（任意・既定はオフラインで背景なし）"):
+                    st.caption("自治体の閉域網でも動くよう、**背景地図は既定で表示しません**"
+                               "（マーカーの位置関係だけで座標を確認できます）。"
+                               "インターネットや自前のタイルサーバが使える場合のみ、下にタイルURLを入れると"
+                               "背景地図が出ます。環境変数 `GTFS_TILE_URL` でも既定値を設定できます。")
+                    st.text_input(
+                        "タイルURL（例: https://tile.openstreetmap.org/{z}/{x}/{y}.png）",
+                        value=str(ss().get("tile_url", "") or os.environ.get("GTFS_TILE_URL", "")),
+                        key="tile_url", placeholder="空欄＝背景地図なし（オフライン）",
+                        help="OpenStreetMap を使う場合は各自で利用規約を確認してください。"
+                             "閉域網では自前タイルサーバのURLを指定します。")
+                fmap = _folium_map(location=center, zoom_start=14)
                 col = {"確定": "green", "要確認": "orange", "未補完": "red"}
                 _cbadge = {"確定": "#2e7d32", "要確認": "#e08a1e", "未補完": "#c62828"}
                 from html import escape as _esc
@@ -3964,7 +3999,7 @@ if _show_coord:
                                  "『全体を描き直す』＝始点から終点まで一気に描き直し（従来）。")
 
                         if _mode5 == "全体を描き直す":
-                            _em = folium.Map(location=_octr, zoom_start=13)
+                            _em = _folium_map(location=_octr, zoom_start=13)
                             _draw_opts(_em)
                             for i, (nm, la, lo) in enumerate(_spts, 1):
                                 folium.Marker([la, lo], tooltip=f"{i}. {nm}", icon=_num_icon(i)).add_to(_em)
@@ -4007,7 +4042,7 @@ if _show_coord:
                             if _result:
                                 st.success(f"『{_result[0]}』〜『{_result[1]}』の区間を差し替えました。"
                                            "下が **できあがった経路（全体）** です（編集した区間以外もそのまま残っています）。")
-                                _rm = folium.Map(location=_octr, zoom_start=14)
+                                _rm = _folium_map(location=_octr, zoom_start=14)
                                 folium.PolyLine(_cur_latlon, color="#1E5FA8", weight=5, opacity=0.95,
                                                 tooltip="できあがった経路（全体）").add_to(_rm)
                                 for i, (nm, la, lo) in enumerate(_spts, 1):
@@ -4018,7 +4053,7 @@ if _show_coord:
                             else:
                                 _ia, _ib = _nrst((_a[1], _a[2])), _nrst((_b[1], _b[2]))
                                 _lo, _hi = (_ia, _ib) if _ia <= _ib else (_ib, _ia)
-                                _em = folium.Map(location=[(_a[1] + _b[1]) / 2, (_a[2] + _b[2]) / 2], zoom_start=15)
+                                _em = _folium_map(location=[(_a[1] + _b[1]) / 2, (_a[2] + _b[2]) / 2], zoom_start=15)
                                 _draw_opts(_em)
                                 # 直す区間は線を消して「ギャップ（線がつながっていない状態）」にする。
                                 # 区間の前後の現在経路(グレー)だけ残し、赤い2停留所の間は線を描かない

@@ -13,6 +13,10 @@ runOnSave = false         # 保存のたびの自動再実行を止める（不�
 enableCORS = false        # 同一LAN内からの接続を許可
 enableXsrfProtection = false
 
+# 使用統計(テレメトリ)の外部送信を無効化。自治体・閉域網でも外部通信が発生しないようにする。
+[browser]
+gatherUsageStats = false
+
 # 官公庁向けの信頼感ある青系テーマ（ウィジェットの基調色。詳細な装飾は app.py のCSSで付与）
 [theme]
 primaryColor = "#1E5FA8"

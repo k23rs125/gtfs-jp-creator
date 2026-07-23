@@ -519,18 +519,24 @@ def main() -> int:
         log("Step 3.6: holiday_* 未指定のためスキップ（運休日を付けない＝要確認）")
 
     # ---- Step 4: generate_shapes ----
+    # 既定は【オフライン】＝OSRM(外部)を呼ばず停留所を直線で結んで shapes を生成する。
+    # 閉域網・自治体運用では、外部OSRMへの接続待ち(タイムアウト)を避けるためこれを既定とする。
+    # 道なりの経路が必要な場合のみ use_osrm=true（＋任意で osrm_url を自前サーバに）で有効化。
     trips_with_shapes = gtfs_dir / "trips.with_shapes.txt"
-    ok = run_step(
-        "Step 4: shapes.txt 生成 (generate_shapes)",
-        [PYTHON, script("generate_shapes.py"),
-         str(gtfs_dir / "stops.txt"), str(gtfs_dir / "stop_times.txt"),
-         str(gtfs_dir / "trips.txt"),
-         "-o", str(gtfs_dir / "shapes.txt"),
-         "--update-trips", str(trips_with_shapes),
-         "--cache", str(work_dir / "shapes_cache.json"),
-         "--report", str(work_dir / "shapes_report.json")],
-        args.dry_run,
-    )
+    _shapes_args = [PYTHON, script("generate_shapes.py"),
+                    str(gtfs_dir / "stops.txt"), str(gtfs_dir / "stop_times.txt"),
+                    str(gtfs_dir / "trips.txt"),
+                    "-o", str(gtfs_dir / "shapes.txt"),
+                    "--update-trips", str(trips_with_shapes),
+                    "--cache", str(work_dir / "shapes_cache.json"),
+                    "--report", str(work_dir / "shapes_report.json")]
+    if cfg.get("use_osrm", False):
+        _osrm_url = cfg.get("osrm_url")
+        if _osrm_url:
+            _shapes_args += ["--osrm-url", _osrm_url]
+    else:
+        _shapes_args += ["--no-osrm"]     # 既定オフライン（直線）
+    ok = run_step("Step 4: shapes.txt 生成 (generate_shapes)", _shapes_args, args.dry_run)
     record("Step 4 shapes生成", ok)
 
     # ---- Step 4b: 検証用マップHTML生成（既定ON） ----

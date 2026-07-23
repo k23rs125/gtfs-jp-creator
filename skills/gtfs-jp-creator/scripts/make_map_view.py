@@ -24,7 +24,9 @@ import argparse
 import csv
 import html
 import json
+import os
 import sys
+from pathlib import Path
 from collections import defaultdict, Counter
 
 JP_LAT_MIN, JP_LAT_MAX = 24.0, 46.0
@@ -150,8 +152,8 @@ TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>停留所マップ ― __TITLE__</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>__LEAFLET_CSS__</style>
+<script>__LEAFLET_JS__</script>
 <style>
   html, body { margin: 0; padding: 0; height: 100%; font-family: "Meiryo", system-ui, sans-serif; }
   #wrap { display: flex; flex-direction: column; height: 100%; }
@@ -245,10 +247,13 @@ const bboxInfo = document.getElementById("bbox-info");
 bboxInfo.textContent = BBOX ? "想定範囲 bbox: " + BBOX.join(", ")
                             : "（bbox未指定：範囲外判定は行いません）";
 
-// 地図
+// 地図。背景タイルは既定オフライン（外部通信なし＝閉域網対応）。
+// TILE_URL が指定された時だけ基盤地図を表示する（環境変数 GTFS_TILE_URL）。
 const map = L.map("map");
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-  { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+const TILE_URL = "__TILE_URL__";
+if (TILE_URL) {
+  L.tileLayer(TILE_URL, { maxZoom: 19, attribution: "(指定タイル)" }).addTo(map);
+}
 
 // ルート線は停留所点の下のレイヤに置く（点が隠れないように）
 map.createPane("shapesPane");
@@ -406,6 +411,19 @@ def build_html(stops, title, bbox, shapes, trips, stop_times):
     out = out.replace("__SHAPES__", json.dumps(shapes, ensure_ascii=False))
     out = out.replace("__TRIPS__", json.dumps(trips, ensure_ascii=False))
     out = out.replace("__STOP_TIMES__", json.dumps(stop_times, ensure_ascii=False))
+    # Leaflet(BSD)を同梱ファイルからインライン展開＝CDN不要でオフライン完結。
+    # データ系の置換の「後」に行う（Leaflet本文が他の __XXX__ を壊さないように最後に注入）。
+    _vendor = Path(__file__).resolve().parent.parent / "references" / "vendor" / "leaflet"
+    try:
+        _css = (_vendor / "leaflet.min.css").read_text(encoding="utf-8")
+        _js = (_vendor / "leaflet.min.js").read_text(encoding="utf-8")
+    except OSError:
+        _css, _js = "", ""   # 同梱が無ければ空（地図は出ないが外部通信もしない＝正しく失敗）
+    # 背景タイルは既定オフライン。GTFS_TILE_URL があればそれを使う（自前タイルサーバ等）。
+    _tile = os.environ.get("GTFS_TILE_URL", "").strip()
+    out = out.replace("__TILE_URL__", _tile)
+    out = out.replace("__LEAFLET_CSS__", _css)
+    out = out.replace("__LEAFLET_JS__", _js)
     return out
 
 
