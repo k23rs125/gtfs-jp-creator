@@ -2741,7 +2741,9 @@ if _show_q:
                                                       "路線で運賃が違う時だけOFFにして路線ごとに入力。")
             zone_fare = _fcol[1].checkbox("区間運賃にする（停留所・区間ごとに違う）", key=f"zonechk_{tk}",
                                           help="チェックすると③の中に『区間運賃の表（発×着）』が出ます。区間ごとに金額を入れます。")
-            with st.form("conditions"):
+            # enter_to_submit=False: 入力欄で Enter を押しても送信（＝生成→画面遷移）しない。
+            # 各項目を続けて入力でき、最後に『GTFS-JP を生成する』ボタンで一括生成する。
+            with st.form("conditions", enter_to_submit=False):
                 # 運賃（入力方法は上の「運賃の入力方法」で選択済み）。金額をここ＝方法選択の直後に入力する。
                 # 区分別テーブル（単一路線 or 全路線一律）: 区分を自由に追加・削除でき、区分ごとに金額と支払い方法を入れる。
                 fare_cat_df = None
