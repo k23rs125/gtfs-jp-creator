@@ -6,9 +6,16 @@ Step 6 (translations.txt 生成): GTFS-JP 拡張ファイル translations.txt �
 半自動で生成する。
 
 言語対応の戦略（既定は ja-Hrkt / en の2言語）:
-    [ja-Hrkt] 漢字 → ひらがな読み           → pykakasi（pip install pykakasi）
+    [ja-Hrkt] 漢字 → ひらがな読み           → SudachiPy（辞書付き形態素解析・Apache-2.0）
+                                              ＋停留所名の連濁/地名末尾の決定的な補正規則
+                                              ＋難読地名の補正辞書（stop_readings.csv）
     [en]      日本語 → 英語                 → LLM（Claude/Gemini/ChatGPT）
     [ja]      原文コピー（--include-ja 時のみ）→ 本スクリプトが直接生成
+
+    読みエンジンは SudachiPy（Apache-2.0）のみを用いる。以前フォールバックに使っていた
+    pykakasi は GPL-3.0-or-later（コピーレフト）で、自治体が自己ホストで配布する形態だと
+    ライセンス上の制約が生じうるため採用しない。読みは「決定的・オフライン・無料・
+    Apache系のみ」で完結させ、外れる地名は補正辞書＋人手確認（④）で担保する。
 
     既定で ja 行を出さないのは、feed_lang=ja のとき停留所名の日本語原本は stops.txt
     が持つため、translations.txt の ja 行は重複になるから（公式 GTFS-JP フィードも
@@ -47,14 +54,9 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
-try:
-    import pykakasi  # 漢字 → ひらがな変換（pure Python）
-    _PYKAKASI_AVAILABLE = True
-except ImportError:
-    _PYKAKASI_AVAILABLE = False
-
-# SudachiPy（辞書付き形態素解析）。地名辞書を持つため難読地名の読みが pykakasi より正確。
-# 決定的（同じ入力→同じ読み）でオフライン・無料。未インストールなら pykakasi にフォールバック。
+# 読みエンジンは SudachiPy（Apache-2.0）に一本化。pykakasi は GPL-3.0-or-later のため不使用
+# （自治体の自己ホスト配布でコピーレフトの制約が生じうる。ライセンス最優先の方針）。
+# SudachiPy（辞書付き形態素解析）は決定的（同じ入力→同じ読み）でオフライン・無料。
 try:
     from sudachipy import dictionary as _sudachi_dict, tokenizer as _sudachi_tok
     _SUDACHI_AVAILABLE = True
@@ -74,6 +76,38 @@ def _get_sudachi():
         except Exception:
             _sudachi = False   # 辞書が無い等で初期化失敗 → 以後スキップ
     return _sudachi or None
+
+
+# 停留所名の末尾でよく起きる「連濁・地名の慣用読み」を決定的に補正する規則。
+# バス停名はほぼ地名で、末尾「口」は連濁して「ぐち」になるのが通例（東口＝ひがしぐち、
+# 鏡山口＝かがみやまぐち）。形態素解析は一般語基準のため「くち」「つう」と読み外しやすい。
+# ここに載せるのは【全国共通で安全な語尾規則のみ】。地域固有の難読読み（例: 長木＝おさぎ、
+# 小長田＝こながた）は地域で読みが異なりうる（長木は他地域では「ながき」）ため規則化せず、
+# 各案件の手動読み（manual_readings.json）や補正辞書での個別指定に委ねる＝自治体横断で安全。
+# 適用は「前半を Sudachi で読み、末尾だけこの読みに差し替える」。長い接尾辞から順に照合する。
+SUFFIX_READING_RULES = [
+    ("入口", "いりぐち"), ("出口", "でぐち"),
+    ("東口", "ひがしぐち"), ("西口", "にしぐち"),
+    ("南口", "みなみぐち"), ("北口", "きたぐち"),
+    ("通り", "どおり"), ("通", "どおり"),
+    ("口", "ぐち"),
+]
+
+
+def _apply_suffix_rules(name: str, base_reading: str) -> str:
+    """表記 name の末尾が既知の地名接尾辞なら、末尾の読みを規則で確定する。
+    前半だけ Sudachi で読み、末尾をSUFFIX_READING_RULESの読みに差し替える。
+    前半が読めない時は規則を無理に当てず base_reading を返す（誤補正しない＝正しく失敗）。"""
+    for suf, suf_read in SUFFIX_READING_RULES:
+        if name.endswith(suf):
+            prefix = name[: -len(suf)]
+            if not prefix:
+                return suf_read
+            pre = _sudachi_hira(prefix)
+            if pre:
+                return pre + suf_read
+            return base_reading
+    return base_reading
 
 
 def _kata2hira(s: str) -> str:
@@ -132,32 +166,19 @@ def write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
 # ひらがな読み生成 (ja-Hrkt)
 # ---------------------------------------------------------------------------
 
-def init_kakasi():
-    """pykakasi インスタンスを初期化。pykakasi が無ければ None を返す。"""
-    if not _PYKAKASI_AVAILABLE:
-        return None
-    kks = pykakasi.kakasi()
-    return kks
+def to_hiragana(text: str) -> str:
+    """漢字混じり文字列を ひらがな に変換する（SudachiPy＝Apache-2.0・オフライン）。
 
-
-def to_hiragana(text: str, kks) -> str:
-    """漢字混じり文字列を ひらがな に変換する。
-
-    半角カナ(ﾌｧﾐﾘｰﾏｰﾄ 等)は pykakasi が濁点・半濁点を誤処理して「ふぁみり゜ま゜」の
-    ように文字化けするため、先に NFKC で全角化してから変換する（読みの精度が上がる）。
+    半角カナ(ﾌｧﾐﾘｰﾏｰﾄ 等)は濁点・半濁点の誤処理を避けるため先に NFKC で全角化する。
+    Sudachi の読みに対し、停留所名の連濁・地名末尾を決定的な規則で補正する
+    （東口=ひがしぐち 等）。読めなければ "" を返す（→ 補正辞書 or ④で人が入力）。
     """
     if not text:
         return ""
-    # 半角カナ(ﾌｧﾐﾘｰﾏｰﾄ等)は先に全角化(NFKC)して誤変換を防ぐ。
     norm = unicodedata.normalize("NFKC", text)
-    # SudachiPy(辞書付き)を優先＝難読地名に強い。読めない時だけ pykakasi にフォールバック。
-    s = _sudachi_hira(norm)
-    if s:
-        return s
-    if kks is None:
-        return ""
-    result = kks.convert(norm)
-    return "".join(item.get("hira", "") for item in result)
+    base = _sudachi_hira(norm) or ""
+    fixed = _apply_suffix_rules(norm, base)
+    return fixed or base
 
 
 def load_reading_dict(path: Path) -> dict[str, dict]:
@@ -290,7 +311,7 @@ def main() -> int:
     parser.add_argument("--merge-en", default=None,
                         help="LLM 英訳結果 JSON （{name: translation, ...}）を読み込んでマージ")
     parser.add_argument("--no-hiragana", action="store_true",
-                        help="pykakasi 未インストール時の救済（ja-Hrkt を生成しない）")
+                        help="ja-Hrkt（ふりがな）を生成しない（SudachiPy 未導入時の救済など）")
     parser.add_argument("--reading-dict", default=None,
                         help="難読地名の補正辞書CSV(stop_name,ja-Hrkt,en)。pykakasiより優先。"
                              "未指定なら references/data/stop_readings.csv があれば自動使用")
@@ -331,19 +352,18 @@ def main() -> int:
           f"routes: {sum(1 for t in targets if t[0]=='routes')})")
     print()
 
-    # --- ひらがな読み生成 ---
-    kks = None
+    # --- ひらがな読み生成（SudachiPy／Apache-2.0・オフライン。pykakasi(GPL)は不使用）---
     hiragana_map: dict[str, str] = {}
+    reading_available = _get_sudachi() is not None
     if not args.no_hiragana:
-        kks = init_kakasi()
-        # SudachiPy か pykakasi のどちらかがあれば読みを生成できる（Sudachi優先）。
-        if _get_sudachi() is None and kks is None:
-            print("Warning: 読み生成ライブラリがありません（SudachiPy/pykakasi）。ja-Hrkt を"
-                  "スキップします（`pip install sudachipy sudachidict_core` 推奨）。",
+        if not reading_available:
+            print("Warning: 読み生成エンジン SudachiPy がありません。ja-Hrkt をスキップします"
+                  "（`pip install sudachipy sudachidict_core` を推奨）。"
+                  "読みは補正辞書 or ④の確認画面で入力・補正できます。",
                   file=sys.stderr)
         else:
             for _, _, value in targets:
-                hiragana_map[value] = to_hiragana(value, kks)
+                hiragana_map[value] = to_hiragana(value)
 
     # --- 難読地名の補正辞書で pykakasi を上書き（全国共通の難読地名のみ） ---
     if args.reading_dict:
@@ -398,8 +418,8 @@ def main() -> int:
             })
             stats["ja"] += 1
 
-        # ja-Hrkt: pykakasi
-        if kks is not None:
+        # ja-Hrkt: SudachiPy＋補正規則＋補正辞書
+        if not args.no_hiragana and reading_available:
             hira = hiragana_map.get(value, "")
             if hira:
                 rows.append({
@@ -442,7 +462,8 @@ def main() -> int:
             "ja_hrkt_rows": stats["ja-Hrkt"],
             "en_rows": stats["en"],
             "en_missing": stats["en_missing"],
-            "pykakasi_available": _PYKAKASI_AVAILABLE and not args.no_hiragana,
+            "reading_engine": ("sudachipy" if reading_available and not args.no_hiragana
+                               else "none"),
         },
         "generated_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -460,7 +481,7 @@ def main() -> int:
     print(f"ja-Hrkt 行:                {stats['ja-Hrkt']}")
     print(f"en 行:                     {stats['en']}")
     print(f"en 未充足:                 {stats['en_missing']}")
-    print(f"pykakasi 利用:             {report['summary']['pykakasi_available']}")
+    print(f"読みエンジン:              {report['summary']['reading_engine']}（SudachiPy/Apache-2.0）")
     print("=" * 64)
     print(f"Output written:  {out_path}  ({len(rows)} rows)")
     if args.export_en_prompt:

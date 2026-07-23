@@ -39,22 +39,21 @@ try:
     from stop_name_merge import detect_variants, apply_merges, all_stop_names
 except Exception:
     detect_variants = None
-# ふりがな(ja-Hrkt)の再計算に生成側と同じロジックを使う（NFKC正規化＋難読地名辞書）。
+# ふりがな(ja-Hrkt)の再計算に生成側と同じロジックを使う（SudachiPy＋補正規則＋難読地名辞書）。
 try:
-    from generate_translations import (init_kakasi as _init_kks, to_hiragana as _to_hira,
+    from generate_translations import (to_hiragana as _to_hira,
                                         load_reading_dict as _load_rdict)
-    _KKS = _init_kks()
     _RDICT = _load_rdict(SCRIPTS.parent / "references" / "data" / "stop_readings.csv")
 except Exception:
-    _KKS, _RDICT, _to_hira = None, {}, None
+    _RDICT, _to_hira = {}, None
 
 
 def _auto_reading(name):
-    """停留所名からふりがな(ja-Hrkt)を自動生成。辞書優先→pykakasi(NFKC)。"""
+    """停留所名からふりがな(ja-Hrkt)を自動生成。補正辞書を最優先→SudachiPy＋補正規則。"""
     name = (name or "").strip()
     if name in _RDICT and _RDICT[name].get("ja-Hrkt"):
         return _RDICT[name]["ja-Hrkt"]
-    return _to_hira(name, _KKS) if _to_hira else ""
+    return _to_hira(name) if _to_hira else ""
 
 
 def _reading_suspicious(reading):
