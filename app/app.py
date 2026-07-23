@@ -1535,9 +1535,14 @@ if _show_tt:
                 _st[f"aga_{tk}"] = merged["agency_address"]
             if merged.get("agency_president_name"):
                 _st[f"agpn_{tk}"] = merged["agency_president_name"]
-            # 区間運賃のExcel（三角の運賃早見表）→ 非均一なら区間運賃表に自動取り込み。
+            # 区間運賃の資料（三角の運賃早見表）→ 非均一なら区間運賃表に自動取り込み。
             # 均一（全区間同額）は手入力の方が速いので取り込まない（利用者の方針）。
-            if str(path).lower().endswith(".xlsx"):
+            # Excel(.xlsx) と PDF(.pdf) の両方に対応（同じ fare_matrix_doc.json 形式に落とす）。
+            _plow = str(path).lower()
+            _fare_script = ("parse_fare_matrix_excel.py" if _plow.endswith(".xlsx")
+                            else "parse_fare_matrix_pdf.py" if _plow.endswith(".pdf")
+                            else None)
+            if _fare_script:
                 _stops = []
                 for _b in (ss().get("extract") or {}).get("blocks", []):
                     for _s in _b.get("stops", []):
@@ -1547,7 +1552,7 @@ if _show_tt:
                 fmj = WORK / "fare_matrix_doc.json"
                 if fmj.exists():
                     fmj.unlink()
-                _args = [SCRIPTS / "parse_fare_matrix_excel.py", path, "-o", fmj]
+                _args = [SCRIPTS / _fare_script, path, "-o", fmj]
                 if _stops:
                     _args += ["--stops", ",".join(_stops)]
                 run(_args)
@@ -1573,7 +1578,7 @@ if _show_tt:
                         "③の運賃欄に手入力してください（均一は入力の方が速いため自動取り込みしません）。")
                 elif not adult and _stops:
                     # フィルタ無しでは表が読めるのに停留所一致が0＝表記ゆれの可能性を通知
-                    _args2 = [SCRIPTS / "parse_fare_matrix_excel.py", path, "-o", fmj]
+                    _args2 = [SCRIPTS / _fare_script, path, "-o", fmj]
                     run(_args2)
                     try:
                         fm2 = json.loads(fmj.read_text(encoding="utf-8")) if fmj.exists() else {}
@@ -2711,8 +2716,8 @@ if _show_q:
             cond_doc = st.file_uploader("運賃・運行条件などの資料があれば（任意・PDF/Excel/Word/テキスト）",
                                         type=["pdf", "xlsx", "md", "txt", "docx"], key=f"conddoc_{tk}",
                                         help="運賃・運行日・事業者情報などを検出して③に初期入力します。"
-                                             "区間ごとに運賃が違う『運賃早見表（三角の表）』のExcelは、区間運賃の表へ"
-                                             "自動取り込みします（均一運賃は入力の方が速いので手入力のまま）。値は必ず要確認。")
+                                             "区間ごとに運賃が違う『運賃早見表（三角の表）』は、ExcelでもPDFでも"
+                                             "区間運賃の表へ自動取り込みします（均一運賃は入力の方が速いので手入力のまま）。値は必ず要確認。")
             if cond_doc is not None and ss().get("conddoc_name") != cond_doc.name:
                 _cp = WORK / ("cond_" + cond_doc.name)
                 _cp.write_bytes(cond_doc.getbuffer())
