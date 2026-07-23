@@ -231,6 +231,12 @@ class _DrawJPLabels(folium.MacroElement):
 
 st.set_page_config(page_title="GTFS-JP メーカー", page_icon="🚌", layout="wide")
 
+# 本アプリは検出値・保存値の事前入力に「value= と session_state の併用」を意図的に多用する
+# （detected を欄へ反映、②③入力の消失対策の再代入など）。この組合せで Streamlit が出す
+# 「値は session_state 側が使われ value= は無視」の警告は設計上無害なので抑制し、ログを整える。
+import logging as _logging  # noqa: E402
+_logging.getLogger("streamlit.elements.lib.policies").setLevel(_logging.ERROR)
+
 # --- 見た目（官公庁向けの信頼感ある青系テーマ。CSS注入なのでサーバ/ローカル問わず効く） ---
 st.markdown("""
 <style>
@@ -1050,6 +1056,24 @@ if _top1.button("◀ 選び直す"):
 if _mode == "solo":
     _top2.caption("一人モード：下のタブを順に進めてください（時刻表 → 入力 → 座標）。"
                   "時刻表の確定や生成で、次のタブへ自動で進みます。")
+    # ── ②③入力の消失対策 ───────────────────────────────────────────────
+    # Streamlit は「その実行で描画されなかった widget」の session_state を実行後に破棄する。
+    # タブ切替や②の『確定して反映』は st.rerun() で③（画面下部）を描画する前に中断するため、
+    # ③の入力欄（事業者名・電話など）が破棄され value= の既定に戻る不具合があった。
+    # 各入力キー（*_<extract_token>）を自身へ再代入して「使用中」とマークし、破棄を防ぐ
+    # （Streamlit 公式のページ間 state 永続化パターン）。ボタン等は対象外（_tk 接尾辞のみ）。
+    # data_editor の state（dict）は session_state で再代入できない（例外）ので対象外。
+    # 再代入して安全なのは text_input/number_input/checkbox/multiselect 等が持つ
+    # スカラー値（str/int/float/bool）とリスト値（multiselect）のみ。
+    _tk_persist = ss().get("extract_token", "")
+    if _tk_persist:
+        for _pk in list(ss().keys()):
+            if (isinstance(_pk, str) and _pk.endswith("_" + _tk_persist)
+                    and isinstance(ss().get(_pk), (str, int, float, bool, list))):
+                try:
+                    ss()[_pk] = ss()[_pk]
+                except Exception:
+                    pass
     _active = ss().get("solo_area", "tt")
     if _active not in ("tt", "q", "coord"):
         _active = "tt"
@@ -2746,9 +2770,14 @@ if _show_q:
                                                       "路線で運賃が違う時だけOFFにして路線ごとに入力。")
             zone_fare = _fcol[1].checkbox("区間運賃にする（停留所・区間ごとに違う）", key=f"zonechk_{tk}",
                                           help="チェックすると③の中に『区間運賃の表（発×着）』が出ます。区間ごとに金額を入れます。")
-            # enter_to_submit=False: 入力欄で Enter を押しても送信（＝生成→画面遷移）しない。
-            # 各項目を続けて入力でき、最後に『GTFS-JP を生成する』ボタンで一括生成する。
-            with st.form("conditions", enter_to_submit=False):
+            # ③はあえて st.form を使わない（コンテナで囲むだけ）。理由:
+            #   st.form 内の入力は「送信ボタンを押すまで確定されず」、フォーム外の操作
+            #   （タブ切替・②の『確定して反映』など）で再実行するとフォームの未送信入力は
+            #   破棄される。③の全項目がフォーム内にあったため、生成前にタブ移動すると
+            #   事業者名・電話などの入力が消える不具合があった。コンテナにすると各項目は
+            #   入力ごとに即 session_state へ確定し、画面を移動しても保持される。
+            #   Enter でも送信（生成→遷移）せず、生成は下のボタンでのみ行う。
+            with st.container():
                 # 運賃（入力方法は上の「運賃の入力方法」で選択済み）。金額をここ＝方法選択の直後に入力する。
                 # 区分別テーブル（単一路線 or 全路線一律）: 区分を自由に追加・削除でき、区分ごとに金額と支払い方法を入れる。
                 fare_cat_df = None
@@ -2882,7 +2911,7 @@ if _show_q:
                                                "既定値に反映します。④で必ず確認してください（AI由来＝要確認・推測を鵜呑みにしない）。")
                 ai_gen_key = st.text_input("ANTHROPIC_API_KEY（上のAIチェックを使う時。環境変数があれば空でOK）",
                                            type="password", value="", key=f"aigk_{tk}")
-                submitted = st.form_submit_button("GTFS-JP を生成する", type="primary")
+                submitted = st.button("GTFS-JP を生成する", type="primary")
 
             if submitted:
                 # 空抽出ガード: 停留所が1つも取れていないなら、空のfeedを黙って作らず停止する。
