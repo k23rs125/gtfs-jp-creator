@@ -313,23 +313,8 @@ def ss():  # session_state ショートカット
     return st.session_state
 
 
-def _map_tile_url():
-    """地図の基盤タイルURLを返す。既定は None（オフライン＝タイル取得しない）。
-    閉域網・自治体運用のため、外部タイル(OpenStreetMap等)は既定で取得しない。
-    背景地図が必要な場合のみ、環境変数 GTFS_TILE_URL か ⑤ の設定欄で
-    タイルURL（例: 自前タイルサーバや https://tile.openstreetmap.org/{z}/{x}/{y}.png）を指定する。"""
-    url = (str(ss().get("tile_url", "")) or os.environ.get("GTFS_TILE_URL", "")).strip()
-    return url or None
-
-
-def _folium_map(**kwargs):
-    """基盤タイルを既定オフライン(None=灰背景＋マーカーのみ)にした folium.Map を返す。
-    タイルURLが設定されている時だけ、その基盤地図を表示する（外部通信は利用者の明示指定時のみ）。"""
-    import folium as _fl
-    url = _map_tile_url()
-    if url:
-        return _fl.Map(tiles=url, attr="(指定タイル)", **kwargs)
-    return _fl.Map(tiles=None, **kwargs)
+# 地図ヘルパーは map_ui.py に分離（従来名でエイリアス import＝挙動不変）。
+from map_ui import map_tile_url as _map_tile_url, folium_map as _folium_map
 
 
 if "work" not in ss():
@@ -731,140 +716,15 @@ st.markdown("""
 st.caption("正確さの源は決定的スクリプト、LLMは構造化の判断のみ、"
            "無い情報は推測せず確認フォームで入力します（誤りを作らない＝正しく失敗）。")
 
-def _ymd_date_input(label, prefill, key, help_text=""):
-    """「年・月・日」を別々の欄で入力させ、内部で使う "YYYYMMDD" の文字列を返す。
-
-    YYYYMMDD や YYYY/MM/DD といった表記は Y/M/D が何を指すか伝わらないため、
-    画面には「年」「月」「日」としか出さない。保存は従来どおり8桁文字列に揃えるので、
-    後続の処理（GTFSのcalendar等）は変更しない。
-    prefill は検出済みの "YYYYMMDD"（空・不正なら未入力で出す）。
-    """
-    _y = _m = _d = None
-    _s = str(prefill or "").strip()
-    if len(_s) == 8 and _s.isdigit():
-        try:
-            _dt = datetime.datetime.strptime(_s, "%Y%m%d").date()
-            _y, _m, _d = _dt.year, _dt.month, _dt.day
-        except ValueError:
-            _y = _m = _d = None
-    st.markdown(f"**{label}**" + (f"　<span style='color:#5b6b7b;font-size:0.85em'>{help_text}</span>"
-                                  if help_text else ""), unsafe_allow_html=True)
-    _c1, _c2, _c3, _c4 = st.columns([2, 1.4, 1.4, 4])
-    _yy = _c1.number_input("年", min_value=2000, max_value=2040, value=_y, step=1,
-                           key=f"{key}_y", placeholder="2026")
-    _mm = _c2.number_input("月", min_value=1, max_value=12, value=_m, step=1,
-                           key=f"{key}_m", placeholder="4")
-    _dd = _c3.number_input("日", min_value=1, max_value=31, value=_d, step=1,
-                           key=f"{key}_d", placeholder="1")
-    if _yy is None and _mm is None and _dd is None:
-        return ""
-    if _yy is None or _mm is None or _dd is None:
-        st.warning(f"{label}：**年・月・日をすべて**入れてください。")
-        return ""
-    try:                                  # 2月30日のような存在しない日は受け付けない
-        datetime.date(int(_yy), int(_mm), int(_dd))
-    except ValueError:
-        st.error(f"{label}：{int(_yy)}年{int(_mm)}月{int(_dd)}日 は存在しない日付です。")
-        return ""
-    return f"{int(_yy):04d}{int(_mm):02d}{int(_dd):02d}"
+# 日付入力ウィジェットは ui_widgets.py に分離（従来名でエイリアス import＝挙動不変）。
+from ui_widgets import ymd_date_input as _ymd_date_input, md_input as _md_input
 
 
-def _md_input(label, default_m, default_d, key):
-    """「月・日」だけの入力（年末年始・お盆の範囲用）。"MM-DD" の文字列を返す。"""
-    _c1, _c2, _c3 = st.columns([1.4, 1.4, 5])
-    _c1.markdown(f"<div style='padding-top:6px'>{label}</div>", unsafe_allow_html=True)
-    _mm = _c2.number_input("月", min_value=1, max_value=12, value=default_m, step=1, key=f"{key}_m")
-    _dd = _c3.number_input("日", min_value=1, max_value=31, value=default_d, step=1, key=f"{key}_d")
-    return f"{int(_mm):02d}-{int(_dd):02d}"
-
-
-# 使い方ガイドの操作動画。リポジトリ内 app/guide_videos/ を優先し、無ければ
-# 稲ゼミ直下の「使い方ガイド」フォルダを見る（動画は容量が大きくGit管理しないため）。
-GUIDE_VIDEO_DIRS = [REPO / "app" / "guide_videos", REPO.parent / "使い方ガイド"]
-
-
-def _norm_video_name(name):
-    """動画ファイル名の表記ゆれを吸収した比較用の文字列を返す。
-
-    「時刻表の読み取り」と「時刻表読み取り」のように、助詞や記号の有無だけが違う
-    ファイル名を同じものとして扱う（撮り直しで名前が揺れても動画が消えないように）。
-    """
-    return re.sub(r"[の\s　_＿\-ー、,．.･・]+", "", str(name).rsplit(".", 1)[0]).lower()
-
-
-def _guide_video(filename):
-    """使い方ガイドの動画パスを返す。見つからなければ None（ガイド本文はそのまま出す）。
-
-    撮り直しでファイル名が少し変わっても動画が消えないよう、完全一致で見つからなければ
-    「の」や空白を無視した名前で照合する。
-    """
-    for _d in GUIDE_VIDEO_DIRS:
-        _p = _d / filename
-        if _p.exists():
-            return _p
-    _key = _norm_video_name(filename)
-    for _d in GUIDE_VIDEO_DIRS:
-        if not _d.is_dir():
-            continue
-        for _f in sorted(_d.glob("*.mp4")):
-            if _norm_video_name(_f.name) == _key:
-                return _f
-    return None
-
-
-_VIDEO_LEN_CACHE = {}    # (パス, 更新時刻, サイズ) -> 表示用の長さ。再実行のたびに読み直さない
-
-
-def _video_length_label(path):
-    """mp4 の再生時間を「20秒」「1分24秒」の形で返す。読めなければ空文字。
-
-    長さを手で書くと動画を撮り直すたびにずれるため、ファイルから読む。
-    mvhd ボックスは moov の位置により先頭にも末尾にもあるので前後1MBずつ見る。
-    差し替えを検知できるよう、更新時刻とサイズも含めた鍵でキャッシュする。
-    """
-    try:
-        import struct
-        _stt = path.stat()
-        _ck = (str(path), _stt.st_mtime_ns, _stt.st_size)
-        if _ck in _VIDEO_LEN_CACHE:
-            return _VIDEO_LEN_CACHE[_ck]
-        _sz = _stt.st_size
-        with path.open("rb") as _f:
-            _bufs = [_f.read(min(_sz, 1 << 20))]
-            if _sz > (1 << 20):
-                _f.seek(_sz - (1 << 20))
-                _bufs.append(_f.read())
-        for _b in _bufs:
-            _i = _b.find(b"mvhd")
-            if _i < 0:
-                continue
-            if _b[_i + 4] == 0:
-                _ts, _dur = struct.unpack(">II", _b[_i + 16:_i + 24])
-            else:
-                _ts, _dur = struct.unpack(">IQ", _b[_i + 24:_i + 36])
-            if _ts:
-                _sec = int(_dur / _ts)          # 再生器の表示に合わせて切り捨て
-                _m, _s = divmod(_sec, 60)
-                _VIDEO_LEN_CACHE[_ck] = f"{_m}分{_s}秒" if _m else f"{_s}秒"
-                return _VIDEO_LEN_CACHE[_ck]
-        _VIDEO_LEN_CACHE[_ck] = ""      # 読めないファイルを毎回読み直さない
-    except Exception:
-        pass
-    return ""
-
-
-def _render_guide_video(*filenames):
-    """操作動画を折りたたみで出す。開くまで読み込まれないので初期表示が重くならない。
-
-    候補を複数渡すと、見つかった最初のものを使う。⑤⑥のように統合動画から
-    個別動画へ差し替える途中でも表示が途切れないよう、優先順で候補を並べる。
-    """
-    _p = next((v for v in (_guide_video(f) for f in filenames) if v), None)
-    if not _p:
-        return
-    _len = _video_length_label(_p)
-    with st.expander("▶️ 動画で見る" + (f"（{_len}）" if _len else "")):
-        st.video(str(_p))
+# 使い方ガイドの動画ヘルパーは guide_media.py に分離（従来名でエイリアス import＝挙動不変）。
+from guide_media import (norm_video_name as _norm_video_name,
+                         guide_video as _guide_video,
+                         video_length_label as _video_length_label,
+                         render_guide_video as _render_guide_video)
 
 
 with st.expander("📖 使い方ガイド（はじめての方はここを開いてください）",
