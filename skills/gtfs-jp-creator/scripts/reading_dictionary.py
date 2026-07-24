@@ -28,6 +28,8 @@ License: Apache 2.0
 from __future__ import annotations
 
 import csv
+import datetime
+import json
 import os
 import re
 from pathlib import Path
@@ -122,6 +124,35 @@ def resolve(dict_dir: str | None = None, municipality: str | None = None,
                 s["_layer"] = layer          # 由来層＝出典（監査証跡の基盤）
                 merged[nm] = s               # 後の層が上書き＝高優先
     return merged
+
+
+def audit_log_path(dict_dir: str | None = None) -> Path:
+    """監査ログ（変更履歴）の保存先。優先: 環境変数 GTFS_AUDIT_LOG > <dict_root>/audit_log.jsonl。
+    追記専用JSONL（1行1変更）で、自治体が全案件の変更を一元的に監査できる。"""
+    env = os.environ.get("GTFS_AUDIT_LOG")
+    if env:
+        return Path(env)
+    return dict_root(dict_dir) / "audit_log.jsonl"
+
+
+def append_audit(entries, dict_dir: str | None = None, ts: str | None = None) -> Path:
+    """監査ログに変更を追記する（追記専用JSONL）。entries は dict または dict のリスト。
+    各行の推奨キー: user, stop_name, field(ja-Hrkt/en), old, new, layer, source(human/ai),
+    ai_model, note。ts 未指定なら現在時刻(ISO8601)を付与する。既存行は書き換えない（改ざん防止）。"""
+    if isinstance(entries, dict):
+        entries = [entries]
+    if not entries:
+        return audit_log_path(dict_dir)
+    if ts is None:
+        ts = datetime.datetime.now().isoformat(timespec="seconds")
+    path = audit_log_path(dict_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        for e in entries:
+            rec = {"ts": ts}
+            rec.update({k: v for k, v in e.items() if v not in (None, "")})
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return path
 
 
 def write_layer_entry(dict_dir: str | None, layer: str, key: str | None,

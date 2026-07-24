@@ -79,6 +79,76 @@ def _auto_reading(name):
     return _to_hira(name) if _to_hira else ""
 
 
+# 読みの出典（どの層/AI/自動か）を日本語ラベルで表示するための対応表。
+_LAYER_JA = {"national": "全国共通", "municipality": "自治体", "route": "路線",
+             "user": "利用者", "project": "プロジェクト"}
+
+
+def _reading_source(name, reading):
+    """現在の読み reading の出典（AI／プロジェクト／利用者／路線／自治体／全国／自動）をラベルで返す。
+    説明責任のための「その読みがどこ由来か」の表示。判定は上位（具体的）から順に行う。"""
+    reading = (reading or "").strip()
+    if not reading:
+        return ""
+    # 当セッションで層を明示保存した場合はそれを尊重（保存直後の表示を正確に）。
+    _sl = (ss().get("_reading_layer") or {}).get(name)
+    if _sl:
+        return _LAYER_JA.get(_sl, _sl)
+    aiap = ss().get("ai_applied") or {}
+    if name in aiap and (aiap[name].get("yomi") or "").strip() == reading:
+        return "AI"
+    try:
+        _mr = WORK / "manual_readings.json"
+        if _mr.exists():
+            _m = json.loads(_mr.read_text(encoding="utf-8")).get("by_stop_name", {})
+            if name in _m and (_m[name].get("ja-Hrkt") or "").strip() == reading:
+                return "プロジェクト"
+    except Exception:
+        pass
+    ov = _reading_overrides().get(name)
+    if ov and (ov.get("ja-Hrkt") or "").strip() == reading:
+        return _LAYER_JA.get(ov.get("_layer"), ov.get("_layer") or "辞書")
+    if _to_hira and _to_hira(name) == reading:
+        return "自動"
+    return "手動"
+
+
+def _save_reading_layer(layer, stop_name, ja_hrkt="", en="", source="human",
+                        ai_model="", note="", old=""):
+    """読み修正を指定した辞書層へ保存し、監査ログへ1件追記する（出典・変更者・日時つき）。
+    project 層は manual_readings.json（呼び出し側で適用）なので辞書CSVへは書かない。
+    user/municipality/route/national は該当CSVへ write_layer_entry で永続化する。
+    戻り値: 実際に保存した層（キー未設定で保存できない時は 'project' に落とす）。"""
+    user = str(ss().get("user_name", "") or "").strip()
+    today = datetime.date.today().isoformat()
+    key = {"user": user, "municipality": str(ss().get("muni_input", "") or "").strip(),
+           "route": next((r.get("route_long_name", "") for r in
+                          (ss().get("decision_spec", {}) or {}).get("routes", [])), ""),
+           "national": "", "project": ""}.get(layer, "")
+    eff_layer = layer
+    if layer in ("user", "municipality", "route") and not key:
+        eff_layer = "project"      # キー（担当者名/自治体名/路線名）が無ければ共有層に書けない
+    if eff_layer in ("user", "municipality", "route", "national") and _rdict_mod is not None:
+        try:
+            _rdict_mod.write_layer_entry(None, eff_layer, key, stop_name,
+                                         ja_hrkt=ja_hrkt, en=en, source=source,
+                                         updated_by=user, updated_at=today, note=note)
+        except Exception:
+            eff_layer = "project"
+    # 監査ログ（追記専用JSONL・改ざん防止）
+    if _rdict_mod is not None:
+        try:
+            _rdict_mod.append_audit({
+                "user": user or "(未設定)", "stop_name": stop_name,
+                "field": "ja-Hrkt" if ja_hrkt else ("en" if en else ""),
+                "old": old, "new": ja_hrkt or en, "layer": eff_layer,
+                "source": source, "ai_model": ai_model, "note": note})
+        except Exception:
+            pass
+    ss().setdefault("_reading_layer", {})[stop_name] = eff_layer
+    return eff_layer
+
+
 def _reading_suspicious(reading):
     """自動読みが怪しい（漢字が残る・半角カナ・濁点の文字化け）なら True。要確認の目印。"""
     r = reading or ""
@@ -3462,6 +3532,31 @@ if _show_coord:
                 with st.expander(f"🈁 ふりがな・英語の確認・修正 — 停留所名／路線名／事業者名"
                                  f"（難読地名の誤読をここで直す{_hdr}）",
                                  expanded=bool(_n_susp) or bool(_aiap) or bool(ss().get("ai_readings"))):
+                    if ss().get("_reading_saved_msg"):
+                        st.success("📝 " + ss().pop("_reading_saved_msg"))
+                    # 変更履歴（監査ログ）の閲覧 — 説明責任・監査性のため直近の変更を表示。
+                    _alog = None
+                    try:
+                        if _rdict_mod is not None:
+                            _alp = _rdict_mod.audit_log_path()
+                            if _alp.exists():
+                                _ll = _alp.read_text(encoding="utf-8").strip().splitlines()
+                                _alog = [json.loads(x) for x in _ll[-300:] if x.strip()]
+                    except Exception:
+                        _alog = None
+                    if _alog:
+                        with st.expander(f"🧾 変更履歴（監査ログ）— 直近 {len(_alog)}件"
+                                         "（誰が・いつ・何を・どの層・出典）"):
+                            _adf = pd.DataFrame([{
+                                "日時": e.get("ts", ""), "担当": e.get("user", ""),
+                                "停留所": e.get("stop_name", ""), "項目": e.get("field", ""),
+                                "変更前": e.get("old", ""), "変更後": e.get("new", ""),
+                                "保存層": _LAYER_JA.get(e.get("layer", ""), e.get("layer", "")),
+                                "出典": e.get("source", ""), "AIモデル": e.get("ai_model", "")}
+                                for e in reversed(_alog)])
+                            st.dataframe(_adf, hide_index=True, width='stretch')
+                            st.caption(f"保存先: {_alp}（追記専用JSONL・改ざん防止）。"
+                                       "環境変数 GTFS_AUDIT_LOG / GTFS_DICT_DIR で移設できます。")
                     st.info("このなかで **①停留所名（下の表）** と "
                             "**②路線名・事業者名・行き先表示（さらに下の表）** の"
                             "**ふりがな・英語**を直せます。**路線名・事業者名を直したいときは"
@@ -3486,13 +3581,18 @@ if _show_coord:
                         _mk = "⚠" if _reading_suspicious(_h) else ""
                         if _nm in _aiap:
                             _mk = (_mk + " 🔎AI").strip()
-                        _row = {"要確認": _mk, "停留所名": _nm, "ふりがな(ja-Hrkt)": _h,
+                        _row = {"要確認": _mk, "出典": _reading_source(_nm, _h),
+                                "停留所名": _nm, "ふりがな(ja-Hrkt)": _h,
                                 "英語(en)": _cur[_nm].get("en", "")}   # 英語は常に編集可（空でOK）
                         _rows.append(_row)
                     with st.form("readings_form"):
                         _cfg = {
                             "要確認": st.column_config.TextColumn("⚠", disabled=True, width="small",
                                                                   help="漢字が残る等、読みが怪しい行の目印"),
+                            "出典": st.column_config.TextColumn(
+                                "出典", disabled=True, width="small",
+                                help="この読みがどこ由来か（AI／プロジェクト／利用者／路線／自治体／全国／自動）。"
+                                     "説明責任のための表示。修正するとその内容は下の『保存先の辞書層』に保存されます。"),
                             "停留所名": st.column_config.TextColumn(
                                 "停留所名", help="停留所名そのものを直せます（OCR誤りの修正など）。"
                                 "変更すると stops.txt と読みが更新されます。"),
@@ -3503,8 +3603,20 @@ if _show_coord:
                         _edited = st.data_editor(pd.DataFrame(_rows), hide_index=True,
                                                  key="readings_editor", column_config=_cfg,
                                                  width='stretch')
+                        _layer_opts = {"プロジェクト（この案件のみ・既定）": "project",
+                                       "利用者（自分の辞書・案件をまたいで再利用）": "user",
+                                       "自治体（この自治体の辞書）": "municipality",
+                                       "路線（この路線の辞書）": "route",
+                                       "全国共通（全国の辞書・慎重に）": "national"}
+                        _save_layer = _layer_opts[st.selectbox(
+                            "修正の保存先（辞書層）", list(_layer_opts),
+                            help="修正した読みをどの階層辞書に保存するか。既定はプロジェクト（この案件のみ）。"
+                                 "利用者/自治体/路線を選ぶと、その辞書に出典つきで永続化し次回以降も再利用されます"
+                                 "（利用者=担当者名、自治体=対象自治体、路線=路線名 が必要）。"
+                                 "どの層でも、変更は誰が・いつ・何から何へ を監査ログに記録します。")]
                         if st.form_submit_button("この内容で反映（zip・地図を更新）"):
-                            _renames, _by = {}, {}   # old→new名 / new名→{ja-Hrkt?,en?}
+                            _renames, _by, _olds = {}, {}, {}   # old→new名 / new名→{ja-Hrkt?,en?} / 旧読み
+                            _human_keys = set()   # 人が読み/英語を直したキー（自動再計算と区別＝監査の source）
                             for _i, _nm in enumerate(_order):
                                 _new = str(_edited.iloc[_i]["停留所名"]).strip()
                                 _nh = str(_edited.iloc[_i]["ふりがな(ja-Hrkt)"]).strip()
@@ -3518,10 +3630,14 @@ if _show_coord:
                                         _auto = _auto_reading(_new)
                                         if _auto:
                                             _by.setdefault(_key, {})["ja-Hrkt"] = _auto
+                                            _olds.setdefault(_key, _cur[_nm].get("ja-Hrkt", ""))
                                 if _read_edited:
                                     _by.setdefault(_key, {})["ja-Hrkt"] = _nh
+                                    _olds[_key] = _cur[_nm].get("ja-Hrkt", "")
+                                    _human_keys.add(_key)
                                 if _en_edited:
                                     _by.setdefault(_key, {})["en"] = _ne
+                                    _human_keys.add(_key)
                             if not _renames and not _by:
                                 st.info("変更がありませんでした。")
                             else:
@@ -3537,6 +3653,20 @@ if _show_coord:
                                     _mr.write_text(json.dumps({"by_stop_name": _by}, ensure_ascii=False,
                                                               indent=2), encoding="utf-8")
                                     run([SCRIPTS / "apply_manual_readings.py", _trans, "--readings", _mr])
+                                    # (2b) 選んだ辞書層へ永続化＋監査ログ（誰が・いつ・何から何へ・どの層・出典）。
+                                    #     project は manual_readings で反映済み＝辞書CSVには書かず監査のみ。
+                                    _saved_layers = {}
+                                    for _k, _spec in _by.items():
+                                        _src = "human" if _k in _human_keys else "auto"
+                                        _lay = _save_reading_layer(
+                                            _save_layer, _k, ja_hrkt=_spec.get("ja-Hrkt", ""),
+                                            en=_spec.get("en", ""), source=_src,
+                                            old=_olds.get(_k, ""))
+                                        _saved_layers[_lay] = _saved_layers.get(_lay, 0) + 1
+                                    _ldesc = "、".join(f"{_LAYER_JA.get(k, k)}:{v}"
+                                                      for k, v in _saved_layers.items())
+                                    ss()["_reading_saved_msg"] = (
+                                        f"読み {len(_by)}件を保存し監査ログに記録しました（保存先 {_ldesc}）。")
                                 # (3) zip 再梱包 & 地図/ビューア再生成（名前変更を反映）
                                 _zz = list(out.glob("*_gtfs-jp.zip"))
                                 if _zz:
@@ -3632,6 +3762,9 @@ if _show_coord:
                                 with st.spinner("Claude に読みを問い合わせ中..."):
                                     ss()["ai_readings"] = claude_structure.suggest_readings(
                                         _order, _akey, context=ss().get("ai_read_ctx", ""))
+                                    # 説明責任: 使用モデルと文脈を記録（temperature=0で決定的）。
+                                    ss()["ai_readings_model"] = getattr(
+                                        claude_structure, "READ_MODEL", "claude")
                                 st.rerun()   # 取得結果を、展開を保ったまま表示する
                             except Exception as _e:
                                 st.error(f"読み候補の取得に失敗しました: {_e}")
@@ -3671,11 +3804,22 @@ if _show_coord:
                                     _mr.write_text(json.dumps({"by_stop_name": _byai}, ensure_ascii=False,
                                                               indent=2), encoding="utf-8")
                                     run([SCRIPTS / "apply_manual_readings.py", _trans, "--readings", _mr])
+                                    # 説明責任: AI由来の採用を監査ログへ（source=ai・使用モデル・確度も記録）。
+                                    _aimodel = ss().get("ai_readings_model", "claude")
+                                    for _nm, _spec in _byai.items():
+                                        _sug = _air.get(_nm) or {}
+                                        _note = f"AI採用・確度{_sug.get('confidence','')}"
+                                        _lay = _save_reading_layer(
+                                            "project", _nm, ja_hrkt=_spec.get("ja-Hrkt", ""),
+                                            en=_spec.get("en", ""), source="ai", ai_model=_aimodel,
+                                            old=_cur.get(_nm, {}).get("ja-Hrkt", ""), note=_note)
+                                        ss().setdefault("_reading_layer", {})[_nm] = "AI"  # 出典表示=AI
                                     _zz = list(out.glob("*_gtfs-jp.zip"))
                                     if _zz:
                                         run([SCRIPTS / "package_gtfs_zip.py", out / "gtfs", "-o", _zz[0]])
                                     ss()["_out_dirty"] = True
-                                    st.success(f"{len(_byai)}件のAI候補を反映しました（要確認）。zipを更新しました。")
+                                    st.success(f"{len(_byai)}件のAI候補を反映し監査ログに記録しました"
+                                               f"（source=ai / model={_aimodel} / 要確認）。zipを更新しました。")
                                     st.rerun()
             # zip ダウンロード（完成物の主ボタンは下の⑥ビューア直下。ここは修正後の再取得用）
             zips = list(out.glob("*_gtfs-jp.zip"))

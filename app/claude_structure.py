@@ -4,6 +4,12 @@ LLMは「路線・方向・循環・除外の判断」だけを返す（転記�
 decision-spec は apply_decisions.py がそのまま展開できる形。"""
 import json
 
+# AI呼び出しは temperature=0（決定的＝同じ入力から常に同じ結果）。自治体の説明責任・再現性のため。
+# 使用モデルは定数で一元管理し、監査ログに記録できるようにする（説明責任）。
+AI_TEMPERATURE = 0
+STRUCT_MODEL = "claude-sonnet-4-6"
+READ_MODEL = "claude-sonnet-4-6"
+
 SYSTEM = """あなたは GTFS-JP 生成の「構造化(Step2)」だけを担う。バス時刻表の抽出結果(blocks/trips)を見て、
 路線・方向・循環・除外の判断を decision-spec(JSON) で返す。停留所名や時刻の転記、座標は扱わない。
 出力は JSON のみ（前後に文章を付けない）。スキーマ:
@@ -55,16 +61,16 @@ READ_SYSTEM = """あなたは日本の地名・バス停名の読み(ふりが�
 
 
 def suggest_readings(names, api_key: str, context: str = "",
-                     model: str = "claude-sonnet-4-6") -> dict:
+                     model: str = READ_MODEL) -> dict:
     """バス停名リストの読み候補を Claude に尋ねる。人が確認する前提の「候補」を返す。
-    戻り値: {name: {"yomi","romaji","confidence","note"}}。"""
+    temperature=0（決定的・再現性）。戻り値: {name: {"yomi","romaji","confidence","note"}}。"""
     from anthropic import Anthropic
     client = Anthropic(api_key=api_key)
     uniq = list(dict.fromkeys(n for n in names if n))
     ctx = f"対象地域(文脈): {context}\n" if context else ""
     body = ctx + "次のバス停名の読みを返してください:\n" + "\n".join(f"- {n}" for n in uniq)
     msg = client.messages.create(
-        model=model, max_tokens=3000, system=READ_SYSTEM,
+        model=model, max_tokens=3000, temperature=AI_TEMPERATURE, system=READ_SYSTEM,
         messages=[{"role": "user", "content": body}])
     text = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text")
     a, z = text.find("{"), text.rfind("}")
@@ -73,13 +79,13 @@ def suggest_readings(names, api_key: str, context: str = "",
     return json.loads(text[a:z + 1])
 
 
-def structure(extract: dict, api_key: str, model: str = "claude-sonnet-4-6") -> dict:
-    """Claude API で decision-spec を得る。"""
+def structure(extract: dict, api_key: str, model: str = STRUCT_MODEL) -> dict:
+    """Claude API で decision-spec を得る。temperature=0（決定的・再現性）。"""
     from anthropic import Anthropic
     client = Anthropic(api_key=api_key)
     summary = summarize_extract(extract)
     msg = client.messages.create(
-        model=model, max_tokens=1500, system=SYSTEM,
+        model=model, max_tokens=1500, temperature=AI_TEMPERATURE, system=SYSTEM,
         messages=[{"role": "user",
                    "content": f"抽出結果:\n{summary}\n\nこの時刻表の decision-spec を JSON で返してください。"}],
     )
