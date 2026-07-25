@@ -39,120 +39,19 @@ try:
     from stop_name_merge import detect_variants, apply_merges, all_stop_names
 except Exception:
     detect_variants = None
-# ふりがな(ja-Hrkt)の再計算に生成側と同じロジックを使う（SudachiPy＋補正規則＋階層辞書）。
+# 読み(ふりがな)・出典(監査)ヘルパーは reading_ui.py に分離（app.py 分割・保守性向上）。
+# app 状態は app_context 経由。従来名（先頭 _）でエイリアス import＝挙動不変。
+from reading_ui import (reading_overrides as _reading_overrides,
+                        auto_reading as _auto_reading,
+                        reading_source as _reading_source,
+                        save_reading_layer as _save_reading_layer,
+                        reading_suspicious as _reading_suspicious,
+                        LAYER_JA as _LAYER_JA)
+# ④の監査ログビューアで audit_log_path 等を使うため reading_dictionary を保持。
 try:
-    from generate_translations import to_hiragana as _to_hira
     import reading_dictionary as _rdict_mod
 except Exception:
-    _to_hira, _rdict_mod = None, None
-
-
-def _reading_overrides():
-    """現在の自治体/路線/利用者から階層辞書（全国<自治体<路線<利用者）をマージした
-    {stop_name: spec(+_layer)} を返す。識別子が変わった時だけ再読込してキャッシュする。
-    spec['_layer'] が読みの出典（監査証跡・出典表示の基盤）。"""
-    if _rdict_mod is None:
-        return {}
-    muni = str(ss().get("muni_input", "") or "").strip()
-    user = str(ss().get("user_name", "") or "").strip()
-    routes = ",".join(
-        (r.get("route_long_name") or "").strip()
-        for r in (ss().get("decision_spec", {}) or {}).get("routes", [])
-        if (r.get("route_long_name") or "").strip())
-    key = (muni, routes, user)
-    if ss().get("_rovr_key") != key:
-        try:
-            ss()["_rovr"] = _rdict_mod.resolve(municipality=muni or None,
-                                               routes=routes or None, user=user or None)
-        except Exception:
-            ss()["_rovr"] = {}
-        ss()["_rovr_key"] = key
-    return ss().get("_rovr", {})
-
-
-def _auto_reading(name):
-    """停留所名からふりがな(ja-Hrkt)を自動生成。階層辞書を最優先→SudachiPy＋補正規則。"""
-    name = (name or "").strip()
-    ov = _reading_overrides().get(name)
-    if ov and ov.get("ja-Hrkt"):
-        return ov["ja-Hrkt"]
-    return _to_hira(name) if _to_hira else ""
-
-
-# 読みの出典（どの層/AI/自動か）を日本語ラベルで表示するための対応表。
-_LAYER_JA = {"national": "全国共通", "municipality": "自治体", "route": "路線",
-             "user": "利用者", "project": "プロジェクト"}
-
-
-def _reading_source(name, reading):
-    """現在の読み reading の出典（AI／プロジェクト／利用者／路線／自治体／全国／自動）をラベルで返す。
-    説明責任のための「その読みがどこ由来か」の表示。判定は上位（具体的）から順に行う。"""
-    reading = (reading or "").strip()
-    if not reading:
-        return ""
-    # 当セッションで層を明示保存した場合はそれを尊重（保存直後の表示を正確に）。
-    _sl = (ss().get("_reading_layer") or {}).get(name)
-    if _sl:
-        return _LAYER_JA.get(_sl, _sl)
-    aiap = ss().get("ai_applied") or {}
-    if name in aiap and (aiap[name].get("yomi") or "").strip() == reading:
-        return "AI"
-    try:
-        _mr = WORK / "manual_readings.json"
-        if _mr.exists():
-            _m = json.loads(_mr.read_text(encoding="utf-8")).get("by_stop_name", {})
-            if name in _m and (_m[name].get("ja-Hrkt") or "").strip() == reading:
-                return "プロジェクト"
-    except Exception:
-        pass
-    ov = _reading_overrides().get(name)
-    if ov and (ov.get("ja-Hrkt") or "").strip() == reading:
-        return _LAYER_JA.get(ov.get("_layer"), ov.get("_layer") or "辞書")
-    if _to_hira and _to_hira(name) == reading:
-        return "自動"
-    return "手動"
-
-
-def _save_reading_layer(layer, stop_name, ja_hrkt="", en="", source="human",
-                        ai_model="", note="", old=""):
-    """読み修正を指定した辞書層へ保存し、監査ログへ1件追記する（出典・変更者・日時つき）。
-    project 層は manual_readings.json（呼び出し側で適用）なので辞書CSVへは書かない。
-    user/municipality/route/national は該当CSVへ write_layer_entry で永続化する。
-    戻り値: 実際に保存した層（キー未設定で保存できない時は 'project' に落とす）。"""
-    user = str(ss().get("user_name", "") or "").strip()
-    today = datetime.date.today().isoformat()
-    key = {"user": user, "municipality": str(ss().get("muni_input", "") or "").strip(),
-           "route": next((r.get("route_long_name", "") for r in
-                          (ss().get("decision_spec", {}) or {}).get("routes", [])), ""),
-           "national": "", "project": ""}.get(layer, "")
-    eff_layer = layer
-    if layer in ("user", "municipality", "route") and not key:
-        eff_layer = "project"      # キー（担当者名/自治体名/路線名）が無ければ共有層に書けない
-    if eff_layer in ("user", "municipality", "route", "national") and _rdict_mod is not None:
-        try:
-            _rdict_mod.write_layer_entry(None, eff_layer, key, stop_name,
-                                         ja_hrkt=ja_hrkt, en=en, source=source,
-                                         updated_by=user, updated_at=today, note=note)
-        except Exception:
-            eff_layer = "project"
-    # 監査ログ（追記専用JSONL・改ざん防止）
-    if _rdict_mod is not None:
-        try:
-            _rdict_mod.append_audit({
-                "user": user or "(未設定)", "stop_name": stop_name,
-                "field": "ja-Hrkt" if ja_hrkt else ("en" if en else ""),
-                "old": old, "new": ja_hrkt or en, "layer": eff_layer,
-                "source": source, "ai_model": ai_model, "note": note})
-        except Exception:
-            pass
-    ss().setdefault("_reading_layer", {})[stop_name] = eff_layer
-    return eff_layer
-
-
-def _reading_suspicious(reading):
-    """自動読みが怪しい（漢字が残る・半角カナ・濁点の文字化け）なら True。要確認の目印。"""
-    r = reading or ""
-    return bool(re.search(r"[一-鿿｡-ﾟ゚゜]", r)) or not r.strip()
+    _rdict_mod = None
 
 
 # GTFS/CSV ファイル編集ユーティリティは gtfs_edit.py に分離（app.py 分割・保守性向上）。
