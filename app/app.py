@@ -47,6 +47,7 @@ from reading_ui import (reading_overrides as _reading_overrides,
                         save_reading_layer as _save_reading_layer,
                         reading_suspicious as _reading_suspicious,
                         build_reading_rows as _build_reading_rows,
+                        parse_route_reading_entries as _parse_route_reading_entries,
                         build_route_reading_rows as _build_route_reading_rows,
                         build_audit_rows as _build_audit_rows,
                         LAYER_JA as _LAYER_JA)
@@ -3082,18 +3083,7 @@ if _show_coord:
                                 st.rerun()
 
                     # ---- 路線名・事業者名・行き先表示 の 読み(ja-Hrkt)・英語(en) ----
-                    _TBL_LABEL = {"routes": "路線", "agency": "事業者", "trips": "行き先"}
-                    _other, _oorder = {}, []
-                    for _r in _trows:
-                        _tb = (_r.get("table_name") or "").strip()
-                        if _tb not in _TBL_LABEL:
-                            continue
-                        _kk = (_tb, (_r.get("field_name") or "").strip(), (_r.get("field_value") or "").strip())
-                        _lg = (_r.get("language") or "").strip()
-                        if _kk[2] and _kk not in _other:
-                            _other[_kk] = {}; _oorder.append(_kk)
-                        if _lg in ("ja-Hrkt", "en"):
-                            _other[_kk][_lg] = _r.get("translation", "")
+                    _other, _oorder = _parse_route_reading_entries(_trows)
                     if _oorder:
                         st.markdown("---")
                         st.markdown("**路線名・事業者名・行き先表示の 読み・英語**")

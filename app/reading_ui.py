@@ -158,6 +158,29 @@ FLD_LABEL = {"route_long_name": "路線名", "route_short_name": "路線略称",
              "agency_name": "事業者名", "trip_headsign": "行き先表示"}
 
 
+def parse_route_reading_entries(trows):
+    """translations の行(trows)から、路線名・事業者名・行き先の読み(ja-Hrkt/en)を
+    (other, oorder) にパースする。build_route_reading_rows と対の関数（データ抽出）。
+
+    other:  {(table_name, field_name, field_value): {ja-Hrkt, en}}
+    oorder: 上記キーの出現順リスト（表示順）。
+    対象テーブルは TBL_LABEL のキー（routes / agency / trips）に限る。純関数（副作用なし）。
+    """
+    other, oorder = {}, []
+    for r in trows:
+        tb = (r.get("table_name") or "").strip()
+        if tb not in TBL_LABEL:
+            continue
+        kk = (tb, (r.get("field_name") or "").strip(), (r.get("field_value") or "").strip())
+        lg = (r.get("language") or "").strip()
+        if kk[2] and kk not in other:
+            other[kk] = {}
+            oorder.append(kk)
+        if lg in ("ja-Hrkt", "en"):
+            other[kk][lg] = r.get("translation", "")
+    return other, oorder
+
+
 def build_route_reading_rows(order, other):
     """路線名・事業者名・行き先の読み表(④)の表示行(dict のリスト)を組み立てる。
 
