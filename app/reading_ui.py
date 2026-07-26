@@ -132,6 +132,26 @@ def reading_suspicious(reading):
     return bool(re.search(r"[一-鿿｡-ﾟ゚゜]", r)) or not r.strip()
 
 
+def build_reading_rows(order, cur, ai_applied=None):
+    """停留所の読み確認表(④・停留所名の表)の表示行(dict のリスト)を組み立てる。
+
+    order: 停留所名の並び / cur: {name: {ja-Hrkt, en}} / ai_applied: AIが既定化した読み(印用)。
+    要確認印(⚠)は reading_suspicious、出典は reading_source で判定する（app.py 側と同一挙動）。
+    UI表示処理とデータ整形処理の分離。
+    """
+    ai_applied = ai_applied or {}
+    rows = []
+    for nm in order:
+        h = cur[nm].get("ja-Hrkt", "")
+        mk = "⚠" if reading_suspicious(h) else ""
+        if nm in ai_applied:
+            mk = (mk + " 🔎AI").strip()
+        rows.append({"要確認": mk, "出典": reading_source(nm, h),
+                     "停留所名": nm, "ふりがな(ja-Hrkt)": h,
+                     "英語(en)": cur[nm].get("en", "")})   # 英語は常に編集可（空でOK）
+    return rows
+
+
 def build_audit_rows(entries):
     """監査ログのエントリ列(entries)を、④変更履歴ビューア用の表示行(dict のリスト)へ変換する。
     純関数（副作用なし）＝UI表示とデータ整形の分離。新しい変更が上に来るよう逆順で返す。

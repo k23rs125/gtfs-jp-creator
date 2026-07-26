@@ -46,6 +46,7 @@ from reading_ui import (reading_overrides as _reading_overrides,
                         reading_source as _reading_source,
                         save_reading_layer as _save_reading_layer,
                         reading_suspicious as _reading_suspicious,
+                        build_reading_rows as _build_reading_rows,
                         build_audit_rows as _build_audit_rows,
                         LAYER_JA as _LAYER_JA)
 # ④の監査ログビューアで audit_log_path 等を使うため reading_dictionary を保持。
@@ -2981,16 +2982,7 @@ if _show_coord:
                                   "AIが入れた読み": _v.get("yomi", ""), "確度": _v.get("confidence", ""),
                                   "根拠(AI)": _v.get("note", "")} for _k, _v in _aiap.items()]
                         st.dataframe(pd.DataFrame(_aidf), hide_index=True, width='stretch')
-                    _rows = []
-                    for _nm in _order:
-                        _h = _cur[_nm].get("ja-Hrkt", "")
-                        _mk = "⚠" if _reading_suspicious(_h) else ""
-                        if _nm in _aiap:
-                            _mk = (_mk + " 🔎AI").strip()
-                        _row = {"要確認": _mk, "出典": _reading_source(_nm, _h),
-                                "停留所名": _nm, "ふりがな(ja-Hrkt)": _h,
-                                "英語(en)": _cur[_nm].get("en", "")}   # 英語は常に編集可（空でOK）
-                        _rows.append(_row)
+                    _rows = _build_reading_rows(_order, _cur, _aiap)
                     with st.form("readings_form"):
                         _cfg = {
                             "要確認": st.column_config.TextColumn("⚠", disabled=True, width="small",
