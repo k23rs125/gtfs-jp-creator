@@ -1,0 +1,35 @@
+# =====================================================================
+# requirements.lock — 再現性のためのバージョン固定（自治体の長期運用向け）
+# =====================================================================
+# 目的: 5〜10年後や別環境でも「動作確認済みと同じ版」で導入できるようにする。
+#   未固定だと将来の `pip install` が非互換な新版を引き、動かなくなる恐れがあるため。
+#
+# 使い方（動作確認済みの版で入れる）:
+#   pip install -r requirements.lock
+#
+# ここに固定するのはアプリの直接依存（トップレベル）。人が読む説明は requirements.txt を参照。
+# ※ 完全な再現（推移的依存も含む）が必要なら、クリーンな仮想環境で
+#   `pip freeze > requirements.full.lock` を採取して併用する。
+# ※ 監査で確認済みのライセンス（すべて permissive）は requirements.txt のコメント参照。
+#   PyMuPDF(AGPL) / pykakasi(GPL) は不使用（除外済み）。
+#
+# 採取: 動作確認時に導入されていた版（Python 3.12）。
+# ---------------------------------------------------------------------
+
+# --- 生成パイプライン（skills/scripts） ---
+pyshp==3.0.3               # 国土数値情報 P11(Shapefile) 読み込み
+pdfplumber==0.11.9         # テキストPDFの座標抽出（MIT。PyMuPDF/AGPLは不使用）
+openpyxl==3.1.5            # Excel 時刻表の読み込み
+sudachipy==0.6.11          # ふりがな(ja-Hrkt) 生成エンジン（Apache-2.0）
+sudachidict_core==20260428 # SudachiPy 辞書（Apache-2.0）
+python-docx==1.2.0        # 運賃・運行条件の Word(.docx) 読み取り
+
+# --- アプリ（Streamlit UI） ---
+streamlit==1.58.0
+folium==0.20.0
+streamlit-folium==0.27.2
+pandas==2.3.3
+numpy==2.4.4              # pandas 依存だが版差が大きいため明示固定
+jinja2==3.1.6
+anthropic==0.112.0        # Step2(構造化)/読み探索の Claude API（任意・キー入力時のみ）
+imageio-ffmpeg==0.6.0     # 動画の切り出し等（任意機能）

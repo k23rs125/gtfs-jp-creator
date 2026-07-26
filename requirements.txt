@@ -1,5 +1,8 @@
-﻿# GTFS-JP Creator — Python 依存ライブラリ
+﻿# GTFS-JP Creator — Python 依存ライブラリ（人が読む一覧＋ライセンス根拠）
 # インストール:  pip install -r requirements.txt
+#
+# 【再現性】自治体の長期運用では、動作確認済みと同じ版で入れられるよう
+#   バージョン固定した requirements.lock を用意している:  pip install -r requirements.lock
 #
 # Python 3.10 以上を推奨。
 
