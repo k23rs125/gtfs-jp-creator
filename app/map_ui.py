@@ -35,6 +35,32 @@ def folium_map(**kwargs):
     return _fl.Map(tiles=None, **kwargs)
 
 
+def build_map_points(crows, confirmed, sid_of, label_of):
+    """⑤座標確認マップのマーカー点リストと tooltip→stop_id の対応を組み立てる。
+
+    戻り値: (pts, tip2id)。pts = [(tip, lat, lon, conf, reason), ...]。
+    確定座標(confirmed)があればそれを優先、無ければ stop_lat/lon を使う（座標なしは除外）。
+    tooltip は一意化する（同名の行き/帰り等が重複する時は末尾に [stop_id] を付与）。
+    sid_of(r): 行の stop_id を返す / label_of(r): 表示ラベルを返す /
+    confirmed: {stop_id: (lat, lon, ...)}。純関数（副作用なし・データ整形と表示の分離）。
+    """
+    pts, tip2id = [], {}
+    for r in crows:
+        sid = sid_of(r)
+        if sid in confirmed:
+            la, lo, conf = confirmed[sid][0], confirmed[sid][1], "確定"
+        elif (r.get("stop_lat") or "").strip():
+            la, lo, conf = float(r["stop_lat"]), float(r["stop_lon"]), r["confidence"]
+        else:
+            continue
+        tip = label_of(r)
+        if tip in tip2id:
+            tip = f"{tip}[{sid}]"
+        tip2id[tip] = sid
+        pts.append((tip, la, lo, conf, r.get("reason", "")))
+    return pts, tip2id
+
+
 def marker_popup_html(tip, conf, reason=""):
     """座標確認マップ(⑤)のピンのポップアップ HTML を組み立てる（純粋な表示ロジック・副作用なし）。
 

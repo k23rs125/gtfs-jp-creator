@@ -218,6 +218,7 @@ def ss():  # session_state ショートカット
 
 # 地図ヘルパーは map_ui.py に分離（従来名でエイリアス import＝挙動不変）。
 from map_ui import (map_tile_url as _map_tile_url, folium_map as _folium_map,
+                    build_map_points as _build_map_points,
                     marker_popup_html as _marker_popup_html)
 
 
@@ -3312,20 +3313,7 @@ if _show_coord:
                 m1.metric("確定", n_ok); m2.metric("要確認", n_rev); m3.metric("未補完", n_non)
 
                 # 地図。tooltipは一意化（同名の行き/帰りを方面で区別、万一重複ならID付与）。
-                pts, tip2id = [], {}
-                for r in crows:
-                    sid = _sid(r)
-                    if sid in confirmed:
-                        la, lo, conf = confirmed[sid][0], confirmed[sid][1], "確定"
-                    elif (r.get("stop_lat") or "").strip():
-                        la, lo, conf = float(r["stop_lat"]), float(r["stop_lon"]), r["confidence"]
-                    else:
-                        continue
-                    tip = _label(r)
-                    if tip in tip2id:
-                        tip = f"{tip}[{sid}]"
-                    tip2id[tip] = sid
-                    pts.append((tip, la, lo, conf, r.get("reason", "")))
+                pts, tip2id = _build_map_points(crows, confirmed, _sid, _label)
                 center = ([sum(p[1] for p in pts) / len(pts), sum(p[2] for p in pts) / len(pts)]
                           if pts else [35.0, 138.0])
                 # 背景地図（基盤タイル）は既定オフライン（外部通信なし＝閉域網対応）。
