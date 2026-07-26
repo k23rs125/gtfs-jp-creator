@@ -33,3 +33,20 @@ def folium_map(**kwargs):
     if url:
         return _fl.Map(tiles=url, attr="(指定タイル)", **kwargs)
     return _fl.Map(tiles=None, **kwargs)
+
+
+def marker_popup_html(tip, conf, reason=""):
+    """座標確認マップ(⑤)のピンのポップアップ HTML を組み立てる（純粋な表示ロジック・副作用なし）。
+
+    ポップアップは幅を明示する（既定だと日本語の長文が1文字ずつ改行されて読めないため）。
+    conf は 確定／要確認／未補完 のいずれかで、色分け表示に使う。
+    """
+    from html import escape as _esc
+    _cbadge = {"確定": "#2e7d32", "要確認": "#e08a1e", "未補完": "#c62828"}
+    return (
+        "<div style='width:230px;white-space:normal;font-size:12px;line-height:1.55;"
+        "word-break:break-word'>"
+        f"<div style='font-weight:700;margin-bottom:3px'>{_esc(tip)}</div>"
+        f"<span style='color:{_cbadge.get(conf, '#555')};font-weight:700'>{_esc(conf)}</span>"
+        + (f"<div style='color:#333;margin-top:2px'>{_esc(reason)}</div>" if reason else "")
+        + "</div>")
