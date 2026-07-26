@@ -219,6 +219,7 @@ def ss():  # session_state ショートカット
 # 地図ヘルパーは map_ui.py に分離（従来名でエイリアス import＝挙動不変）。
 from map_ui import (map_tile_url as _map_tile_url, folium_map as _folium_map,
                     build_map_points as _build_map_points,
+                    count_confidence as _count_confidence,
                     marker_popup_html as _marker_popup_html)
 
 
@@ -3306,9 +3307,7 @@ if _show_coord:
                 def eff_conf(r):
                     return "確定" if _sid(r) in confirmed else r["confidence"]
 
-                n_ok = sum(1 for r in crows if eff_conf(r) == "確定")
-                n_rev = sum(1 for r in crows if eff_conf(r) == "要確認")
-                n_non = sum(1 for r in crows if eff_conf(r) == "未補完")
+                n_ok, n_rev, n_non = _count_confidence(crows, confirmed, _sid)
                 m1, m2, m3 = st.columns(3)
                 m1.metric("確定", n_ok); m2.metric("要確認", n_rev); m3.metric("未補完", n_non)
 

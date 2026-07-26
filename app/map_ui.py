@@ -61,6 +61,22 @@ def build_map_points(crows, confirmed, sid_of, label_of):
     return pts, tip2id
 
 
+def count_confidence(crows, confirmed, sid_of):
+    """⑤の信頼度メトリクス（確定・要確認・未補完 の件数）を集計する。
+
+    確定座標(confirmed)にある停留所は『確定』、それ以外は行の confidence を用いる
+    （app.py 側の eff_conf と同一ロジック）。戻り値: (n_ok, n_rev, n_non)。
+    純関数（副作用なし・集計処理と UI 表示処理の分離）。
+    sid_of(r): 行の stop_id を返す / confirmed: {stop_id: (...)}。
+    """
+    def eff(r):
+        return "確定" if sid_of(r) in confirmed else r["confidence"]
+    n_ok = sum(1 for r in crows if eff(r) == "確定")
+    n_rev = sum(1 for r in crows if eff(r) == "要確認")
+    n_non = sum(1 for r in crows if eff(r) == "未補完")
+    return n_ok, n_rev, n_non
+
+
 def marker_popup_html(tip, conf, reason=""):
     """座標確認マップ(⑤)のピンのポップアップ HTML を組み立てる（純粋な表示ロジック・副作用なし）。
 
