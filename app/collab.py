@@ -15,12 +15,17 @@ License: Apache 2.0
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 
 import streamlit as st
 
 from app_context import (autosave_dir, autosave_file, sid, ss, user_id, work_dir)
+
+# 自動保存・復元の失敗を「握りつぶし」で隠さず記録するためのロガー（自治体での障害切り分け用）。
+# 失敗しても処理は続行する（挙動は不変）＝ログ出力を足すだけで、成功時の動作は一切変えない。
+_log = logging.getLogger("gtfs.collab")
 
 # 保存する作業一式（費用の高い手作業＝抽出・時刻修正・路線割当・確定座標・検出・原本・生成結果）。
 SAVE_KEYS = ["extract", "extract_token", "decision_spec", "detected", "confirmed",
@@ -61,8 +66,9 @@ def persist_out():
         for _wf in _WORK_FILES:
             if (work_dir() / _wf).exists():
                 shutil.copy2(work_dir() / _wf, dst / _wf)
-    except Exception:
-        pass
+    except Exception as e:
+        # 保存に失敗しても処理は続行（挙動不変）。ただし記録は残す（サイレント障害を防ぐ）。
+        _log.warning("生成物の保存(persist_out)に失敗しました: %s", e)
 
 
 def restore_out(_sid):
@@ -80,8 +86,9 @@ def restore_out(_sid):
         for _wf in _WORK_FILES:
             if (src / _wf).exists():
                 shutil.copy2(src / _wf, work_dir() / _wf)
-    except Exception:
-        pass
+    except Exception as e:
+        # 復元に失敗しても処理は続行（挙動不変）。記録は残す。
+        _log.warning("生成物の復元(restore_out)に失敗しました: %s", e)
 
 
 def load_by_code(code):
@@ -275,8 +282,9 @@ def autosave():
                 ss()["_seen_out_ver"] = shared["_out_ver"]
         # 自分の保存直後は「変化なし」と記録して、ライブ同期が自分の保存で再実行しないように。
         ss()["_last_sync_sig"] = sync_signature(shared)
-    except Exception:
-        pass
+    except Exception as e:
+        # 自動保存に失敗しても処理は続行（挙動不変）。作業が保存できていない事態を検知できるよう記録。
+        _log.warning("自動保存(autosave)に失敗しました: %s", e)
 
 
 def sync_signature(shared):
