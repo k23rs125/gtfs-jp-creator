@@ -130,3 +130,16 @@ def reading_suspicious(reading):
     """自動読みが怪しい（漢字が残る・半角カナ・濁点の文字化け）なら True。要確認の目印。"""
     r = reading or ""
     return bool(re.search(r"[一-鿿｡-ﾟ゚゜]", r)) or not r.strip()
+
+
+def build_audit_rows(entries):
+    """監査ログのエントリ列(entries)を、④変更履歴ビューア用の表示行(dict のリスト)へ変換する。
+    純関数（副作用なし）＝UI表示とデータ整形の分離。新しい変更が上に来るよう逆順で返す。
+    保存層(layer)は日本語ラベル(LAYER_JA)に変換する。"""
+    return [{
+        "日時": e.get("ts", ""), "担当": e.get("user", ""),
+        "停留所": e.get("stop_name", ""), "項目": e.get("field", ""),
+        "変更前": e.get("old", ""), "変更後": e.get("new", ""),
+        "保存層": LAYER_JA.get(e.get("layer", ""), e.get("layer", "")),
+        "出典": e.get("source", ""), "AIモデル": e.get("ai_model", "")}
+        for e in reversed(entries)]

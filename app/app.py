@@ -46,6 +46,7 @@ from reading_ui import (reading_overrides as _reading_overrides,
                         reading_source as _reading_source,
                         save_reading_layer as _save_reading_layer,
                         reading_suspicious as _reading_suspicious,
+                        build_audit_rows as _build_audit_rows,
                         LAYER_JA as _LAYER_JA)
 # ④の監査ログビューアで audit_log_path 等を使うため reading_dictionary を保持。
 try:
@@ -2958,13 +2959,7 @@ if _show_coord:
                     if _alog:
                         with st.expander(f"🧾 変更履歴（監査ログ）— 直近 {len(_alog)}件"
                                          "（誰が・いつ・何を・どの層・出典）"):
-                            _adf = pd.DataFrame([{
-                                "日時": e.get("ts", ""), "担当": e.get("user", ""),
-                                "停留所": e.get("stop_name", ""), "項目": e.get("field", ""),
-                                "変更前": e.get("old", ""), "変更後": e.get("new", ""),
-                                "保存層": _LAYER_JA.get(e.get("layer", ""), e.get("layer", "")),
-                                "出典": e.get("source", ""), "AIモデル": e.get("ai_model", "")}
-                                for e in reversed(_alog)])
+                            _adf = pd.DataFrame(_build_audit_rows(_alog))
                             st.dataframe(_adf, hide_index=True, width='stretch')
                             st.caption(f"保存先: {_alp}（追記専用JSONL・改ざん防止）。"
                                        "環境変数 GTFS_AUDIT_LOG / GTFS_DICT_DIR で移設できます。")
