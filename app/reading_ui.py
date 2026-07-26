@@ -152,6 +152,24 @@ def build_reading_rows(order, cur, ai_applied=None):
     return rows
 
 
+# 路線名・事業者名・行き先の読み表(④)のラベル（表示用の日本語名）。
+TBL_LABEL = {"routes": "路線", "agency": "事業者", "trips": "行き先"}
+FLD_LABEL = {"route_long_name": "路線名", "route_short_name": "路線略称",
+             "agency_name": "事業者名", "trip_headsign": "行き先表示"}
+
+
+def build_route_reading_rows(order, other):
+    """路線名・事業者名・行き先の読み表(④)の表示行(dict のリスト)を組み立てる。
+
+    order: (table_name, field_name, field_value) のキー並び / other: {key: {ja-Hrkt, en}}。
+    build_reading_rows と対の関数（UI表示処理とデータ整形処理の分離）。
+    種類・項目は TBL_LABEL / FLD_LABEL で日本語ラベルに変換する（app.py 側と同一挙動）。
+    """
+    return [{"種類": TBL_LABEL.get(k[0], k[0]), "項目": FLD_LABEL.get(k[1], k[1]),
+             "名前": k[2], "ふりがな(ja-Hrkt)": other[k].get("ja-Hrkt", ""),
+             "英語(en)": other[k].get("en", "")} for k in order]
+
+
 def build_audit_rows(entries):
     """監査ログのエントリ列(entries)を、④変更履歴ビューア用の表示行(dict のリスト)へ変換する。
     純関数（副作用なし）＝UI表示とデータ整形の分離。新しい変更が上に来るよう逆順で返す。

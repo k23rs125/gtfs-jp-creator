@@ -47,6 +47,7 @@ from reading_ui import (reading_overrides as _reading_overrides,
                         save_reading_layer as _save_reading_layer,
                         reading_suspicious as _reading_suspicious,
                         build_reading_rows as _build_reading_rows,
+                        build_route_reading_rows as _build_route_reading_rows,
                         build_audit_rows as _build_audit_rows,
                         LAYER_JA as _LAYER_JA)
 # ④の監査ログビューアで audit_log_path 等を使うため reading_dictionary を保持。
@@ -3082,8 +3083,6 @@ if _show_coord:
 
                     # ---- 路線名・事業者名・行き先表示 の 読み(ja-Hrkt)・英語(en) ----
                     _TBL_LABEL = {"routes": "路線", "agency": "事業者", "trips": "行き先"}
-                    _FLD_LABEL = {"route_long_name": "路線名", "route_short_name": "路線略称",
-                                  "agency_name": "事業者名", "trip_headsign": "行き先表示"}
                     _other, _oorder = {}, []
                     for _r in _trows:
                         _tb = (_r.get("table_name") or "").strip()
@@ -3100,9 +3099,7 @@ if _show_coord:
                         st.markdown("**路線名・事業者名・行き先表示の 読み・英語**")
                         st.caption("停留所以外（路線・事業者・行き先）の**読み(ja-Hrkt)と英語**もここで直せます。"
                                    "読みは辞書解析(SudachiPy)で自動生成。**名前そのものは②③で**直してください。")
-                        _orows = [{"種類": _TBL_LABEL.get(_k[0], _k[0]), "項目": _FLD_LABEL.get(_k[1], _k[1]),
-                                   "名前": _k[2], "ふりがな(ja-Hrkt)": _other[_k].get("ja-Hrkt", ""),
-                                   "英語(en)": _other[_k].get("en", "")} for _k in _oorder]
+                        _orows = _build_route_reading_rows(_oorder, _other)
                         with st.form("readings_other_form"):
                             _oed = st.data_editor(
                                 pd.DataFrame(_orows), hide_index=True, key="readings_other_editor",
