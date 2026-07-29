@@ -142,3 +142,47 @@ class TestMarkerPopupHtml:
     def test_has_width_style(self):
         # 日本語長文が1文字ずつ改行されないよう幅を明示している
         assert "width:230px" in map_ui.marker_popup_html("A", "確定")
+
+
+# ============================================================
+# inject_tile_url: 背景タイルを「表示時」に現在設定へ差し替える
+#   （生成時に焼き込まれた値に依存させない＝古い生成物・後からの設定変更でも反映）
+# ============================================================
+class TestInjectTileURL:
+    _HTML = ('<script>\nconst BBOX = null;\n'
+             'const TILE_URL = "";\n'
+             'const map = L.map("map");\n</script>')
+
+    def test_empty_baked_gets_current_url(self):
+        out = map_ui.inject_tile_url(self._HTML, "https://t/{z}/{x}/{y}.png")
+        assert 'const TILE_URL = "https://t/{z}/{x}/{y}.png"' in out
+
+    def test_baked_url_replaced_by_current(self):
+        html = self._HTML.replace('""', '"https://old/{z}/{x}/{y}.png"')
+        out = map_ui.inject_tile_url(html, "https://new/{z}/{x}/{y}.png")
+        assert 'const TILE_URL = "https://new/{z}/{x}/{y}.png"' in out
+        assert "old" not in out
+
+    def test_current_empty_sets_offline(self):
+        html = self._HTML.replace('""', '"https://x/{z}/{x}/{y}.png"')
+        out = map_ui.inject_tile_url(html, "")
+        assert 'const TILE_URL = ""' in out          # 空＝背景なし（オフライン）
+        assert "https://x" not in out
+
+    def test_whitespace_current_is_trimmed_to_offline(self):
+        out = map_ui.inject_tile_url(self._HTML, "   ")
+        assert 'const TILE_URL = ""' in out
+
+    def test_no_pattern_returns_unchanged(self):
+        assert map_ui.inject_tile_url("<div>no tile here</div>", "https://t") == "<div>no tile here</div>"
+
+    def test_only_first_occurrence_replaced(self):
+        html = 'const TILE_URL = "";\nconst TILE_URL = "";'
+        out = map_ui.inject_tile_url(html, "https://t/{z}/{x}/{y}.png")
+        assert out.count('https://t/{z}/{x}/{y}.png') == 1
+
+    def test_url_with_special_chars_not_mangled(self):
+        # 置換文字列を関数で与えているため {..} や記号がそのまま入る
+        url = "https://a.example/{z}/{x}/{y}.png?k=v&x=1"
+        out = map_ui.inject_tile_url(self._HTML, url)
+        assert f'const TILE_URL = "{url}"' in out

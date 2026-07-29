@@ -207,8 +207,18 @@ ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
 
 
 def run(cmd, cwd=None):
+    # ⑤「背景地図の設定」で入力されたタイルURL(ss.tile_url)を、地図生成の子プロセス
+    # (make_map_view / make_gtfs_viewer 等)にも GTFS_TILE_URL として渡す。未入力なら
+    # 起動時の環境変数(ENV)のまま＝既定オフライン。UI設定と生成HTMLの背景地図を一致させる。
+    # env 構築ロジックは app_context.build_subprocess_env（純関数・単体テスト対象）に集約。
+    _tile = ""
+    try:
+        _tile = ss().get("tile_url", "")
+    except Exception:
+        pass
+    _env = _build_subprocess_env(_tile, ENV)
     r = subprocess.run([PY] + [str(c) for c in cmd], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", env=ENV, cwd=cwd)
+                       encoding="utf-8", errors="replace", env=_env, cwd=cwd)
     return r.returncode, r.stdout, r.stderr
 
 
@@ -216,11 +226,14 @@ def ss():  # session_state ショートカット
     return st.session_state
 
 
+# 子プロセスへ渡す環境の構築（背景地図UI設定の反映）は app_context に集約＝単体テスト可能。
+from app_context import build_subprocess_env as _build_subprocess_env
 # 地図ヘルパーは map_ui.py に分離（従来名でエイリアス import＝挙動不変）。
 from map_ui import (map_tile_url as _map_tile_url, folium_map as _folium_map,
                     build_map_points as _build_map_points,
                     count_confidence as _count_confidence,
-                    marker_popup_html as _marker_popup_html)
+                    marker_popup_html as _marker_popup_html,
+                    inject_tile_url as _inject_tile_url)
 
 
 if "work" not in ss():
@@ -348,8 +361,7 @@ def restore_prompt():
     except Exception:
         return
     st.info("💾 前回の作業が保存されています：" + _restore_label(data, f)
-            + "　**続きから再開**できます（抽出・路線の割り当て・時刻表の修正・③の入力・"
-              "生成結果まで復元）。")
+            + "　**続きから再開**できます。")
     c1, c2, _ = st.columns([1, 1, 3])
     if c1.button("前回の続きから復元する", type="primary"):
         try:
@@ -383,8 +395,7 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
-st.caption("正確さの源は決定的スクリプト、LLMは構造化の判断のみ、"
-           "無い情報は推測せず確認フォームで入力します（誤りを作らない＝正しく失敗）。")
+st.caption("分からない項目は推測せず、その都度あなたに確認します（誤ったデータを作らないため）。")
 
 # 日付入力ウィジェットは ui_widgets.py に分離（従来名でエイリアス import＝挙動不変）。
 from ui_widgets import ymd_date_input as _ymd_date_input, md_input as _md_input
@@ -398,7 +409,7 @@ from guide_media import (norm_video_name as _norm_video_name,
 
 
 with st.expander("📖 使い方ガイド（はじめての方はここを開いてください）",
-                 expanded=not ss().get("extract")):
+                 expanded=False):
     st.markdown("""
 **この道具でできること**：バス時刻表（PDF・Excel）を読み込み、**①→⑥の順に確認・入力するだけ**で、
 標準フォーマット **GTFS-JP** を作れます。難しい処理は自動で行い、**人の判断が要る所だけ**をあなたに尋ねます。
@@ -541,38 +552,32 @@ if not _mode:
                  width='stretch'):
         ss()["work_mode"] = "solo"; st.rerun()
 
-    st.markdown("---")
-    st.markdown("#### 👥 複数人で分担する場合")
-    st.markdown("📌 :red[**別々の担当は同時に並行できます**]"
-                "（時刻表担当と事業者情報担当は同時進行OK。同じ担当は同時に一人だけ＝"
-                "他の人には「読み取り専用」と表示）。")
-    st.markdown("🔑 :red[**同じ案件を分担する人は、全員が「同じ共有コード」を使います。**]")
-    _nm = st.text_input("あなたのお名前（分担時に『誰が編集中か』の表示に使います）",
-                        value=ss().get("user_name", ""), key="_name_in", placeholder="例: 田中")
-    if _nm.strip():
-        ss()["user_name"] = _nm.strip()
+    with st.expander("👥 複数人で分担する場合（分担するときだけ開いてください）"):
+        st.caption("担当を分けて同時進行できます（同じ担当は一人ずつ／全員が同じ共有コードを使います）。")
+        _nm = st.text_input("あなたのお名前（分担時に『誰が編集中か』の表示に使います）",
+                            value=ss().get("user_name", ""), key="_name_in", placeholder="例: 田中")
+        if _nm.strip():
+            ss()["user_name"] = _nm.strip()
 
-    # ── ① 新しくこの案件を始める人：担当を選ぶ→共有コードが自動で発行される ──
-    st.markdown("**🆕 新しくこの案件を始める人** … 担当を選んでください。"
-                ":red[**共有コードが自動で発行**]され画面上部に出ます（それをチームに伝えます）。")
-    _pcols = st.columns(3)
-    for _i, (_k, _lbl) in enumerate(WORK_AREAS):
-        if _pcols[_i].button(_lbl, key=f"pick_{_k}", width='stretch'):
-            ss()["work_mode"] = _k; st.rerun()
+        # ── ① 新しくこの案件を始める人：担当を選ぶ→共有コードが自動で発行される ──
+        st.markdown("**🆕 新しく始める人**：担当を選ぶと共有コードが発行されます（画面上部に表示）。")
+        _pcols = st.columns(3)
+        for _i, (_k, _lbl) in enumerate(WORK_AREAS):
+            if _pcols[_i].button(_lbl, key=f"pick_{_k}", width='stretch'):
+                ss()["work_mode"] = _k; st.rerun()
 
-    # ── ② チームから共有コードを受け取った人：コードを入力して参加 ──
-    st.markdown("**🔑 チームから共有コードを受け取った人** … コードを入力して参加してください"
-                "（参加後、上の担当ボタンで自分の担当を選びます）。")
-    _hc1, _hc2 = st.columns([2, 1])
-    _code_in = _hc1.text_input("共有コード", key="_handoff_code_in",
-                               label_visibility="collapsed", placeholder="例: 3a9f1c2b（チームから受け取ったコード）")
-    if _hc2.button("このコードで参加", width='stretch'):
-        _ok, _msg = _load_by_code(_code_in)
-        if _ok:
-            ss()["_joined_code"] = True     # 参加成功→次の画面で「参加しました！」を出す
-            st.rerun()
-        else:
-            st.error(_msg)
+        # ── ② チームから共有コードを受け取った人：コードを入力して参加 ──
+        st.markdown("**🔑 コードで参加する人**：受け取ったコードを入力してください。")
+        _hc1, _hc2 = st.columns([2, 1])
+        _code_in = _hc1.text_input("共有コード", key="_handoff_code_in",
+                                   label_visibility="collapsed", placeholder="例: 3a9f1c2b（チームから受け取ったコード）")
+        if _hc2.button("このコードで参加", width='stretch'):
+            _ok, _msg = _load_by_code(_code_in)
+            if _ok:
+                ss()["_joined_code"] = True     # 参加成功→次の画面で「参加しました！」を出す
+                st.rerun()
+            else:
+                st.error(_msg)
     st.stop()
 
 # モード決定後：上部に「選び直す」。一人＝タブバーで切替、複数人＝担当のみ表示。
@@ -710,11 +715,13 @@ if _show_tt:
         st.header("① 時刻表をアップロード")
         up = st.file_uploader("バス時刻表（.xlsx / PDF / Word(.docx) / PowerPoint(.pptx) / OCR後の .md）— **複数選択できます**",
                               type=["xlsx", "pdf", "docx", "pptx", "md"], accept_multiple_files=True)
-        st.caption("📄 文字が選べるPDF・Excelはそのまま抽出。**Word/PowerPoint**は中の**表**をそのまま読み取り"
-                   "（時刻表が画像で貼られている場合はOCRに回します）。**画像化PDF（スキャン）**は、"
-                   "抽出するとアプリ内で**OCRして続行するボタン**が出ます（ターミナル不要）。"
-                   "**複数のファイル**（路線ごとに分かれた時刻表など）を選ぶと、まとめて1つのGTFS-JPにできます"
-                   "（②で全路線を割り当て）。")
+        st.caption("複数のファイルを選ぶと、まとめて1つのGTFS-JPにできます。")
+        with st.popover("💡 ファイル形式について"):
+            st.markdown(
+                "- **文字が選べるPDF・Excel** → そのまま抽出（最も正確）。\n"
+                "- **Word / PowerPoint** → 中の表を読み取り（画像貼付はOCRに回します）。\n"
+                "- **画像化PDF（スキャン）** → 抽出後に**OCRして続行**ボタンが出ます（ターミナル不要）。\n"
+                "- **複数ファイル**（路線ごとの時刻表など）→ まとめて1つのGTFS-JPに（②で割り当て）。")
 
 
         def render_ocr_panel():
@@ -1613,19 +1620,20 @@ if _show_tt:
 
         if "extract" in ss():
             st.header("② 路線の割り当て（どの路線・方向か）")
-            st.caption("停留所の並びが同じ**便のまとまり**を自動で**同じ路線**にまとめ、"
-                       "方向（行き=0/帰り=1）を割り振りました（要確認）。複数路線・往復の対応づけが違うときは"
-                       "表を編集してください。路線名も変更できます。"
-                       "（便のまとまり＝時刻表のひとかたまり／PDFなら1ページ分）")
+            st.caption("自動で路線・方向を割り当てました（要確認）。違うときは下の表を直接編集してください。")
             st.markdown("<span style='color:#16202B;font-weight:700'>✏️ 表のセルはクリック（ダブルクリック）で"
                         "編集できます</span><span style='color:#16202B'>（路線名・方向・行き先・運行日）。</span>",
                         unsafe_allow_html=True)
             blocks_e = ex.get("blocks", [])
             _rows0 = _auto_route_rows(blocks_e, ex.get("source", ""))
-            # 復元直後（route_editor の編集stateがまだ無い時）だけ、保存済みの割り当て(decision_spec)を
-            # 初期表示に反映して「続きから」を実現する。以降はユーザーの編集が優先される。
+            # 表の初期値は「毎回」保存済みの割り当て(decision_spec)から再シードする。
+            # ＝decision_spec を唯一の真実(source of truth)とし、data_editor の編集state(差分)が
+            #   タブ切替や『確定して反映』の st.rerun()（描画前中断）で破棄されても、確定済みの
+            #   運行曜日・路線名・方向・行き先が既定値(平日=月〜金)へ勝手に戻らないようにする。
+            #   新しい編集は data_editor の差分が base_df に上乗せされるため、従来どおり優先される
+            #   （初回描画のみに限定していた旧実装は、破棄時に土曜等が消える不具合があった）。
             _ds0 = ss().get("decision_spec")
-            if _ds0 and f"route_editor_{ss().get('extract_token','')}" not in ss():
+            if _ds0:
                 _b2r = {int(b): r.get("route_long_name", "")
                         for r in _ds0.get("routes", []) for b in r.get("blocks", [])}
                 _bd0 = _ds0.get("block_direction", {})
@@ -1679,14 +1687,12 @@ if _show_tt:
                     "日": st.column_config.CheckboxColumn("日"),
                 },
             )
-            st.caption("**運行する曜日**は**月〜日のチェック**で指定（初期値＝平日：月〜金／**月水金**など任意の組合せOK）。"
-                       "**祝日**にどのダイヤが運休/運行するかは、**下の『運休日』の「祝日は運休」**で"
-                       "ダイヤごとに選びます。年末年始・お盆の運休も同じ場所で設定します。"
-                       "曜日で時刻が違う時刻表は便のまとまりを分けてください。")
-            st.info("💡 **こんな時は（例）**\n\n"
-                    "- **往復の路線** → 行き（佐屋→駅）と帰り（駅→佐屋）を **同じ路線名** にし、方向を 0 と 1 に。\n"
-                    "- **平日と土日で時刻が違う** → 平日ページは 月〜金、土日ページは 土・日 にチェックを分ける。\n"
-                    "- **月水金だけ運行** → 月・水・金だけチェック（祝日を休むなら下の**『祝日は運休』**）。\n"
+            st.caption("運行する曜日を月〜日のチェックで指定（初期値＝平日）。祝日・年末年始・お盆の運休は下の『運休日』で。")
+            with st.popover("💡 こんなときは？"):
+                st.markdown(
+                    "- **往復の路線** → 行きと帰りを **同じ路線名** にし、方向を 0 と 1 に。\n"
+                    "- **平日と土日で時刻が違う** → 平日は 月〜金、土日は 土・日 にチェックを分ける。\n"
+                    "- **月水金だけ運行** → 月・水・金だけチェック。\n"
                     "- **日祝ダイヤ** → **土・日** にチェックし、下の『祝日は運休』で**このダイヤを選ばない**"
                     "（選ばなかったダイヤが祝日も運行します）。\n"
                     "- **循環路線** → 方向は 0 のまま、行き先は『右回り／左回り』でもOK。")
@@ -1911,12 +1917,9 @@ if _show_tt:
                 n_an = len(anomalies)
                 st.markdown("<span style='color:#16202B;font-weight:700'>✏️ 時刻・停留所名のセルはクリック"
                             "（ダブルクリック）で編集できます。</span>", unsafe_allow_html=True)
-                st.caption("抽出した**全時刻**です。原典（紙やPDF）と見比べて、違うセルを直接直してください。"
-                           "空欄＝通過。**停留所名も直接編集**でき、**行を選んで削除**もできます"
-                           "（「待機時間」「○○出発」など停留所でない行を消す／表記を直す）。"
-                           + (f"OCR誤読の疑い **{n_an}件** は各表の下に列挙しています。" if n_an else "")
-                           + "**続けて速く入力できます**。入力し終えたら下の"
-                             "**『この時刻表で確定して反映』**を押してください（1つずつは反映されません）。")
+                st.caption("原典と見比べて違うセルを直接編集（空欄＝通過）。停留所でない行は削除できます。"
+                           + (f"OCR誤読の疑い **{n_an}件** は各表の下に列挙。" if n_an else "")
+                           + "編集後は下の**『この時刻表で確定して反映』**を押してください。")
                 st.markdown("<span style='color:#c62828;font-weight:700'>⚠ 時刻は必ず原典と1つずつ見比べて"
                             "確認してください。「📄 原典を別タブで開く」で並べて照合できます。"
                             "</span>", unsafe_allow_html=True)
@@ -2236,16 +2239,14 @@ if _show_q:
         # =====================================================================
         if ss().get("decision_spec"):
             st.header("③ PDF/Excel に無い項目を入力（不足分の質問）")
-            st.caption("上の②でシステムが確認した結果、時刻表に書かれていない項目です。"
-                       "推測せず入力してください（不明は空欄でOK＝暫定/要確認として入る。ただし路線名は必須）。"
-                       "下の『生成する』を押すと入力が一括で反映されます。")
-            st.info("💡 **こんな時は（例）**\n\n"
+            st.caption("時刻表に無い項目だけ入力します。不明は空欄でOK（路線名のみ必須）。")
+            with st.popover("💡 こんなときは？"):
+                st.markdown(
                     "- **運賃が均一（例：100円）** → 金額を1つ入れるだけ。\n"
-                    "- **区間で運賃が違う** → 「均一運賃」のチェックを外し、区間の表に金額を入力。\n"
-                    "- **事業者名・法人番号が不明** → 空欄のままで進めてOK（後から直せます／暫定値で出ます）。\n"
-                    "- **祝日は運休** → ②の『祝日は運休』にチェックし、**運休するダイヤを路線ごとに選ぶ**"
-                    "（選ばなかったダイヤが祝日も運行します）。\n"
-                    "- **有効期間が分からない** → 空欄でも生成できます（提出前に正しい期間を入れてください）。")
+                    "- **区間で運賃が違う** → 「均一運賃」のチェックを外し、区間の表に入力。\n"
+                    "- **事業者名・法人番号が不明** → 空欄のままでOK（後から直せます／暫定値で出ます）。\n"
+                    "- **祝日は運休** → ②の『祝日は運休』で運休するダイヤを路線ごとに選ぶ。\n"
+                    "- **有効期間が分からない** → 空欄でも生成できます（提出前に入力）。")
             _routes_now = ss()["decision_spec"]["routes"]
             det = ss().get("detected", {}) or {}
             tk = ss().get("extract_token", "")
@@ -2391,17 +2392,19 @@ if _show_q:
                                           "市区町村まで入れると同名停留所の精度が大きく上がります")
                 c1.caption("⚠ **市区町村まで**入れてください（例: 福岡県築上町）。"
                            "都道府県だけだと同名のバス停を県内の別の場所に誤って合わせる恐れがあります。")
-                c2.caption("**事業者情報**（正式提出に必要。自治体はご自身の情報を入力）")
+                c2.caption("**事業者情報**（自治体はご自身の情報を。不明は空欄でOK）")
                 ag_name = c2.text_input("事業者名", value="", key=f"agn_{tk}")
-                ag_official = c2.text_input("正式名称（登記名。空なら事業者名を使用）", value="", key=f"agof_{tk}")
                 ag_id = c2.text_input("法人番号（13桁・不明なら空）", value="", key=f"agid_{tk}")
-                ag_zip = c2.text_input("郵便番号（例 811-2192）", value="", key=f"agz_{tk}")
-                ag_addr = c2.text_input("住所", value="", key=f"aga_{tk}")
-                agp1, agp2 = c2.columns(2)
-                ag_pres_pos = agp1.text_input("代表者 役職", value="", key=f"agpp_{tk}", help="例: 町長・市長・社長")
-                ag_pres_name = agp2.text_input("代表者 氏名", value="", key=f"agpn_{tk}")
-                ag_url = c2.text_input("URL", value=det.get("url", ""), key=f"url_{tk}")
-                ag_phone = c2.text_input("電話", value=det.get("phone", ""), key=f"tel_{tk}")
+                # 正式提出時にだけ要る詳細は折りたたみへ（初見の入力負担を減らす＝任意項目は隠す）。
+                with c2.expander("＋ 事業者の詳細（任意・正式提出時に）"):
+                    ag_official = st.text_input("正式名称（登記名。空なら事業者名を使用）", value="", key=f"agof_{tk}")
+                    ag_zip = st.text_input("郵便番号（例 811-2192）", value="", key=f"agz_{tk}")
+                    ag_addr = st.text_input("住所", value="", key=f"aga_{tk}")
+                    agp1, agp2 = st.columns(2)
+                    ag_pres_pos = agp1.text_input("代表者 役職", value="", key=f"agpp_{tk}", help="例: 町長・市長・社長")
+                    ag_pres_name = agp2.text_input("代表者 氏名", value="", key=f"agpn_{tk}")
+                    ag_url = st.text_input("URL", value=det.get("url", ""), key=f"url_{tk}")
+                    ag_phone = st.text_input("電話", value=det.get("phone", ""), key=f"tel_{tk}")
                 c3.caption("🚌 **行き先表示は②の割り当て表**で便のまとまりごとに設定できます"
                            "（複数の行き先に対応）。")
                 # 運行する曜日は②の『運行日』で便のまとまりごとに決めるため、ここでは入力しない。
@@ -2921,7 +2924,10 @@ if _show_coord:
             mv = out / "map_view.html"
             if mv.exists():
                 st.subheader("地図プレビュー（停留所・経路）")
-                st.iframe(mv, height=520)
+                # 背景タイルは「表示時」に現在設定(⑤入力 or 環境変数)を注入する。
+                # 生成時に焼き込まれた値に依存しない＝生成後の設定変更・古い生成物の復元でも反映される。
+                _tile_now = str(ss().get("tile_url", "") or os.environ.get("GTFS_TILE_URL", "")).strip()
+                st.iframe(_inject_tile_url(mv.read_text(encoding="utf-8"), _tile_now), height=520)
             # 要確認CSV
             rc_csv = out / "座標_要確認.csv"
             if rc_csv.exists():
@@ -2972,13 +2978,13 @@ if _show_coord:
                             "**②路線名・事業者名・行き先表示（さらに下の表）** の"
                             "**ふりがな・英語**を直せます。**路線名・事業者名を直したいときは"
                             "下までスクロール**してください。")
-                    st.caption("✏️ **読み・停留所名のセルはクリック（ダブルクリック）で編集**できます。"
-                               "読みは辞書付き解析（SudachiPy）で自動生成します（半角カナはNFKCで正規化、"
-                               "全国共通の難読は辞書で補正）。それでも難読地名は誤読が残ることがあります"
-                               "（例: 相島「あいじま」→正しくは「あいのしま」）。"
-                               "**⚠印**の行（漢字が残る等）は特に確認を。**停留所名そのものも直せます**"
-                               "（OCR誤りの修正など）。名前を変えると読みは自動で作り直します"
-                               "（読み欄も直せばそちらが優先）。GTFS-JP の必須項目です。")
+                    st.caption("✏️ 読み・停留所名はクリックで編集。**⚠印**の行（難読地名など）は特に確認を。")
+                    with st.popover("💡 読みについて"):
+                        st.markdown(
+                            "- 読みは **SudachiPy** で自動生成（半角カナは正規化・難読は辞書で補正）。\n"
+                            "- 難読地名は誤読が残ることがあります（例: 相島「あいじま」→正しくは「あいのしま」）。\n"
+                            "- **停留所名そのもの**も直せます（OCR誤りの修正など）。名前を変えると読みは作り直します"
+                            "（読み欄も直せばそちらが優先）。GTFS-JP の必須項目です。")
                     if _aiap:
                         st.info(f"🔎 **AIが探索して既定にした読み {len(_aiap)}件**（表の🔎AI印）。"
                                 "AI由来なので**原典で確認**してください。下の表で 元の自動読み→AIの読み・確度を確認できます。")
@@ -3226,16 +3232,14 @@ if _show_coord:
             conf_csv = WORK / "out" / "座標_信頼度.csv"
             if conf_csv.exists():
                 st.header("⑤ 座標の確認（地図）")
-                st.caption("確定=緑／要確認=橙／未補完=赤。要確認・未補完は地図クリックか座標入力で確定する。"
-                           "**全部が確定になるまで「公式提出可」にしない**（＝推測座標を黙って出さない）。"
-                           "**行き・帰りは別々の停留所**として表示されます（多くは反対車線＝別座標。"
-                           "終点・敷地内で同じ場所なら『同じ場所にする』で揃えられます）。")
-                st.info("**「この位置で確定」を押さなかったらどうなる？** — その停留所は"
-                        "**橙（要確認）のまま**残ります。zip は作れて中身の座標も入っていますが、"
-                        "それは**アプリが推定した位置**なので、④の提出前チェックは"
-                        "**「公式提出可」になりません**（要確認の件数が表示されます）。"
-                        "つまり**データが消えるわけではなく、「まだ人が確認していない」印が付いたまま**です。"
-                        "推定位置で問題なければ、**動かさずにそのまま「この位置で確定」を押せばOK**です。")
+                st.caption("確定=緑／要確認=橙／未補完=赤。橙・赤は地図クリックか座標入力で確定します。")
+                with st.popover("❓ 確定しないとどうなる？"):
+                    st.markdown(
+                        "その停留所は**橙（要確認）のまま**残ります。zip は作れて座標も入っていますが、"
+                        "それは**アプリの推定位置**なので、④の提出前チェックは**「公式提出可」になりません**。"
+                        "データが消えるわけではなく「まだ人が確認していない」印が付いた状態です。\n\n"
+                        "推定位置で問題なければ、動かさず**「この位置で確定」**を押せばOK。"
+                        "行き・帰りは別々の停留所として表示されます（同じ場所なら『同じ場所にする』で揃う）。")
 
                 # ── 行き↔帰りの反転（地図で向きが逆と分かった便のまとまりを反転＋その場で再生成）──
                 with st.expander("↔ 行き／帰りが逆のとき反転する（停留所の順・時刻を逆にして再生成）"):
@@ -3315,114 +3319,127 @@ if _show_coord:
                 pts, tip2id = _build_map_points(crows, confirmed, _sid, _label)
                 center = ([sum(p[1] for p in pts) / len(pts), sum(p[2] for p in pts) / len(pts)]
                           if pts else [35.0, 138.0])
-                # 背景地図（基盤タイル）は既定オフライン（外部通信なし＝閉域網対応）。
-                # 必要な場合だけ、ここにタイルURL（自前タイルサーバ等）を入れると背景地図が出る。
-                with st.expander("🗺️ 背景地図の設定（任意・既定はオフラインで背景なし）"):
-                    st.caption("自治体の閉域網でも動くよう、**背景地図は既定で表示しません**"
-                               "（マーカーの位置関係だけで座標を確認できます）。"
-                               "インターネットや自前のタイルサーバが使える場合のみ、下にタイルURLを入れると"
-                               "背景地図が出ます。環境変数 `GTFS_TILE_URL` でも既定値を設定できます。")
-                    st.text_input(
-                        "タイルURL（例: https://tile.openstreetmap.org/{z}/{x}/{y}.png）",
-                        value=str(ss().get("tile_url", "") or os.environ.get("GTFS_TILE_URL", "")),
-                        key="tile_url", placeholder="空欄＝背景地図なし（オフライン）",
-                        help="OpenStreetMap を使う場合は各自で利用規約を確認してください。"
-                             "閉域網では自前タイルサーバのURLを指定します。")
-                fmap = _folium_map(location=center, zoom_start=14)
-                col = {"確定": "green", "要確認": "orange", "未補完": "red"}
-                for tip, la, lo, conf, reason in pts:
-                    _pop_html = _marker_popup_html(tip, conf, reason)
-                    folium.Marker([la, lo], tooltip=tip, draggable=True,
-                                  icon=folium.Icon(color=col.get(conf, "gray")),
-                                  popup=folium.Popup(_pop_html, max_width=260)).add_to(fmap)
-                st.caption("📍 ピンを**ドラッグ**して正しい位置へ動かし、そのピンを**クリック**すると、"
-                           "下に『この位置で確定』ボタンが出ます（地図の空き場所クリックで座標を拾うこともできます）。")
-                state = st_folium(fmap, width=900, height=460, key="confmap",
-                                  returned_objects=["last_clicked", "last_object_clicked",
-                                                    "last_object_clicked_tooltip"])
+                _map_on = st.toggle("🗺️ 地図を右に表示", value=bool(ss().get("_map_on", True)), key="_map_on")
+                if _map_on:
+                    _msize = st.select_slider("地図サイズ", options=["小", "中", "大"],
+                                              value=ss().get("_map_size", "中"), key="_map_size")
+                    _lr = {"小": [3, 2], "中": [1, 1], "大": [2, 3]}[_msize]
+                    _mh = {"小": 380, "中": 480, "大": 620}[_msize]
+                    col_left, col_right = st.columns(_lr, gap="medium")
+                else:
+                    col_left, col_right, _mh = st.container(), None, 0
+                state = None
+                if col_right is not None:
+                    with col_right:
+                        # 背景地図（基盤タイル）は既定オフライン（外部通信なし＝閉域網対応）。
+                        # 必要な場合だけ、ここにタイルURL（自前タイルサーバ等）を入れると背景地図が出る。
+                        with st.expander("🗺️ 背景地図の設定（任意・既定はオフラインで背景なし）"):
+                            st.caption("自治体の閉域網でも動くよう、**背景地図は既定で表示しません**"
+                                       "（マーカーの位置関係だけで座標を確認できます）。"
+                                       "インターネットや自前のタイルサーバが使える場合のみ、下にタイルURLを入れると"
+                                       "背景地図が出ます。環境変数 `GTFS_TILE_URL` でも既定値を設定できます。")
+                            st.text_input(
+                                "タイルURL（例: https://tile.openstreetmap.org/{z}/{x}/{y}.png）",
+                                value=str(ss().get("tile_url", "") or os.environ.get("GTFS_TILE_URL", "")),
+                                key="tile_url", placeholder="空欄＝背景地図なし（オフライン）",
+                                help="OpenStreetMap を使う場合は各自で利用規約を確認してください。"
+                                     "閉域網では自前タイルサーバのURLを指定します。")
+                        fmap = _folium_map(location=center, zoom_start=14)
+                        col = {"確定": "green", "要確認": "orange", "未補完": "red"}
+                        for tip, la, lo, conf, reason in pts:
+                            _pop_html = _marker_popup_html(tip, conf, reason)
+                            folium.Marker([la, lo], tooltip=tip, draggable=True,
+                                          icon=folium.Icon(color=col.get(conf, "gray")),
+                                          popup=folium.Popup(_pop_html, max_width=260)).add_to(fmap)
+                        st.caption("📍 ピンを**ドラッグ**して正しい位置へ動かし、そのピンを**クリック**すると、"
+                                   "下に『この位置で確定』ボタンが出ます（地図の空き場所クリックで座標を拾うこともできます）。")
+                        state = st_folium(fmap, use_container_width=True, height=_mh, key="confmap",
+                                          returned_objects=["last_clicked", "last_object_clicked",
+                                                            "last_object_clicked_tooltip"])
                 clicked = state.get("last_clicked") if state else None
                 obj = state.get("last_object_clicked") if state else None
                 obj_tip = state.get("last_object_clicked_tooltip") if state else None
                 # クリック/ドラッグされたピンの停留所と、その地図上の現在位置（ドラッグ後の座標）
                 obj_sid = tip2id.get(obj_tip) if (obj and obj_tip) else None
                 obj_pos = (round(obj["lat"], 6), round(obj["lng"], 6)) if obj else None
-                if clicked:
-                    st.info(f"地図クリック位置: {clicked['lat']:.6f}, {clicked['lng']:.6f}"
-                            "（下で停留所を選び『地図クリック位置で確定』）")
+                with col_left:
+                    if clicked:
+                        st.info(f"地図クリック位置: {clicked['lat']:.6f}, {clicked['lng']:.6f}"
+                                "（下で停留所を選び『地図クリック位置で確定』）")
 
-                todo = [r for r in crows if eff_conf(r) != "確定"]
-                if todo:
-                    st.subheader(f"要確認・未補完を確定する（残り {len(todo)} 件）")
-                    _todo_ids = [_sid(r) for r in todo]
-                    # 選択肢は未確定の停留所。確定済みのピンを「ドラッグして動かした」ときだけ、
-                    # 再調整できるよう一時的に加える（ただ確定しただけなら加えず、次の未確定へ自動で進む）。
-                    _readjust = (obj_sid in confirmed and obj_pos is not None
-                                 and (abs(confirmed[obj_sid][0] - obj_pos[0]) > 1e-6
-                                      or abs(confirmed[obj_sid][1] - obj_pos[1]) > 1e-6))
-                    _opts = list(_todo_ids)
-                    if _readjust and obj_sid not in _opts:
-                        _opts.append(obj_sid)
-                    # 地図の点をクリック（未確定）／確定済みをドラッグ したら、その停留所を一覧で自動選択する
-                    if obj_sid in _opts:
-                        ss()["conf_sel"] = obj_sid
-                    if ss().get("conf_sel") not in _opts:
-                        ss()["conf_sel"] = _opts[0]
-                    sel = st.selectbox(
-                        "停留所（地図の点をクリックでも選べます）", _opts, key="conf_sel",
-                        format_func=lambda s: (next((_label(r) for r in crows if _sid(r) == s), s)
-                                               + ("（確定済み）" if s in confirmed else "")))
-                    cur = next((r for r in crows if _sid(r) == sel), {})
-                    _cc = confirmed.get(sel)
-                    if _cc:
-                        _sla, _slo = _cc[0], _cc[1]
-                    elif (cur.get("stop_lat") or "").strip():
-                        _sla, _slo = float(cur["stop_lat"]), float(cur["stop_lon"])
+                    todo = [r for r in crows if eff_conf(r) != "確定"]
+                    if todo:
+                        st.subheader(f"要確認・未補完を確定する（残り {len(todo)} 件）")
+                        _todo_ids = [_sid(r) for r in todo]
+                        # 選択肢は未確定の停留所。確定済みのピンを「ドラッグして動かした」ときだけ、
+                        # 再調整できるよう一時的に加える（ただ確定しただけなら加えず、次の未確定へ自動で進む）。
+                        _readjust = (obj_sid in confirmed and obj_pos is not None
+                                     and (abs(confirmed[obj_sid][0] - obj_pos[0]) > 1e-6
+                                          or abs(confirmed[obj_sid][1] - obj_pos[1]) > 1e-6))
+                        _opts = list(_todo_ids)
+                        if _readjust and obj_sid not in _opts:
+                            _opts.append(obj_sid)
+                        # 地図の点をクリック（未確定）／確定済みをドラッグ したら、その停留所を一覧で自動選択する
+                        if obj_sid in _opts:
+                            ss()["conf_sel"] = obj_sid
+                        if ss().get("conf_sel") not in _opts:
+                            ss()["conf_sel"] = _opts[0]
+                        sel = st.selectbox(
+                            "停留所（地図の点をクリックでも選べます）", _opts, key="conf_sel",
+                            format_func=lambda s: (next((_label(r) for r in crows if _sid(r) == s), s)
+                                                   + ("（確定済み）" if s in confirmed else "")))
+                        cur = next((r for r in crows if _sid(r) == sel), {})
+                        _cc = confirmed.get(sel)
+                        if _cc:
+                            _sla, _slo = _cc[0], _cc[1]
+                        elif (cur.get("stop_lat") or "").strip():
+                            _sla, _slo = float(cur["stop_lat"]), float(cur["stop_lon"])
+                        else:
+                            _sla = _slo = None
+                        # 選択中の停留所のピンをドラッグしたら、その位置を採用（座標表示・確定ボタンを1か所に集約）
+                        _dragged = (obj_sid == sel) and obj_pos is not None and (
+                            _sla is None or abs(_sla - obj_pos[0]) > 1e-6 or abs(_slo - obj_pos[1]) > 1e-6)
+                        _nla, _nlo = (obj_pos if _dragged else (_sla, _slo))
+                        _ctag = "（確定済み）" if _cc else ""
+                        if _nla is None:
+                            st.write(f"**{_label(cur)}**{_ctag} の座標: まだありません"
+                                     "（地図クリックかピンのドラッグで決めてください）")
+                        else:
+                            _mv = "　🟢 ドラッグで移動中（この位置で確定できます）" if _dragged else ""
+                            st.write(f"**{_label(cur)}**{_ctag} の座標: 緯度 {_nla:.6f} ／ 経度 {_nlo:.6f}{_mv}")
+                        st.caption("この停留所の**ピンを地図でドラッグ**すると位置が変わります。"
+                                   "『この位置で確定』で確定します（動かさなければ今の位置のまま確定）。"
+                                   "地図の空き場所をクリックした座標も使えます。")
+                        # 同じ場所（終点・敷地内）: 同名で反対方向の停留所と同座標にする
+                        _sibs = [r for r in crows if r["stop_name"] == cur.get("stop_name") and _sid(r) != sel]
+                        for _sb in _sibs[:1]:
+                            _sbid = _sid(_sb)
+                            _sbc = confirmed.get(_sbid) or ((float(_sb["stop_lat"]), float(_sb["stop_lon"]))
+                                                            if (_sb.get("stop_lat") or "").strip() else None)
+                            if _sbc and st.button(f"『{_label(_sb)}』と同じ場所にする（敷地内・終点向け）"):
+                                confirmed[sel] = (round(_sbc[0], 6), round(_sbc[1], 6)); st.rerun()
+                        b1, b2 = st.columns(2)
+                        if b1.button("この位置で確定", type="primary", disabled=(_nla is None)):
+                            confirmed[sel] = (round(_nla, 6), round(_nlo, 6)); st.rerun()
+                        if b2.button("📍 地図クリック位置で確定", disabled=not clicked):
+                            confirmed[sel] = (round(clicked["lat"], 6), round(clicked["lng"], 6)); st.rerun()
                     else:
-                        _sla = _slo = None
-                    # 選択中の停留所のピンをドラッグしたら、その位置を採用（座標表示・確定ボタンを1か所に集約）
-                    _dragged = (obj_sid == sel) and obj_pos is not None and (
-                        _sla is None or abs(_sla - obj_pos[0]) > 1e-6 or abs(_slo - obj_pos[1]) > 1e-6)
-                    _nla, _nlo = (obj_pos if _dragged else (_sla, _slo))
-                    _ctag = "（確定済み）" if _cc else ""
-                    if _nla is None:
-                        st.write(f"**{_label(cur)}**{_ctag} の座標: まだありません"
-                                 "（地図クリックかピンのドラッグで決めてください）")
-                    else:
-                        _mv = "　🟢 ドラッグで移動中（この位置で確定できます）" if _dragged else ""
-                        st.write(f"**{_label(cur)}**{_ctag} の座標: 緯度 {_nla:.6f} ／ 経度 {_nlo:.6f}{_mv}")
-                    st.caption("この停留所の**ピンを地図でドラッグ**すると位置が変わります。"
-                               "『この位置で確定』で確定します（動かさなければ今の位置のまま確定）。"
-                               "地図の空き場所をクリックした座標も使えます。")
-                    # 同じ場所（終点・敷地内）: 同名で反対方向の停留所と同座標にする
-                    _sibs = [r for r in crows if r["stop_name"] == cur.get("stop_name") and _sid(r) != sel]
-                    for _sb in _sibs[:1]:
-                        _sbid = _sid(_sb)
-                        _sbc = confirmed.get(_sbid) or ((float(_sb["stop_lat"]), float(_sb["stop_lon"]))
-                                                        if (_sb.get("stop_lat") or "").strip() else None)
-                        if _sbc and st.button(f"『{_label(_sb)}』と同じ場所にする（敷地内・終点向け）"):
-                            confirmed[sel] = (round(_sbc[0], 6), round(_sbc[1], 6)); st.rerun()
-                    b1, b2 = st.columns(2)
-                    if b1.button("この位置で確定", type="primary", disabled=(_nla is None)):
-                        confirmed[sel] = (round(_nla, 6), round(_nlo, 6)); st.rerun()
-                    if b2.button("📍 地図クリック位置で確定", disabled=not clicked):
-                        confirmed[sel] = (round(clicked["lat"], 6), round(clicked["lng"], 6)); st.rerun()
-                else:
-                    st.success("✅ すべての座標が確定しました。**公式提出可** です。")
+                        st.success("✅ すべての座標が確定しました。**公式提出可** です。")
 
-                if confirmed:
-                    st.write(f"確認済み（手動確定）: {len(confirmed)} 件")
-                    if st.button("確定座標で再生成する", type="primary"):
-                        mc = {"by_stop_id": {sid: {"lat": la, "lon": lo}
-                                             for sid, (la, lo) in confirmed.items()}}
-                        (WORK / "manual_coords.json").write_text(json.dumps(mc, ensure_ascii=False), encoding="utf-8")
-                        cfg = json.loads((WORK / "config.json").read_text(encoding="utf-8"))
-                        cfg["manual_coords"] = str(WORK / "manual_coords.json")
-                        (WORK / "config.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
-                        with st.spinner("確定座標で再生成中..."):
-                            rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
-                        ss().result = {"rc": rc, "log": se}
-                        ss()["_out_dirty"] = True
-                        st.success("再生成しました（確定座標を反映）。"); st.rerun()
+                    if confirmed:
+                        st.write(f"確認済み（手動確定）: {len(confirmed)} 件")
+                        if st.button("確定座標で再生成する", type="primary"):
+                            mc = {"by_stop_id": {sid: {"lat": la, "lon": lo}
+                                                 for sid, (la, lo) in confirmed.items()}}
+                            (WORK / "manual_coords.json").write_text(json.dumps(mc, ensure_ascii=False), encoding="utf-8")
+                            cfg = json.loads((WORK / "config.json").read_text(encoding="utf-8"))
+                            cfg["manual_coords"] = str(WORK / "manual_coords.json")
+                            (WORK / "config.json").write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+                            with st.spinner("確定座標で再生成中..."):
+                                rc, so, se = run([SCRIPTS / "run_pipeline.py", "--config", WORK / "config.json"], cwd=REPO)
+                            ss().result = {"rc": rc, "log": se}
+                            ss()["_out_dirty"] = True
+                            st.success("再生成しました（確定座標を反映）。"); st.rerun()
 
         # =====================================================================
         # Step 5b: 路線図を手で描き直す（shapes 編集）— 地図に点を打って正しい経路にする

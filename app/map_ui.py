@@ -8,12 +8,28 @@ app.py からは従来名（先頭 _）でエイリアス import して呼ぶ＝
 License: Apache 2.0
 """
 import os
+import re
 
 import streamlit as st
 
 
 def ss():
     return st.session_state
+
+
+def inject_tile_url(html, tile_url):
+    """地図HTML(make_map_view)の `const TILE_URL = "..."` を、表示時点の現在設定 tile_url へ
+    差し替えて返す（純関数・副作用なし）。
+
+    背景タイルは生成時にHTMLへ焼き込まれるが、それだと『生成後にタイルを設定』『古い生成物を
+    復元』した場合に反映されない（＝タイルが生成時に束縛される構造的欠陥）。埋め込み表示の
+    直前にここで注入することで、常に現在の設定（⑤の入力 or 環境変数 GTFS_TILE_URL）を反映する
+    ＝タイルを『表示時』に束縛する。tile_url が空なら背景なし（オフライン）。該当パターンが
+    無いHTML（旧形式等）はそのまま返す。"""
+    t = str(tile_url or "").strip()
+    # 置換文字列はURL中の \ や {..} を特別扱いしないよう関数形で与える。
+    return re.sub(r'const TILE_URL = "[^"]*"',
+                  lambda _m: 'const TILE_URL = "' + t + '"', html, count=1)
 
 
 def map_tile_url():

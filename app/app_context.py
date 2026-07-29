@@ -47,3 +47,18 @@ def autosave_dir() -> Path:
 def autosave_file() -> Path:
     """このプロジェクト(sid)の共有保存ファイル（app.py の AUTOSAVE_FILE と同一）。"""
     return autosave_dir() / f"session_{sid()}.json"
+
+
+# --- 地図生成の子プロセスへ渡す環境の構築（背景地図のUI設定を生成HTMLへ反映する）---
+def build_subprocess_env(tile_url, base_env):
+    """地図生成(make_map_view / ビューア)の子プロセスに渡す環境を作る純関数。
+
+    ⑤「背景地図の設定」で入力したタイルURL(tile_url)があれば、それを GTFS_TILE_URL として
+    base_env に上書き注入する。未入力(空/空白/None)なら base_env をそのまま返す＝既定オフライン
+    （閉域網では外部通信なし）。UI設定と生成HTML(map_view.html)の背景地図を一致させるための土台。
+    副作用なし・Streamlit非依存（base_env は変更せず、必要時のみ新しい dict を返す）。
+    """
+    t = str(tile_url or "").strip()
+    if t:
+        return {**base_env, "GTFS_TILE_URL": t}
+    return base_env
